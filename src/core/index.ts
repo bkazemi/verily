@@ -237,8 +237,17 @@ export interface ArtifactProvider {
  */
 export class Refused extends Error {}
 
-/** A piece of what the holder is told: a paragraph, or something they run or publish as is. */
-export type Instruction = string | { code: string };
+/**
+ * A piece of what the holder is told: a paragraph, a paragraph with links in it, or
+ * something they run or publish as is.
+ */
+export type Instruction = string | { code: string } | Inline[];
+
+/**
+ * A piece of a paragraph: text, or text that links somewhere the holder goes to do what
+ * the paragraph says. Renderers link only http(s) addresses and open them in a new tab.
+ */
+export type Inline = string | { text: string; href: string };
 
 export type Provider = RedirectProvider | ArtifactProvider;
 

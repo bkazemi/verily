@@ -10,7 +10,15 @@ import type {
 
 /** Instructions reach a page as pieces, so a test that reads them as prose joins them. */
 export const written = (parts: Instruction[]) =>
-  parts.map((part) => (typeof part === 'string' ? part : part.code)).join('\n');
+  parts
+    .map((part) =>
+      typeof part === 'string'
+        ? part
+        : Array.isArray(part)
+          ? part.map((piece) => (typeof piece === 'string' ? piece : piece.text)).join('')
+          : part.code,
+    )
+    .join('\n');
 
 export class MemoryStorage implements Storage {
   rows = new Map<string, unknown>();

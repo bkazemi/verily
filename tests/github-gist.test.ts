@@ -40,6 +40,13 @@ test('a public gist containing the line identifies the account that published it
   assert.deepEqual(calls, ['https://api.github.com/gists/0123456789abcdef01234567']);
   assert.match(written(instance.instructions(expect)), /public gist/);
   assert.ok(written(instance.instructions(expect)).includes(expect));
+
+  // Where to publish is a link, so the holder does not have to type it.
+  assert.deepEqual(instance.instructions(expect)[0], [
+    'Publish this line in a public gist at ',
+    { text: 'gist.github.com', href: 'https://gist.github.com/' },
+    ', then paste the gist address below.',
+  ]);
 });
 
 test('the holder cannot point the check at anything but a gist', async () => {

@@ -12,6 +12,7 @@ import {
   type Attestations,
   type Evidence,
   type Flow,
+  type Inline,
   type Instruction,
   type LocalAccount,
   type Provider,
@@ -214,9 +215,22 @@ function instructions(parts: Instruction[]) {
     .map((part) =>
       typeof part === 'string'
         ? `<p>${escape(part)}</p>`
-        : `<pre><code>${escape(part.code)}</code></pre>`,
+        : Array.isArray(part)
+          ? `<p>${part.map(inline).join('')}</p>`
+          : `<pre><code>${escape(part.code)}</code></pre>`,
     )
     .join('');
+}
+
+/** A piece of a paragraph. A link that is not http(s) is written as its text alone. */
+function inline(piece: Inline) {
+  if (typeof piece === 'string') return escape(piece);
+
+  const href = safeUrl(piece.href);
+
+  return href
+    ? `<a href="${escape(href)}" rel="noreferrer" target="_blank">${escape(piece.text)}</a>`
+    : escape(piece.text);
 }
 
 function safeUrl(value: string) {

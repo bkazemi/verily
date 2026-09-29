@@ -1025,3 +1025,48 @@ test('a link-back method is marked with the globe, and GitHub keeps its own mark
   await press('GitHub2 ways ›');
   assert.ok(!globeIn(choice('Link back from GitHub')));
 });
+
+test('a link in the instructions opens in a new tab, and only if it is http(s)', async () => {
+  const { dialog } = await connectHarness(async (path) => {
+    if (path === '/methods')
+      return {
+        ...connectMethods,
+        methods: [
+          { provider: 'github', method: 'gist', name: 'GitHub', action: 'Publish a proof' },
+        ],
+      };
+
+    return {
+      id: 'f1',
+      phase: 'pending',
+      provider: { id: 'github', name: 'GitHub', method: 'gist' },
+      artifact: 'location',
+      field: 'Address of your published proof',
+      instructions: [
+        [
+          'Publish at ',
+          { text: 'gist.github.com', href: 'https://gist.github.com/' },
+          ' or ',
+          { text: 'here', href: 'javascript:alert(1)' },
+          '.',
+        ],
+        { code: 'Verity proof' },
+      ],
+    };
+  });
+
+  await dialog
+    .all()
+    .find((e) => e.tagName === 'button' && e.textContent.includes('Publish a proof'))!
+    .onclick?.({});
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const links = dialog.links();
+
+  assert.equal(links.length, 1);
+  assert.equal(links[0]!.href, 'https://gist.github.com/');
+  assert.equal(links[0]!.target, '_blank');
+  assert.equal(links[0]!.textContent, 'gist.github.com');
+  assert.match(dialog.textContent, /Publish at gist\.github\.com or here\./);
+});

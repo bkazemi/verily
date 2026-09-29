@@ -603,3 +603,34 @@ test('the dialog watches a sign-in flow until the provider sends the holder back
   await f.request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
   assert.equal((await read()).phase, 'approval');
 });
+
+test('a link in the instructions is a link on the page, and only if it is http(s)', async () => {
+  const provider = fakeArtifactProvider();
+
+  provider.instructions = (expect) => [
+    [
+      'Publish at ',
+      { text: 'notes.test', href: 'https://notes.test/' },
+      ' or ',
+      { text: 'here', href: 'javascript:alert(1)' },
+      '.',
+    ],
+    { code: expect },
+  ];
+
+  const f = fixture([provider]);
+  const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
+  const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
+  const path = start.headers.get('location')!.replace('/api/verity', '');
+
+  const body = await (
+    await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })
+  ).text();
+
+  assert.match(
+    body,
+    /<p>Publish at <a href="https:\/\/notes\.test\/" rel="noreferrer" target="_blank">notes\.test<\/a> or here\.<\/p>/,
+  );
+
+  assert.doesNotMatch(body, /javascript:/);
+});

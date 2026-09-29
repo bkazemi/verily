@@ -1,6 +1,6 @@
-import type { ExternalAccount, Instruction } from '../core/index.js';
+import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
 import { externalName } from '../core/index.js';
-import { accountCard, linkMark, node, styles } from './evidence-dialog.js';
+import { accountCard, linkMark, node, outward, styles } from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
 import { verityLogo } from './logo.js';
 import { version } from '../version.js';
@@ -101,6 +101,27 @@ function codeBlock(code: string): HTMLDivElement {
   block.append(scroller, copy);
 
   return block;
+}
+
+/** A paragraph with links in it. A link that is not http(s) is written as its text alone. */
+function paragraph(pieces: Inline[]): HTMLParagraphElement {
+  const element = node('p');
+
+  for (const piece of pieces) {
+    if (typeof piece === 'string') element.append(document.createTextNode(piece));
+    else if (httpUrl(piece.href)) element.append(outward(node('a', piece.text), piece.href));
+    else element.append(document.createTextNode(piece.text));
+  }
+
+  return element;
+}
+
+function httpUrl(value: string): boolean {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
 }
 
 function button(label: string, primary = false): HTMLButtonElement {
@@ -434,7 +455,11 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
 
     content.replaceChildren(
       ...flow.instructions!.map((part) =>
-        typeof part === 'string' ? node('p', part) : codeBlock(part.code),
+        typeof part === 'string'
+          ? node('p', part)
+          : Array.isArray(part)
+            ? paragraph(part)
+            : codeBlock(part.code),
       ),
       label,
       row(back, check),

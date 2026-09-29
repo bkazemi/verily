@@ -16,7 +16,11 @@ export function githubGistProvider(options: { fetch?: typeof fetch } = {}): Arti
     method: 'gist',
     artifact: 'location',
     instructions: (expect) => [
-      'Publish this line in a public gist at gist.github.com, then paste the gist address below.',
+      [
+        'Publish this line in a public gist at ',
+        { text: 'gist.github.com', href: 'https://gist.github.com/' },
+        ', then paste the gist address below.',
+      ],
       { code: expect },
     ],
     async verify({ artifact, expect }): Promise<ExternalAccount> {
