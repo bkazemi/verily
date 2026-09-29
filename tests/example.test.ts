@@ -109,7 +109,7 @@ test(
 
       assert.match(
         await (await fetch(origin, { headers: { cookie } })).text(),
-        /Verify with GitHub/,
+        /<verity-connect backend-url="\/api\/verity"><\/verity-connect>/,
       );
 
       const mine = await (await fetch(`${origin}/api/verity/mine`, { headers: { cookie } })).json();
