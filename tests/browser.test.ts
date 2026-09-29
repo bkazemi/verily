@@ -806,7 +806,14 @@ test('a page read by a link back is a record the badge will show', async () => {
 
   assert.match(cards[1]!.textContent, /example\.test\/about/);
   assert.ok(!cards[1]!.textContent.includes('@example'));
+  // A link-back provider the site named itself still gets the globe.
+  assert.ok(globeIn(cards[1]!));
 });
+
+/** Whether an element draws the globe: its equator is the one line only the globe has. */
+function globeIn(element: Element): boolean {
+  return element.all().some((e) => e.tagName === 'path' && e.attributes.d === 'M1.5 8h13');
+}
 
 test('the version stamped on a record is the one the package ships', async () => {
   const { version } = await import('../src/version.js');
@@ -999,4 +1006,22 @@ test('cancel cannot race a confirmation that is still out', async () => {
   await confirming;
 
   assert.deepEqual({ ...(await result) }, { outcome: 'complete', connectionId: 'c9' });
+});
+
+test('a link-back method is marked with the globe, and GitHub keeps its own mark', async () => {
+  const { dialog, press } = await connectHarness(async () => ({
+    ...connectMethods,
+    methods: [
+      { provider: 'link', method: 'backlink', name: 'your website', action: 'Link back' },
+      { provider: 'github', method: 'oauth', name: 'GitHub', action: 'Sign in with GitHub' },
+      { provider: 'github', method: 'backlink', name: 'GitHub', action: 'Link back from GitHub' },
+    ],
+  }));
+
+  const choice = (label: string) =>
+    dialog.all().find((e) => e.tagName === 'button' && e.textContent.includes(label))!;
+
+  assert.ok(globeIn(choice('Link back')));
+  await press('GitHub2 ways ›');
+  assert.ok(!globeIn(choice('Link back from GitHub')));
 });

@@ -221,7 +221,7 @@ function render(content: HTMLElement, evidence: Evidence) {
     ...attestationNote(evidence.attestations.local, names),
   );
 
-  const logo = providerMark(evidence.provider);
+  const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
   const externalCard = accountCard(
     // The mark and the name, or just the name. A mark that falls back to writing the name

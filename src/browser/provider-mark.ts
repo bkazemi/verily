@@ -35,16 +35,31 @@ function github(): SVGSVGElement {
  * of an organisation.
  */
 function key(): SVGSVGElement {
-  const svg = mark();
-
-  svg.setAttribute('fill', 'none');
-
-  for (const d of [
+  return lines([
     'M7.4 8.6a3.3 3.3 0 1 0-4.7 4.7 3.3 3.3 0 0 0 4.7-4.7Z',
     'M7.4 8.6 14 2',
     'M11.2 4.8l1.6 1.6',
     'M9.4 6.6l1.6 1.6',
-  ]) {
+  ]);
+}
+
+/** A globe, drawn here like the key, for a link back from a page on the open web. */
+function globe(): SVGSVGElement {
+  return lines([
+    'M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z',
+    'M1.5 8h13',
+    'M8 1.5C6.1 3.3 5.1 5.5 5.1 8s1 4.7 2.9 6.5',
+    'M8 1.5c1.9 1.8 2.9 4 2.9 6.5s-1 4.7-2.9 6.5',
+  ]);
+}
+
+/** A mark drawn as rounded strokes in the text colour. */
+function lines(paths: string[]): SVGSVGElement {
+  const svg = mark();
+
+  svg.setAttribute('fill', 'none');
+
+  for (const d of paths) {
     const path = document.createElementNS(namespace, 'path');
 
     path.setAttribute('d', d);
@@ -63,8 +78,9 @@ function key(): SVGSVGElement {
  * the provider's name keeps this to one job: a caller that also writes the name would
  * otherwise print it twice, and only the caller knows where the name belongs.
  */
-export function providerMark(provider: string): SVGSVGElement | undefined {
+export function providerMark(provider: string, method?: string): SVGSVGElement | undefined {
   const marks: Record<string, () => SVGSVGElement> = { github, openpgp: key };
 
-  return marks[provider]?.();
+  // A site names its own link-back providers, so those fall back on the method's mark.
+  return marks[provider]?.() ?? (method === 'backlink' ? globe() : undefined);
 }

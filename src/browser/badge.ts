@@ -240,7 +240,7 @@ export function renderBadge(element: HTMLElement, evidence: Evidence): HTMLAncho
   const divider = span('divider', '');
 
   divider.setAttribute('aria-hidden', 'true');
-  const logo = providerMark(evidence.provider);
+  const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
   // A provider with no mark of its own is named instead, so the pill never drops it.
   badge.append(divider, logo ?? span('name', provider), span('name', handle));

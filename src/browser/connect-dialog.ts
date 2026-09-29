@@ -281,7 +281,7 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
         continue;
       }
 
-      const control = labelled(choice.provider, choice.action);
+      const control = labelled(choice.provider, choice.action, choice.method);
 
       control.onclick = () => {
         // Opened in the click itself, or a browser would block it; pointed at the
@@ -332,9 +332,9 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
   }
 
   /** A choice button: the provider's mark where it has one, then what the button does. */
-  function labelled(provider: string, text: string) {
+  function labelled(provider: string, text: string, method?: string) {
     const control = button('');
-    const logo = providerMark(provider);
+    const logo = providerMark(provider, method);
 
     if (logo) control.append(logo);
 
@@ -443,7 +443,7 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
   }
 
   function approve(flow: FlowView) {
-    const logo = providerMark(flow.provider.id);
+    const logo = providerMark(flow.provider.id, flow.provider.method);
 
     const external = accountCard(
       logo
