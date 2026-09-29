@@ -110,9 +110,18 @@ createServer((req, res) => {
 }).listen(3000);
 ```
 
-### 4. Link to it
+### 4. Let users connect an account
 
-Send signed-in users to `<baseUrl>/verify` to connect an account. `<baseUrl>/mine` returns their connections as JSON, for your settings page.
+Put the connect pill on your settings page. Clicking it opens a dialog where the user picks a method, proves it and approves the connection, without leaving the page:
+
+```html
+<script src="/assets/verity.js" defer></script>
+<verity-connect backend-url="/api/verity"></verity-connect>
+```
+
+GitHub sign-in still happens on GitHub, in a small window. The dialog picks the flow back up when the user returns. When a connection is recorded, the element fires a `verity-result` event whose `detail` holds the new `connectionId`. The backend must be on the same origin as the page.
+
+The full-page flow at `<baseUrl>/verify` still works, for links and for browsers without JavaScript. `<baseUrl>/mine` returns the user's connections as JSON, for your settings page.
 
 Then schedule the upkeep described under [Operations](#operations).
 
@@ -144,6 +153,7 @@ Clicking the badge opens the verification details:
 The badge refreshes every 30 seconds, and only ever reads public evidence. The client can also start and end connections, and draw a badge into an element of your own:
 
 ```js
+await client.openConnect(); // the connect dialog; call from a click
 await client.connect({ provider: 'github' }); // opens <baseUrl>/verify in a popup; call from a click
 await client.mountBadge(element, { connectionId }); // draws once; call again to refresh
 await client.disconnect(connectionId);

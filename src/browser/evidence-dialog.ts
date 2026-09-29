@@ -14,7 +14,7 @@ import { version } from '../version.js';
 
 const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
 
-const styles = `
+export const styles = `
   * { box-sizing: border-box; }
   dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 24px; border: 1px solid #dce2de; border-radius: 16px; background: #fff; color: #23312b; box-shadow: 0 24px 90px #10201935; font: 13px/1.6 system-ui, sans-serif; }
   dialog::backdrop { background: #15271f66; }
@@ -47,7 +47,7 @@ const styles = `
   ${markStyles}
 `;
 
-function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') {
+export function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = '') {
   const element = document.createElement(tag);
 
   element.textContent = text;
@@ -61,7 +61,7 @@ function node<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', classNam
  * read against what it links to, and following one in place would close the dialog and
  * take the reader off the page the pill was on. `noreferrer` keeps the opener unreachable.
  */
-function outward(anchor: HTMLAnchorElement, url: string): HTMLAnchorElement {
+export function outward(anchor: HTMLAnchorElement, url: string): HTMLAnchorElement {
   anchor.href = url;
   anchor.rel = 'noreferrer';
   anchor.target = '_blank';
@@ -70,7 +70,7 @@ function outward(anchor: HTMLAnchorElement, url: string): HTMLAnchorElement {
 }
 
 /** Joins the two cards: the link itself, drawn rather than described. */
-function linkMark(): SVGSVGElement {
+export function linkMark(): SVGSVGElement {
   const namespace = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(namespace, 'svg');
 
@@ -140,7 +140,7 @@ function moment(time: number) {
  * `extra` carries evidence belonging to that side alone: a provider authenticates and
  * expires on its own terms, and a second provider on the same subject would differ.
  */
-function accountCard(
+export function accountCard(
   heading: Node[],
   name: string,
   reference: string | undefined,

@@ -46,8 +46,25 @@ class Element {
     this.open = true;
   }
 
+  checked = false;
+  disabled = false;
+
+  /** As a real dialog does, closing fires `close` for whoever is listening. */
   close() {
     this.open = false;
+
+    for (const handler of this.listeners['close'] ?? []) handler({});
+  }
+
+  /** Enough of a selector for the dialogs: a tag, optionally `:checked`. */
+  querySelector(selector: string): Element | null {
+    const [tag, state] = selector.split(':');
+
+    return (
+      this.all()
+        .slice(1)
+        .find((e) => e.tagName === tag && (state !== 'checked' || e.checked)) ?? null
+    );
   }
 
   focus() {}
@@ -796,4 +813,190 @@ test('the version stamped on a record is the one the package ships', async () =>
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.equal(version, `v${manifest.version.split('.')[0]}`);
+});
+
+/**
+ * The connect dialog over a scripted backend. Each request is answered by `answer`, which
+ * may hold one back to model a slow server; the sign-in poll is fired by hand.
+ */
+async function connectHarness(answer: (path: string, body?: string) => Promise<unknown>) {
+  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const body = new Element();
+  const polls: (() => Promise<void>)[] = [];
+
+  const element = (tag: string) => {
+    const created = new Element();
+
+    created.tagName = tag;
+
+    return created;
+  };
+
+  const context = vm.createContext({
+    URL,
+    Date,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    setInterval: (handler: () => Promise<void>) => polls.push(handler),
+    clearInterval: () => {},
+    CSSStyleSheet: class {
+      replaceSync() {}
+    },
+    HTMLElement: { [Symbol.hasInstance]: (value: unknown) => value instanceof Element },
+    HTMLAnchorElement: {
+      [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'a',
+    },
+    HTMLTextAreaElement: {
+      [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'textarea',
+    },
+    HTMLDialogElement: {
+      [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'dialog',
+    },
+    location: { href: 'https://site.test/settings', origin: 'https://site.test' },
+    window: {
+      open: () => ({
+        closed: false,
+        location: { href: '' },
+        close() {
+          this.closed = true;
+        },
+      }),
+    },
+    document: {
+      body,
+      createElementNS: (_namespace: string, tag: string) => element(tag),
+      createElement: element,
+      createTextNode: (text: string) => {
+        const node = new Element();
+
+        node.textContent = text;
+
+        return node;
+      },
+    },
+    fetch: async (url: string, init?: { body?: string }) => {
+      const data = await answer(new URL(url).pathname.replace('/api/verity', ''), init?.body);
+
+      return { ok: true, json: async () => data };
+    },
+  });
+
+  vm.runInContext(asset, context);
+
+  const client = context.Verity.init({ backendUrl: '/api/verity' }) as {
+    openConnect(opener: Element): Promise<{ outcome: string; connectionId?: string }>;
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const result = client.openConnect(new Element());
+
+  await settle();
+
+  const dialog = body.find('dialog')[0]!;
+
+  const press = async (label: string) => {
+    const button = dialog.all().find((e) => e.tagName === 'button' && e.textContent === label);
+
+    assert.ok(button, `no ${label} button`);
+    await button.onclick?.({});
+    await settle();
+  };
+
+  return { dialog, polls, press, result, settle };
+}
+
+const connectMethods = {
+  siteName: 'Site',
+  verifierName: 'site.test',
+  local: { heading: 'Site', value: 'Alice' },
+  methods: [{ provider: 'github', method: 'oauth', name: 'GitHub', action: 'Sign in with GitHub' }],
+};
+
+const approvalView = {
+  id: 'f1',
+  phase: 'approval',
+  provider: { id: 'github', name: 'GitHub', method: 'oauth' },
+  local: { heading: 'Site', value: 'Alice' },
+  external: { id: '42', handle: 'alice', profileUrl: 'https://github.com/alice' },
+};
+
+test('a sign-in answer that arrives after the holder cancelled does not bring the flow back', async () => {
+  let late!: (value: unknown) => void;
+
+  const { dialog, polls, press, settle } = await connectHarness(async (path) => {
+    if (path === '/methods') return connectMethods;
+
+    if (path === '/sessions')
+      return {
+        id: 'f1',
+        phase: 'pending',
+        provider: { id: 'github', name: 'GitHub', method: 'oauth' },
+        authorizationUrl: 'https://github.test/authorize',
+      };
+
+    return new Promise((resolve) => (late = resolve));
+  });
+
+  await press('Sign in with GitHub');
+  assert.match(dialog.textContent, /Continue in the GitHub window/);
+
+  // The poll asks, the holder cancels, and only then does the answer come back.
+  const polled = polls.at(-1)!();
+
+  await press('Cancel');
+  late(approvalView);
+  await polled;
+  await settle();
+
+  assert.match(dialog.textContent, /Sign in with GitHub/);
+  assert.doesNotMatch(dialog.textContent, /Confirm connection/);
+});
+
+test('closing the dialog while an approval is out still reports the connection it made', async () => {
+  let approved!: (value: unknown) => void;
+
+  const { dialog, press, result } = await connectHarness(async (path) => {
+    if (path === '/methods') return connectMethods;
+
+    if (path === '/sessions') return approvalView;
+
+    return new Promise((resolve) => (approved = resolve));
+  });
+
+  await press('Sign in with GitHub');
+  const confirming = press('Confirm connection');
+
+  dialog.close();
+  approved({ outcome: 'complete', connectionId: 'c9' });
+  await confirming;
+
+  assert.deepEqual({ ...(await result) }, { outcome: 'complete', connectionId: 'c9' });
+});
+
+test('cancel cannot race a confirmation that is still out', async () => {
+  const answers: ((value: unknown) => void)[] = [];
+
+  const { dialog, press, result } = await connectHarness(async (path) => {
+    if (path === '/methods') return connectMethods;
+
+    if (path === '/sessions') return approvalView;
+
+    return new Promise((resolve) => answers.push(resolve));
+  });
+
+  await press('Sign in with GitHub');
+  const confirming = press('Confirm connection');
+  const cancel = dialog.all().find((e) => e.tagName === 'button' && e.textContent === 'Cancel')!;
+
+  // Both decisions are held while one is out, and a click on the other sends nothing.
+  assert.equal(cancel.disabled, true);
+  await press('Cancel');
+  assert.equal(answers.length, 1);
+
+  dialog.close();
+  answers[0]!({ outcome: 'complete', connectionId: 'c9' });
+  await confirming;
+
+  assert.deepEqual({ ...(await result) }, { outcome: 'complete', connectionId: 'c9' });
 });

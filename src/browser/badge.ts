@@ -13,7 +13,8 @@ const styles = `
       var(--verity-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
     text-decoration: none;
   }
-  a[href]:hover { background: var(--verity-hover, #f3f6f4); border-color: var(--verity-border, #dce2e0); }
+  button.badge { margin: 0; cursor: pointer; }
+  a[href]:hover, button.badge:hover { background: var(--verity-hover, #f3f6f4); border-color: var(--verity-border, #dce2e0); }
   .badge:focus-visible { outline: 2px solid #357ce5; outline-offset: 2px; }
   .name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
   .label { display: none; font-size: 11px; color: var(--verity-muted, #65726c); }
@@ -31,8 +32,9 @@ const styles = `
   .expired .icon { color: #815a12; background: #fbefce; }
   .revoked .icon, .message .icon { color: #626d69; background: #edf0ee; }
   .message { color: var(--verity-muted, #65726c); }
+  .add { font-weight: 600; }
   @media (prefers-reduced-motion: no-preference) {
-    a { transition: background .12s, border-color .12s; }
+    a, button { transition: background .12s, border-color .12s; }
     /* The mark is drawn before the answer arrives, so it resolves rather than swaps. */
     .mark, .mark path { transition: opacity .18s ease, stroke .18s ease; }
     .spinner { border-top-color: transparent; opacity: .4; animation: verity-spin .7s linear infinite; }
@@ -92,7 +94,7 @@ function frame(element: HTMLElement, state: string): { pill: HTMLElement; mark: 
     element.replaceChildren(host);
   }
 
-  const tag = state === 'message' ? 'span' : 'a';
+  const tag = state === 'message' ? 'span' : state === 'connect' ? 'button' : 'a';
 
   if (!frame.pill || frame.pill.tagName.toLowerCase() !== tag) {
     frame.pill = document.createElement(tag);
@@ -253,4 +255,23 @@ export function renderBadge(element: HTMLElement, evidence: Evidence): HTMLAncho
   shown.set(element, key);
 
   return badge;
+}
+
+/**
+ * The pill that starts a connection, in the same frame as the badges it will produce. Its
+ * mark claims nothing yet, so it is drawn in the text colour as a pending one is.
+ */
+export function renderConnectPill(element: HTMLElement): HTMLButtonElement {
+  const { pill, mark } = frame(element, 'connect');
+  const button = pill as HTMLButtonElement;
+
+  paintMark(mark, 'pending');
+  button.type = 'button';
+  const divider = span('divider', '');
+
+  divider.setAttribute('aria-hidden', 'true');
+  button.append(divider, span('add', 'Verify an account'));
+  messages.set(element, 'connect');
+
+  return button;
 }

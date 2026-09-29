@@ -1,5 +1,17 @@
 import type { Evidence } from '../core/index.js';
-import { badgeShown, renderBadge, renderBadgeMessage, renderBadgePending } from './badge.js';
+import {
+  badgeShown,
+  renderBadge,
+  renderBadgeMessage,
+  renderBadgePending,
+  renderConnectPill,
+} from './badge.js';
+import {
+  openConnectDialog,
+  type ConnectApi,
+  type FlowView,
+  type Methods,
+} from './connect-dialog.js';
 import { openEvidenceDialog } from './evidence-dialog.js';
 
 export type { Evidence } from '../core/index.js';
@@ -40,7 +52,72 @@ export function init({ backendUrl }: { backendUrl: string }) {
     return response.json();
   }
 
+  /** The connect flow as the dialog drives it, every answer checked before it is drawn. */
+  const flows: ConnectApi = {
+    async methods() {
+      const data = await request('/methods');
+
+      if (!record(data) || !record(data.local) || !Array.isArray(data.methods))
+        throw new Error('Invalid methods response');
+
+      if (typeof data.local.profileUrl === 'string') safeUrl(data.local.profileUrl);
+
+      return data as unknown as Methods;
+    },
+    start: async (provider, method) =>
+      flowView(await request('/sessions', { kind: 'connect', provider, method })),
+    read: async (id) => flowView(await request(`/flows/${encodeURIComponent(id)}?format=json`)),
+    submit: async (id, artifact) =>
+      flowView(await request(`/flows/${encodeURIComponent(id)}/submit`, { artifact })),
+    async approve(id, visibility, cancel) {
+      const data = await request(`/flows/${encodeURIComponent(id)}/approve`, {
+        action: cancel ? 'cancel' : 'approve',
+        visibility,
+      });
+
+      if (!record(data)) throw new Error('Invalid approval response');
+
+      return data.outcome === 'complete' && typeof data.connectionId === 'string'
+        ? { outcome: 'complete', connectionId: data.connectionId }
+        : { outcome: 'cancelled' };
+    },
+  };
+
   const client = {
+    /**
+     * Opens the connect dialog over the current page. Resolves when it closes, with how
+     * the last attempt in it ended. Call from a click: a sign-in method opens a window.
+     */
+    openConnect(opener: HTMLElement = document.body): Promise<Result> {
+      if (base.origin !== location.origin)
+        throw new Error('Management requires a same-origin backend');
+
+      return openConnectDialog(opener, flows);
+    },
+    /**
+     * Draws the pill that opens the connect dialog. The host receives a `verity-result`
+     * event, whose detail is the Result, whenever the dialog closes on a new connection.
+     */
+    mountConnect(element: HTMLElement) {
+      const pill = renderConnectPill(element);
+
+      pill.setAttribute('aria-haspopup', 'dialog');
+
+      pill.onclick = async () => {
+        if (typeof HTMLDialogElement === 'undefined') {
+          location.href = `${base.href}/verify`;
+
+          return;
+        }
+
+        const result = await client.openConnect(element);
+
+        if (result.outcome === 'complete')
+          element.dispatchEvent(
+            new CustomEvent('verity-result', { detail: result, bubbles: true, composed: true }),
+          );
+      };
+    },
     async connect({ provider }: { provider: string }): Promise<Result> {
       if (base.origin !== location.origin)
         throw new Error('Management requires a same-origin backend');
@@ -213,6 +290,29 @@ function readable(evidence: Evidence): Evidence | undefined {
   }
 }
 
+/** A flow step, refused unless every address in it may be followed or drawn as a link. */
+function flowView(value: unknown): FlowView {
+  if (
+    !record(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.phase !== 'string' ||
+    !record(value.provider)
+  )
+    throw new Error('Invalid flow response');
+
+  if (value.authorizationUrl !== undefined) safeUrl(String(value.authorizationUrl));
+
+  if (value.phase === 'approval') {
+    if (!record(value.local) || !record(value.external)) throw new Error('Invalid flow response');
+
+    safeUrl(String(value.external.profileUrl));
+
+    if (value.local.profileUrl !== undefined) safeUrl(String(value.local.profileUrl));
+  }
+
+  return value as unknown as FlowView;
+}
+
 function safeUrl(value: string) {
   const url = new URL(value);
 
@@ -285,6 +385,30 @@ function validEvidence(value: unknown): value is Evidence {
     ['authenticatedAt', 'approvedAt', 'expiresAt'].every(
       (k) => typeof value[k] === 'number' && Number.isFinite(value[k]),
     )
+  );
+}
+
+if (typeof customElements !== 'undefined' && !customElements.get('verity-connect')) {
+  /** The pill a signed-in holder clicks to connect an account, in a dialog over the page. */
+  customElements.define(
+    'verity-connect',
+    class extends HTMLElement {
+      static observedAttributes = ['backend-url'];
+
+      connectedCallback() {
+        this.present();
+      }
+
+      attributeChangedCallback() {
+        if (this.isConnected) this.present();
+      }
+
+      private present() {
+        const backendUrl = this.getAttribute('backend-url');
+
+        if (backendUrl) init({ backendUrl }).mountConnect(this);
+      }
+    },
   );
 }
 

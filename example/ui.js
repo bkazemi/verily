@@ -10,12 +10,11 @@ async function action(work) {
   }
 }
 
-document.getElementById('verify').onclick = () =>
+document.querySelector('verity-connect').addEventListener('verity-result', () =>
   action(async () => {
-    const result = await client.connect({ provider: 'github' });
-
-    message.textContent = `Verification ${result.outcome}.`;
-  });
+    message.textContent = 'Verification complete.';
+  }),
+);
 
 async function render() {
   const response = await fetch('/api/verity/mine', { cache: 'no-store' });

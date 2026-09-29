@@ -8,6 +8,7 @@ import {
   providerMethod,
   statusLabel,
   type Attestation,
+  type ArtifactProvider,
   type Attestations,
   type Evidence,
   type Flow,
@@ -69,9 +70,13 @@ const html = (body: string, status = 200) =>
     headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' },
   });
 
-const json = (data: unknown) =>
+const json = (data: unknown, cookie?: string) =>
   new Response(JSON.stringify(data), {
-    headers: { ...headers, 'Content-Type': 'application/json' },
+    headers: {
+      ...headers,
+      'Content-Type': 'application/json',
+      ...(cookie ? { 'Set-Cookie': cookie } : {}),
+    },
   });
 
 /**
@@ -163,6 +168,22 @@ function methodAction(provider: Provider): string {
   };
 
   return actions[providerMethod(provider)] ?? `Continue with ${provider.name}`;
+}
+
+/** What the holder hands back for an artifact method, named for what it is. */
+function artifactField(provider: ArtifactProvider): string {
+  if (provider.artifact === 'document') return 'Your proof';
+
+  return provider.method === 'backlink'
+    ? 'Address of the page carrying your link'
+    : 'Address of your published proof';
+}
+
+/** Said beside every artifact method: what the holder publishes is public by design. */
+function artifactNote(provider: ArtifactProvider): string {
+  return provider.method === 'backlink'
+    ? 'This link is public, as is the page you point at. Anyone reading either one can follow it here.'
+    : 'This line is public, as is whatever published it. Publish nothing else alongside it.';
 }
 
 /** Names the providers on offer once each, however many ways each can be shown. */
@@ -360,6 +381,66 @@ export function createVerity(options: ServerOptions) {
   const entry = (flow: { flowId: string; authorizationUrl?: string }) =>
     flow.authorizationUrl ?? `${prefix}/flows/${flow.flowId}`;
 
+  /** The binding cookie that ties a flow to the browser that started it. */
+  const flowCookie = (binding: string) =>
+    `${cookieName}=${binding}; HttpOnly; SameSite=Lax; Path=${prefix || '/'}; Max-Age=${Math.ceil((options.flowTtlMs ?? 600000) / 1000)}${base.protocol === 'https:' ? '; Secure' : ''}`;
+
+  /** The subject as the holder's own card shows it. The private id never leaves here. */
+  const subject = (user: LocalAccount) => ({
+    ...localSide(user, options.siteName),
+    profileUrl: user.profileUrl,
+  });
+
+  /**
+   * A connect flow as the in-page dialog draws it: the same steps the flow pages walk
+   * through, as data, so the holder never has to leave the page they started on.
+   */
+  async function flowView(flow: Flow, authorizationUrl?: string) {
+    const provider = service.providerOf(flow);
+
+    const view: Record<string, unknown> = {
+      id: flow.id,
+      phase: flow.phase,
+      provider: { id: provider.id, name: provider.name, method: providerMethod(provider) },
+    };
+
+    if (authorizationUrl) view.authorizationUrl = authorizationUrl;
+
+    if (flow.phase === 'pending' && flow.expect && isArtifactProvider(provider))
+      Object.assign(view, {
+        instructions: provider.instructions(flow.expect),
+        artifact: provider.artifact,
+        field: artifactField(provider),
+        note: artifactNote(provider),
+      });
+
+    if (flow.phase === 'approval') {
+      const joined = await service.joining(flow);
+
+      Object.assign(view, {
+        local: subject(flow.local!),
+        external: flow.external,
+        ...(joined ? { joined: { visibility: joined.visibility } } : {}),
+      });
+    }
+
+    if (flow.phase === 'failed' && flow.reason) view.reason = flow.reason;
+
+    if (flow.phase === 'complete') view.connectionId = flow.resultId;
+
+    return view;
+  }
+
+  /** A flow the dialog may read: one this holder started, to connect an account. */
+  async function ownFlow(request: Request, id: string) {
+    const flow = await service.flow(id, binding(request));
+
+    if (flow.kind !== 'connect' || (await local(request)).id !== flow.local?.id)
+      throw new Unavailable();
+
+    return flow;
+  }
+
   async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -482,10 +563,29 @@ export function createVerity(options: ServerOptions) {
             method: url.searchParams.get('method') ?? undefined,
           });
 
-          const cookie = `${cookieName}=${flow.binding}; HttpOnly; SameSite=Lax; Path=${prefix || '/'}; Max-Age=${Math.ceil((options.flowTtlMs ?? 600000) / 1000)}${base.protocol === 'https:' ? '; Secure' : ''}`;
-
-          return redirect(entry(flow), cookie);
+          return redirect(entry(flow), flowCookie(flow.binding));
         }
+
+        // What the in-page dialog offers: every configured method, for the signed-in holder.
+        if (path === '/methods') {
+          const user = await local(request);
+          const several = service.providers.length > 1;
+
+          return json({
+            siteName: options.siteName,
+            verifierName: options.verifierName,
+            local: subject(user),
+            methods: service.providers.map((p) => ({
+              provider: p.id,
+              method: providerMethod(p),
+              name: p.name,
+              action: several ? methodAction(p) : `Continue with ${p.name}`,
+            })),
+          });
+        }
+
+        if (path.startsWith('/flows/') && url.searchParams.get('format') === 'json')
+          return json(await flowView(await ownFlow(request, path.slice(7))));
 
         if (path.startsWith('/flows/')) {
           const flow = await service.flow(path.slice(7), binding(request));
@@ -503,17 +603,13 @@ export function createVerity(options: ServerOptions) {
                 `Verify with ${provider.name}`,
                 `${instructions(provider.instructions(flow.expect))}
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
-            ${
+            <label>${escape(artifactField(provider))} ${
               provider.artifact === 'document'
-                ? '<label>Your proof <textarea name="artifact" rows="14" cols="72" required></textarea></label>'
-                : `<label>${provider.method === 'backlink' ? 'Address of the page carrying your link' : 'Address of your published proof'} <input name="artifact" type="url" required></label>`
-            }
+                ? '<textarea name="artifact" rows="14" cols="72" required></textarea>'
+                : '<input name="artifact" type="url" required>'
+            }</label>
             <button>Check my proof</button></form>
-            <p class="fine">${
-              provider.method === 'backlink'
-                ? 'This link is public, as is the page you point at. Anyone reading either one can follow it here.'
-                : 'This line is public, as is whatever published it. Publish nothing else alongside it.'
-            }</p>
+            <p class="fine">${escape(artifactNote(provider))}</p>
             <script src="${escape(prefix)}/copy.js" defer></script>`,
               ),
             );
@@ -609,6 +705,8 @@ export function createVerity(options: ServerOptions) {
           return json(await service.read(path.slice(8), await local(request)));
       } else {
         const data = await body(request);
+        // The in-page dialog asks in JSON and is answered in JSON; a form gets its page.
+        const asJson = request.headers.get('content-type')?.startsWith('application/json');
 
         if (path === '/connect') {
           await local(request);
@@ -635,9 +733,13 @@ export function createVerity(options: ServerOptions) {
             { provider: data.provider || undefined, method: data.method || undefined },
           );
 
-          const cookie = `${cookieName}=${flow.binding}; HttpOnly; SameSite=Lax; Path=${prefix || '/'}; Max-Age=${Math.ceil((options.flowTtlMs ?? 600000) / 1000)}${base.protocol === 'https:' ? '; Secure' : ''}`;
+          if (asJson && kind === 'connect')
+            return json(
+              await flowView(await service.flow(flow.flowId, flow.binding), flow.authorizationUrl),
+              flowCookie(flow.binding),
+            );
 
-          return redirect(entry(flow), cookie);
+          return redirect(entry(flow), flowCookie(flow.binding));
         }
 
         const submission = path.match(/^\/flows\/([^/]+)\/submit$/);
@@ -645,7 +747,12 @@ export function createVerity(options: ServerOptions) {
         if (submission) {
           if (!data.artifact) throw new Unavailable();
 
+          if (asJson) await ownFlow(request, submission[1]!);
+
           await service.submit(submission[1]!, binding(request), data.artifact);
+
+          if (asJson)
+            return json(await flowView(await service.flow(submission[1]!, binding(request))));
 
           return redirect(`${prefix}/flows/${submission[1]!}`);
         }
@@ -668,6 +775,9 @@ export function createVerity(options: ServerOptions) {
             data.visibility as 'public' | 'unlisted',
             data.action === 'cancel',
           );
+
+          if (asJson)
+            return json(id ? { outcome: 'complete', connectionId: id } : { outcome: 'cancelled' });
 
           return result(id ? 'complete' : 'cancelled', id);
         }

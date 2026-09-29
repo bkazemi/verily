@@ -176,7 +176,7 @@ async function handle(request: Request) {
     );
 
   return html(`<h2>Account settings: Alex Example</h2><p>Confirm the connection between this account and your GitHub account.</p>
-    <button id="verify">Verify with GitHub</button><p><a href="/api/verity/verify">Verify using the full-page flow</a></p><p id="message" role="status"></p><section id="connections"></section>
+    <verity-connect backend-url="/api/verity"></verity-connect><p><a href="/api/verity/verify">Verify using the full-page flow</a></p><p id="message" role="status"></p><section id="connections"></section>
     <script src="/assets/verity.js" defer></script><script src="/assets/ui.js" defer></script>`);
 }
 

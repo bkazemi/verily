@@ -114,7 +114,6 @@ export function linkProvider(options: LinkProviderOptions): ArtifactProvider {
       { code: expect },
       'Writing the page yourself, that is one element:',
       { code: `<a rel="me" href="${expect}">${expect}</a>` },
-      'On GitHub, putting the address in your profile’s website field is enough: GitHub marks that link rel="me" for you, as Mastodon does for its profile links. Paste the page’s final address, because a redirect is not followed.',
     ],
 
     async verify({ artifact, expect }): Promise<ExternalAccount> {
@@ -301,7 +300,7 @@ function account(page: URL, profile?: RegExp): ExternalAccount {
 export function githubLinkProvider(
   options: Omit<LinkProviderOptions, 'id' | 'name' | 'hosts' | 'profile'> = {},
 ): ArtifactProvider {
-  return linkProvider({
+  const provider = linkProvider({
     ...options,
     id: 'github',
     name: 'GitHub',
@@ -309,6 +308,15 @@ export function githubLinkProvider(
     // GitHub's own rule: alphanumerics and single hyphens, never leading or trailing, 39 max.
     profile: /^\/([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})$/,
   });
+
+  return {
+    ...provider,
+    // GitHub writes the rel="me" itself, so the holder only fills in one field.
+    instructions: (expect) => [
+      'Put this address in the website field of your GitHub profile, then paste your profile’s address below.',
+      { code: expect },
+    ],
+  };
 }
 
 /**

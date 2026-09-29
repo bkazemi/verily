@@ -495,3 +495,111 @@ test('a proof handed over is taken as text, published here, and served as text',
 
   assert.equal(missing.status, 404);
 });
+
+test('the in-page dialog runs a proof start to finish in JSON, and only for its own holder', async () => {
+  const provider = fakeArtifactProvider();
+  const f = fixture([fakeProvider(), provider]);
+
+  const post = (path: string, data: Record<string, string>, cookie = 'local=alice') =>
+    f.request(path, {
+      method: 'POST',
+      headers: { origin: 'https://site.test', cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+  assert.equal((await f.request('/methods')).status, 404);
+
+  const offered = await (
+    await f.request('/methods', { headers: { cookie: 'local=alice' } })
+  ).json();
+
+  assert.deepEqual(
+    offered.methods.map((m: { action: string }) => m.action),
+    ['Sign in with GitHub', 'Publish a proof on Notes'],
+  );
+
+  assert.equal(offered.local.value, 'Alice');
+  assert.ok(!JSON.stringify(offered).includes(alice.id));
+
+  const start = await post('/sessions', { kind: 'connect', provider: 'notes', method: 'gist' });
+  const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
+  const pending = await start.json();
+
+  assert.equal(pending.phase, 'pending');
+  assert.equal(pending.field, 'Address of your published proof');
+  const expect = pending.instructions[1].code;
+
+  // The flow is bound to this browser and this holder; neither half is enough alone.
+  assert.equal((await f.request(`/flows/${pending.id}?format=json`)).status, 404);
+
+  assert.equal(
+    (
+      await f.request(`/flows/${pending.id}?format=json`, {
+        headers: { cookie: `${cookie}; local=bob` },
+      })
+    ).status,
+    404,
+  );
+
+  assert.equal(
+    (await post(`/flows/${pending.id}/submit`, { artifact: 'x' }, `${cookie}; local=bob`)).status,
+    404,
+  );
+
+  provider.artifacts.set('https://notes.test/alice/1', expect);
+
+  const review = await (
+    await post(
+      `/flows/${pending.id}/submit`,
+      { artifact: 'https://notes.test/alice/1' },
+      `${cookie}; local=alice`,
+    )
+  ).json();
+
+  assert.equal(review.phase, 'approval');
+  assert.equal(review.external.handle, 'alice');
+  assert.equal(review.joined, undefined);
+
+  const done = await (
+    await post(
+      `/flows/${pending.id}/approve`,
+      { action: 'approve', visibility: 'public' },
+      `${cookie}; local=alice`,
+    )
+  ).json();
+
+  assert.equal(done.outcome, 'complete');
+  assert.equal((await f.app.service.read(done.connectionId)).visibility, 'public');
+});
+
+test('the dialog watches a sign-in flow until the provider sends the holder back', async () => {
+  const f = fixture();
+
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ kind: 'connect' }),
+  });
+
+  const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
+  const view = await start.json();
+
+  assert.match(view.authorizationUrl, /^https:\/\/provider\.test\/authorize/);
+
+  const read = async () =>
+    (
+      await f.request(`/flows/${view.id}?format=json`, {
+        headers: { cookie: `${cookie}; local=alice` },
+      })
+    ).json();
+
+  assert.equal((await read()).phase, 'pending');
+  const state = new URL(view.authorizationUrl).searchParams.get('state')!;
+
+  await f.request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
+  assert.equal((await read()).phase, 'approval');
+});
