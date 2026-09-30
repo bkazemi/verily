@@ -26,6 +26,8 @@ export { VerityService, Unavailable } from './service.js';
 
 export { githubProvider } from './github.js';
 
+export { discordProvider } from './discord.js';
+
 export { githubGistProvider } from './github-gist.js';
 
 export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './link.js';

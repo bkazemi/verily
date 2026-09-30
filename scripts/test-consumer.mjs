@@ -32,9 +32,9 @@ try {
     `
     import assert from 'node:assert/strict';
     import { createRequire } from 'node:module';
-    import { createVerity, githubProvider, githubLinkProvider, linkProvider, PostgresStorage, status, init } from '@bkazemi/verity';
+    import { createVerity, githubProvider, discordProvider, githubLinkProvider, linkProvider, PostgresStorage, status, init } from '@bkazemi/verity';
     assert.equal(typeof createVerity, 'function'); assert.equal(typeof githubProvider, 'function');
-    assert.equal(typeof linkProvider, 'function');
+    assert.equal(typeof linkProvider, 'function'); assert.equal(typeof discordProvider, 'function');
     assert.equal(githubLinkProvider().id, 'github');
     assert.equal(typeof PostgresStorage, 'function'); assert.equal(typeof status, 'function'); assert.equal(typeof init, 'function');
     console.log(createRequire(import.meta.url).resolve('@bkazemi/verity/verity.js'));

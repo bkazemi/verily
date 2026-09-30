@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import {
   createVerity,
+  discordProvider,
   githubProvider,
   nodeHandler,
   Pool,
@@ -17,8 +18,30 @@ const password = process.env.EXAMPLE_PASSWORD;
 if (!password || password.length < 12)
   throw new Error('Set EXAMPLE_PASSWORD to at least 12 characters');
 
-if (!process.env.DATABASE_URL || !process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET)
-  throw new Error('Set DATABASE_URL, GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET');
+if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL');
+
+// Each sign-in is offered when its credentials are set.
+const providers = [
+  ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
+    ? [
+        githubProvider({
+          clientId: process.env.GITHUB_CLIENT_ID,
+          clientSecret: process.env.GITHUB_CLIENT_SECRET,
+        }),
+      ]
+    : []),
+  ...(process.env.DISCORD_CLIENT_ID && process.env.DISCORD_CLIENT_SECRET
+    ? [
+        discordProvider({
+          clientId: process.env.DISCORD_CLIENT_ID,
+          clientSecret: process.env.DISCORD_CLIENT_SECRET,
+        }),
+      ]
+    : []),
+];
+
+if (!providers.length)
+  throw new Error('Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or the DISCORD_ pair, or both');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const storage = new PostgresStorage(pool, process.env.VERITY_NAMESPACE ?? 'verity');
@@ -50,12 +73,7 @@ async function authenticate(request: Request) {
 
 const verity = createVerity({
   storage,
-  providers: [
-    githubProvider({
-      clientId: process.env.GITHUB_CLIENT_ID,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET,
-    }),
-  ],
+  providers,
   baseUrl: `${origin}/api/verity`,
   siteName: 'Example Community',
   verifierName: 'verity.example.com',

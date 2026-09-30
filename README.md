@@ -92,7 +92,7 @@ const verity = createVerity({
 | `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                          |
 | `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in.           |
 
-For GitHub sign-in, [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) with the callback URL `<baseUrl>/callback`.
+For GitHub sign-in, [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) with the callback URL `<baseUrl>/callback`. For Discord sign-in, create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the same callback URL as an OAuth2 redirect.
 
 ### 3. Mount it
 
@@ -166,6 +166,7 @@ To match your site's look, set any of these CSS variables on an ancestor: `--ver
 ```ts
 import {
   githubProvider,
+  discordProvider,
   githubGistProvider,
   linkProvider,
   githubLinkProvider,
@@ -176,12 +177,13 @@ import {
 | Provider               | The user proves it by                                                                 | Setup                                   |
 | ---------------------- | ------------------------------------------------------------------------------------- | --------------------------------------- |
 | `githubProvider()`     | signing in with GitHub.                                                               | A GitHub OAuth app.                     |
+| `discordProvider()`    | signing in with Discord.                                                              | A Discord application.                  |
 | `githubGistProvider()` | publishing a public gist containing a line Verity gives them.                         | None.                                   |
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                     | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile.               | The local account needs a `profileUrl`. |
 | `pgpProvider()`        | signing a line Verity gives them with their OpenPGP key, then pasting it and the key. | None.                                   |
 
-All methods except GitHub sign-in let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verity re-reads them on a schedule. A PGP signature is kept by Verity and published at `<baseUrl>/connections/<id>/proof`.
+All methods except the sign-ins let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verity re-reads them on a schedule. A PGP signature is kept by Verity and published at `<baseUrl>/connections/<id>/proof`.
 
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
@@ -227,7 +229,7 @@ setInterval(
   async () => {
     try {
       await verity.service.prune();
-      await verity.service.recheck(); // only needed if you use a method other than GitHub sign-in
+      await verity.service.recheck(); // only needed if you use a method other than signing in
     } catch (error) {
       console.error('Verity upkeep failed', error);
     }
@@ -245,12 +247,12 @@ setInterval(
 
 Clone the repository and run `npm ci`. `npm run preview` then shows the badge in every state at http://localhost:3001, with no other setup.
 
-The full example also needs Postgres and a GitHub OAuth app with the callback URL `http://localhost:3000/api/verity/callback`:
+The full example also needs Postgres and a GitHub OAuth app or a Discord application (or both) with the callback URL `http://localhost:3000/api/verity/callback`:
 
 ```sh
 npm run build
 docker compose up -d --wait
-cp example/.env.example .env   # add the GitHub client id and secret, and a long EXAMPLE_PASSWORD
+cp example/.env.example .env   # add GitHub and/or Discord credentials, and a long EXAMPLE_PASSWORD
 node --env-file=.env --import tsx example/server.ts
 ```
 

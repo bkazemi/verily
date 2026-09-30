@@ -1,0 +1,8 @@
+The Discord mark in src/browser/provider-mark.ts is taken from Simple Icons
+(https://simpleicons.org, https://github.com/simple-icons/simple-icons), version 16.33.0.
+
+Simple Icons releases its icon data under CC0 1.0 Universal
+(https://creativecommons.org/publicdomain/zero/1.0/).
+
+The mark itself is a trademark of Discord Inc. It is used only to identify an account as a
+Discord account, as Discord's brand guidelines allow (https://discord.com/branding).
