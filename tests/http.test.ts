@@ -79,7 +79,7 @@ test('HTTP full flow and visibility across HTML/JSON, generic secret failures an
     assert.equal(response.status, 404);
     assert.equal(await response.text(), expected);
     assert.equal(response.headers.get('cache-control'), 'no-store');
-    assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+    assert.equal(response.headers.get('referrer-policy'), 'same-origin');
   }
 
   const share = (await f.app.service.share(id, alice))!;

@@ -13,7 +13,7 @@ const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', origin);
 
   response.setHeader('Cache-Control', 'no-store');
-  response.setHeader('Referrer-Policy', 'no-referrer');
+  response.setHeader('Referrer-Policy', 'same-origin');
 
   if (url.pathname === '/assets/verity.js') {
     response.setHeader('Content-Type', 'text/javascript');

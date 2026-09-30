@@ -58,7 +58,7 @@ const page = (prefix: string, title: string, body: string) =>
 
 const headers = {
   'Cache-Control': 'no-store',
-  'Referrer-Policy': 'no-referrer',
+  'Referrer-Policy': 'same-origin',
   'X-Robots-Tag': 'noindex, nofollow',
   'X-Content-Type-Options': 'nosniff',
   'Content-Security-Policy':

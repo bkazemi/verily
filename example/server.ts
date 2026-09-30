@@ -86,7 +86,7 @@ const page = (body: string) =>
 
 const safeHeaders = {
   'Cache-Control': 'no-store',
-  'Referrer-Policy': 'no-referrer',
+  'Referrer-Policy': 'same-origin',
   'Content-Security-Policy':
     "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff',
