@@ -634,3 +634,13 @@ test('a link in the instructions is a link on the page, and only if it is http(s
 
   assert.doesNotMatch(body, /javascript:/);
 });
+
+test('pages allow forms to redirect to each sign-in provider and nowhere else', async () => {
+  const f = fixture();
+
+  const policy = (await f.request('/verify', { headers: { cookie: 'local=alice' } })).headers.get(
+    'content-security-policy',
+  )!;
+
+  assert.match(policy, /form-action 'self' https:\/\/provider\.test$/);
+});

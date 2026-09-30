@@ -16,6 +16,7 @@ import {
   type Instruction,
   type LocalAccount,
   type Provider,
+  type RedirectProvider,
 } from '../core/index.js';
 import { VerityService, Unavailable, type ServiceOptions } from './service.js';
 import { copyScript } from './copy.js';
@@ -834,7 +835,42 @@ export function createVerity(options: ServerOptions) {
     }
   }
 
-  return { service, handle };
+  // A sign-in form submits here and is redirected to the provider. Chromium applies
+  // form-action to every redirect of a form submission, so each provider's origin must be
+  // allowed alongside our own or the redirect is blocked. The origin is read from the
+  // provider's own authorization URL, which is built without side effects.
+  const formAction = [
+    "'self'",
+    ...new Set(
+      service.providers
+        .filter((p) => !isArtifactProvider(p))
+        .map(
+          (p) =>
+            new URL(
+              (p as RedirectProvider).authorizationUrl({
+                state: 'state',
+                challenge: 'challenge',
+                redirectUri: `${service.baseUrl}/callback`,
+              }),
+            ).origin,
+        ),
+    ),
+  ].join(' ');
+
+  async function secured(request: Request): Promise<Response> {
+    const response = await handle(request);
+    const policy = response.headers.get('content-security-policy');
+
+    if (policy)
+      response.headers.set(
+        'content-security-policy',
+        policy.replace("form-action 'self'", `form-action ${formAction}`),
+      );
+
+    return response;
+  }
+
+  return { service, handle: secured };
 }
 
 /** Mount on your chosen Node router. Public origin is configured, never inferred from Host. */
