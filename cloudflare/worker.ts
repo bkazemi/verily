@@ -287,7 +287,7 @@ export class VerityStore {
       `<div class="side"><p class="who">${escape(local.heading)}</p>
       <p class="name">${escape(local.value)}</p>
       <p class="reference">${escape(this.local.reference)}</p></div>
-      <p><a href="/api/verity/verify">Verify with GitHub or renew a connection</a></p>
+      <p><a href="/api/verity/verify">Verify an account or renew a connection</a></p>
       <p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p>
       ${connections.map((e) => this.connection(e)).join('')}
       <form action="/logout" method="post"><button>Sign out</button></form>`,

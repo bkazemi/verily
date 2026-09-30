@@ -122,7 +122,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
 
     assert.match(login.headers.get('set-cookie')!, /verity_owner=.*HttpOnly; Secure; SameSite=Lax/);
-    assert.match(await (await request('/', { headers: { cookie } })).text(), /Verify with GitHub/);
+    assert.match(await (await request('/', { headers: { cookie } })).text(), /Verify an account/);
     await mf.dispose();
 
     mf = new Miniflare({
@@ -132,7 +132,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
 
     const settings = await request('/', { headers: { cookie } });
 
-    assert.match(await settings.text(), /Verify with GitHub/);
+    assert.match(await settings.text(), /Verify an account/);
 
     const start = await post('/api/verity/sessions', 'kind=connect', cookie);
 
