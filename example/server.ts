@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import {
   createVerity,
   discordProvider,
+  youtubeProvider,
   githubProvider,
   nodeHandler,
   Pool,
@@ -38,10 +39,18 @@ const providers = [
         }),
       ]
     : []),
+  ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    ? [
+        youtubeProvider({
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        }),
+      ]
+    : []),
 ];
 
 if (!providers.length)
-  throw new Error('Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or the DISCORD_ pair, or both');
+  throw new Error('Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or the DISCORD_ or GOOGLE_ pair');
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const storage = new PostgresStorage(pool, process.env.VERITY_NAMESPACE ?? 'verity');

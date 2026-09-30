@@ -96,8 +96,9 @@ Sign-in methods need an app registered with the provider, and each site running 
 
 - **GitHub:** [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) and set its callback URL. An OAuth app has only one, so development and production each need their own app.
 - **Discord:** create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the callback URL under **OAuth2 → Redirects**. One application can list several. Discord shows the client secret only when you reset it.
+- **YouTube:** in the [Google Cloud console](https://console.cloud.google.com/), enable the YouTube Data API v3, create an OAuth client of type **Web application**, and add the callback URL as an authorized redirect URI. One client can list several. The `youtube.readonly` scope is sensitive: until Google verifies your app, users see an unverified-app warning and the project can only ever be used by 100 accounts, so apply for verification before offering it publicly. Reading the channel is free, within the default quota of 10,000 units a day.
 
-Pass the app's client id and secret to `githubProvider()` or `discordProvider()`, and keep them on the server. The other methods need no registration.
+Pass the app's client id and secret to `githubProvider()`, `discordProvider()` or `youtubeProvider()`, and keep them on the server. The other methods need no registration.
 
 ### 3. Mount it
 
@@ -172,6 +173,7 @@ To match your site's look, set any of these CSS variables on an ancestor: `--ver
 import {
   githubProvider,
   discordProvider,
+  youtubeProvider,
   githubGistProvider,
   linkProvider,
   githubLinkProvider,
@@ -183,6 +185,7 @@ import {
 | ---------------------- | ------------------------------------------------------------------------------------- | --------------------------------------- |
 | `githubProvider()`     | signing in with GitHub.                                                               | A GitHub OAuth app.                     |
 | `discordProvider()`    | signing in with Discord.                                                              | A Discord application.                  |
+| `youtubeProvider()`    | signing in with Google and choosing their YouTube channel.                            | A Google OAuth client.                  |
 | `githubGistProvider()` | publishing a public gist containing a line Verity gives them.                         | None.                                   |
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                     | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile.               | The local account needs a `profileUrl`. |
@@ -252,12 +255,12 @@ setInterval(
 
 Clone the repository and run `npm ci`. `npm run preview` then shows the badge in every state at http://localhost:3001, with no other setup.
 
-The full example also needs Postgres and a GitHub OAuth app or a Discord application (or both) with the callback URL `http://localhost:3000/api/verity/callback`:
+The full example also needs Postgres and a GitHub OAuth app, a Discord application or a Google OAuth client (any of them) with the callback URL `http://localhost:3000/api/verity/callback`:
 
 ```sh
 npm run build
 docker compose up -d --wait
-cp example/.env.example .env   # add GitHub and/or Discord credentials, and a long EXAMPLE_PASSWORD
+cp example/.env.example .env   # add credentials for at least one sign-in, and a long EXAMPLE_PASSWORD
 node --env-file=.env --import tsx example/server.ts
 ```
 

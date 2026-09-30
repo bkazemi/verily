@@ -29,6 +29,8 @@ export { githubProvider } from './github.js';
 
 export { discordProvider } from './discord.js';
 
+export { youtubeProvider } from './youtube.js';
+
 export { githubGistProvider } from './github-gist.js';
 
 export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './link.js';

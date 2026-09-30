@@ -5,6 +5,7 @@ import { styleVersion } from '../src/server/style.js';
 import {
   createVerity,
   discordProvider,
+  youtubeProvider,
   githubLinkProvider,
   githubProvider,
 } from '../src/server/index.js';
@@ -27,6 +28,9 @@ export interface Env {
   /** Discord sign-in is offered only when both are set. */
   DISCORD_CLIENT_ID?: string;
   DISCORD_CLIENT_SECRET?: string;
+  /** YouTube sign-in is offered only when both are set. */
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   OWNER_KEY: string;
 }
 
@@ -170,8 +174,8 @@ export class VerityStore {
     this.app = createVerity({
       storage: new CloudflareStorage(ctx.storage),
       // Two ways of showing one GitHub account. Whichever is used first is the record's
-      // main method, and the other is listed beneath it once used. Discord is offered
-      // only when its secrets are set.
+      // main method, and the other is listed beneath it once used. Discord and YouTube
+      // are offered only when their secrets are set.
       providers: [
         githubProvider({
           clientId: env.GITHUB_CLIENT_ID,
@@ -183,6 +187,14 @@ export class VerityStore {
               discordProvider({
                 clientId: env.DISCORD_CLIENT_ID,
                 clientSecret: env.DISCORD_CLIENT_SECRET,
+              }),
+            ]
+          : []),
+        ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+          ? [
+              youtubeProvider({
+                clientId: env.GOOGLE_CLIENT_ID,
+                clientSecret: env.GOOGLE_CLIENT_SECRET,
               }),
             ]
           : []),
