@@ -4,6 +4,8 @@
 //
 // Secrets are never set here. Use `wrangler secret put NAME` for:
 //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, OWNER_KEY
+// and, to offer Discord sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET.
+// The Discord application needs <PUBLIC_ORIGIN>/api/verity/callback as a redirect.
 //
 // Those two GitHub secrets are only needed by githubProvider(), the sign-in
 // method, which is what cloudflare/worker.ts is wired to. The holder-paced

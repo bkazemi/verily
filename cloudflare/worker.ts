@@ -2,7 +2,12 @@ import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/wor
 import { externalName, localSide, statusLabel, type Evidence } from '../src/core/index.js';
 import { logo } from '../src/logo.js';
 import { styleVersion } from '../src/server/style.js';
-import { createVerity, githubLinkProvider, githubProvider } from '../src/server/index.js';
+import {
+  createVerity,
+  discordProvider,
+  githubLinkProvider,
+  githubProvider,
+} from '../src/server/index.js';
 import { CloudflareStorage } from './storage.js';
 import { OwnerAuth } from './auth.js';
 import type { LocalKind } from '../src/core/index.js';
@@ -19,6 +24,9 @@ export interface Env {
   REPORT_URL: string;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
+  /** Discord sign-in is offered only when both are set. */
+  DISCORD_CLIENT_ID?: string;
+  DISCORD_CLIENT_SECRET?: string;
   OWNER_KEY: string;
 }
 
@@ -162,13 +170,22 @@ export class VerityStore {
     this.app = createVerity({
       storage: new CloudflareStorage(ctx.storage),
       // Two ways of showing one GitHub account. Whichever is used first is the record's
-      // main method, and the other is listed beneath it once used.
+      // main method, and the other is listed beneath it once used. Discord is offered
+      // only when its secrets are set.
       providers: [
         githubProvider({
           clientId: env.GITHUB_CLIENT_ID,
           clientSecret: env.GITHUB_CLIENT_SECRET,
         }),
         githubLinkProvider(),
+        ...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET
+          ? [
+              discordProvider({
+                clientId: env.DISCORD_CLIENT_ID,
+                clientSecret: env.DISCORD_CLIENT_SECRET,
+              }),
+            ]
+          : []),
       ],
       baseUrl: `${env.PUBLIC_ORIGIN}/api/verity`,
       siteName: env.SITE_NAME,

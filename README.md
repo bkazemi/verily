@@ -92,7 +92,12 @@ const verity = createVerity({
 | `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                          |
 | `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in.           |
 
-For GitHub sign-in, [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) with the callback URL `<baseUrl>/callback`. For Discord sign-in, create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the same callback URL as an OAuth2 redirect.
+Sign-in methods need an app registered with the provider, and each site running Verity registers its own. The callback URL is always `<baseUrl>/callback`, so for `baseUrl: 'https://example.com/api/verity'` it is `https://example.com/api/verity/callback`. The provider redirects only to URLs registered in advance, so each place you run Verity, a local one for development included, needs its callback registered.
+
+- **GitHub:** [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) and set its callback URL. An OAuth app has only one, so development and production each need their own app.
+- **Discord:** create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the callback URL under **OAuth2 → Redirects**. One application can list several. Discord shows the client secret only when you reset it.
+
+Pass the app's client id and secret to `githubProvider()` or `discordProvider()`, and keep them on the server. The other methods need no registration.
 
 ### 3. Mount it
 
