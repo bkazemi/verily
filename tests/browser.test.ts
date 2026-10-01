@@ -819,7 +819,19 @@ test('the version stamped on a record is the one the package ships', async () =>
   const { version } = await import('../src/version.js');
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
-  assert.equal(version, `v${manifest.version.split('.')[0]}`);
+  assert.equal(version, `v${manifest.version}`);
+});
+
+test('the dialog shows the full version beside the logotype, as text', async () => {
+  const { version } = await import('../src/version.js');
+
+  const { dialog } = await connectHarness(async (path) =>
+    path === '/methods' ? connectMethods : approvalView,
+  );
+
+  const footer = dialog.all().find((e) => e.tagName === 'footer')!;
+
+  assert.equal(footer.all().find((e) => e.tagName === 'span')!.textContent, version);
 });
 
 /**
