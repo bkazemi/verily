@@ -79,7 +79,8 @@ function secureOrigin(value: string) {
 
 /**
  * The registered sites, from the `SITES` variable, each with its key from the secret
- * `SITE_<ID>_KEY`. Anything wrong refuses to start rather than serving a site half set up.
+ * `SITE_<ID>_KEY`. Anything wrong in the list refuses to start rather than serving a site
+ * half set up. A site whose key is missing or malformed is left out instead.
  */
 export function registry(config: unknown, secrets: Record<string, unknown>): Map<string, Site> {
   const list: unknown = typeof config === 'string' ? JSON.parse(config) : (config ?? []);
@@ -106,9 +107,6 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
       if (typeof url !== 'string' || new URL(url).origin !== origin)
         throw new Error(`Site ${id} must authorize and return on its own origin`);
 
-    if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(key))
-      throw new Error(`Site ${id} needs a random base64url key of at least 32 bytes`);
-
     if (
       providers !== undefined &&
       (!Array.isArray(providers) ||
@@ -124,6 +122,14 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
         visibility.some((v) => v !== 'public' && v !== 'unlisted'))
     )
       throw new Error(`Site ${id} must list "public", "unlisted" or both, or no visibility at all`);
+
+    // A secret is set apart from a deployment and cannot be checked before one. A wrong
+    // one leaves its own site unserved, and never takes the rest of the instance with it.
+    if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(key)) {
+      console.error(`Site ${id} is not served: it needs a base64url key of at least 32 bytes`);
+
+      continue;
+    }
 
     sites.set(id, {
       id,
