@@ -164,7 +164,12 @@ export function accountCard(
   return card;
 }
 
-function render(content: HTMLElement, evidence: Evidence) {
+/**
+ * One linked account: its state, how it was shown and when, on a card of its own. A
+ * subject with several accounts gets one of these each, since a provider authenticates and
+ * expires on its own terms and none of that may be read across to another's card.
+ */
+function externalCard(evidence: Evidence) {
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
   const status = statusLabel(evidence, Date.now());
   const provider = evidence.providerName;
@@ -175,10 +180,16 @@ function render(content: HTMLElement, evidence: Evidence) {
   // what a reader checks the claim against, and a plain click on the pill opens this
   // dialog rather than that page, so the way there belongs here.
   const attribution = node('div', 'via: ', 'muted');
-  const verifier = outward(node('a', evidence.verifierName), evidence.evidenceUrl);
 
-  verifier.title = `View this record at ${evidence.verifierName} (opens in a new tab)`;
-  attribution.append(verifier);
+  // An unlisted record has no page a reader could open, so the verifier is named and
+  // not linked: a link there would lead to a page that refuses them.
+  if (evidence.visibility === 'public') {
+    const verifier = outward(node('a', evidence.verifierName), evidence.evidenceUrl);
+
+    verifier.title = `View this record at ${evidence.verifierName} (opens in a new tab)`;
+    attribution.append(verifier);
+  } else attribution.append(document.createTextNode(evidence.verifierName));
+
   copy.append(node('div', status, 'state'), attribution);
 
   summary.append(verificationMark(current ? 'current' : 'inactive'), copy);
@@ -206,24 +217,9 @@ function render(content: HTMLElement, evidence: Evidence) {
   }
 
   const names = { site: evidence.siteName, provider };
-
-  // Each card says what it is. Without that the pair is two unlabelled boxes.
-  const local = localSide(evidence.local, evidence.siteName);
-
-  const localCard = accountCard(
-    [document.createTextNode(local.heading)],
-    local.value,
-    // The heading names the site and the label names the subject, so the site's own
-    // reference adds a third line saying the same thing. The provider id on the other
-    // card stays: that one is the provider's identifier, not the site's own wording.
-    undefined,
-    evidence.local.profileUrl,
-    ...attestationNote(evidence.attestations.local, names),
-  );
-
   const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
-  const externalCard = accountCard(
+  return accountCard(
     // The mark and the name, or just the name. A mark that falls back to writing the name
     // would print it twice here, since this heading writes it either way.
     logo ? [logo, document.createTextNode(provider)] : [document.createTextNode(provider)],
@@ -237,11 +233,36 @@ function render(content: HTMLElement, evidence: Evidence) {
     ...evidence.attestations.external.slice(1).flatMap((a) => attestationNote(a, names, true)),
     dates,
   );
+}
+
+/**
+ * The subject once, then each account linked to it on its own card, in the order they
+ * were connected. Every record given is of the one subject, which the caller has checked.
+ */
+function render(content: HTMLElement, records: Evidence[]) {
+  const [first] = records as [Evidence, ...Evidence[]];
+
+  // Each card says what it is. Without that the pair is two unlabelled boxes.
+  const local = localSide(first.local, first.siteName);
+
+  const localCard = accountCard(
+    [document.createTextNode(local.heading)],
+    local.value,
+    // The heading names the site and the label names the subject, so the site's own
+    // reference adds a third line saying the same thing. The provider id on the other
+    // card stays: that one is the provider's identifier, not the site's own wording.
+    undefined,
+    first.local.profileUrl,
+    ...attestationNote(first.attestations.local, {
+      site: first.siteName,
+      provider: first.providerName,
+    }),
+  );
 
   content.replaceChildren(
     localCard,
     linkMark(),
-    externalCard,
+    ...records.map(externalCard),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
     // the card they came from, and a second provider on this subject gets its own card.
     node(
@@ -260,8 +281,15 @@ function render(content: HTMLElement, evidence: Evidence) {
  */
 export function openEvidenceDialog(
   opener: HTMLElement,
-  load: () => Promise<Evidence>,
-  opened?: Evidence,
+  load: () => Promise<Evidence | Evidence[]>,
+  opened?: Evidence | Evidence[],
+  /**
+   * Turns the records held into the cards drawn, each time they are drawn. The dialog
+   * keeps the records as they were read and arranges them afresh at every deadline: which
+   * record speaks for an account depends on which are still good, and that changes with
+   * the clock, not only with what is read.
+   */
+  arrange: (records: Evidence[]) => Evidence[] = (records) => records,
 ): void {
   const existing = openDialogs.get(opener);
 
@@ -302,13 +330,39 @@ export function openEvidenceDialog(
   let drawn: string | undefined;
 
   /** Redraws only for a record that reads differently from the one already on screen. */
-  const draw = (evidence: Evidence) => {
-    const key = JSON.stringify([evidence, statusLabel(evidence, Date.now())]);
+  const draw = (given: Evidence | Evidence[]) => {
+    const records = arrange([given].flat());
+    const key = JSON.stringify(records.map((e) => [e, statusLabel(e, Date.now())]));
 
     if (key === drawn) return;
 
     drawn = key;
-    render(content, evidence);
+    render(content, records);
+  };
+
+  /**
+   * Redraws at the moment the next record runs out, where that comes before the next check
+   * would notice, and then waits on the one after. Each account reaches its own deadline,
+   * so with several the first must not be the only one that is watched.
+   */
+  const watch = (given: Evidence | Evidence[]) => {
+    clearTimeout(expiryTimer);
+
+    const remaining = Math.min(
+      ...[given]
+        .flat()
+        .filter((e) => e.status === 'verified' && e.expiresAt > Date.now())
+        .map((e) => e.expiresAt - Date.now()),
+    );
+
+    if (remaining > 30000) return;
+
+    expiryTimer = setTimeout(() => {
+      if (!dialog.open) return;
+
+      draw(given);
+      watch(given);
+    }, remaining);
   };
 
   const refresh = async () => {
@@ -321,15 +375,8 @@ export function openEvidenceDialog(
 
       if (!dialog.open) return;
 
-      clearTimeout(expiryTimer);
       draw(evidence);
-      const remaining = evidence.expiresAt - Date.now();
-
-      if (evidence.status === 'verified' && remaining > 0 && remaining <= 30000) {
-        expiryTimer = setTimeout(() => {
-          if (dialog.open) draw(evidence);
-        }, remaining);
-      }
+      watch(evidence);
     } catch {
       clearTimeout(expiryTimer);
       drawn = undefined;
@@ -369,12 +416,15 @@ export function openEvidenceDialog(
       clearTimeout(expiryTimer);
       openDialogs.delete(opener);
       host.remove();
-      opener.firstElementChild?.shadowRoot?.querySelector<HTMLElement>('a, [tabindex]')?.focus();
+
+      opener.firstElementChild?.shadowRoot
+        ?.querySelector<HTMLElement>('a, button, [tabindex]')
+        ?.focus();
     },
     { once: true },
   );
 
-  if (opened) draw(opened);
+  if (opened && [opened].flat().length) draw(opened);
 
   dialog.showModal();
   void refresh();

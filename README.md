@@ -160,6 +160,14 @@ Clicking the badge opens the verification details:
   <img src="docs/images/dialog.png" alt="The verification details dialog: the local account, the linked GitHub account, its status, and when it was approved, expires and was last checked" width="448" />
 </p>
 
+A user with several accounts gets one badge for all of them. Give it every connection id, in any order:
+
+```html
+<verity-badge backend-url="/api/verity" connection-ids="ID_ONE ID_TWO ID_THREE"></verity-badge>
+```
+
+It shows the account that was connected first, then how many more there are, such as `+2`. Clicking it opens the same details, with each account on its own card in the order they were connected. Only accounts that are verified now are counted, and one of those leads if the first has lapsed. An account that appears on more than one record, because it was shown a second way or removed and connected again, is shown once. The ids must all belong to the same user.
+
 The badge refreshes every 30 seconds, and only ever reads public evidence. The client can also start and end connections, and draw a badge into an element of your own:
 
 ```js
@@ -278,7 +286,15 @@ const { [user.id]: connections } = await verity.connections([user.id]);
 const verified = connections.filter((c) => c.status === 'verified');
 ```
 
-Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. A public one can also be shown with the [badge](#show-the-badge), pointed at the instance. `connections()` takes any number of ids, so read a whole page of users in one call, and cache the answer briefly.
+To show them, hand the records to the badge. It draws them as given and fetches nothing, so it works for unlisted links, which a browser cannot read for itself:
+
+```html
+<verity-badge connections="[...the records, as JSON...]"></verity-badge>
+```
+
+From script, set the property instead: `badge.connections = records`. Send a page only the records its reader may see: whatever is in the page, the reader has. Several records become one badge, as under [Show the badge](#show-the-badge), and an unlisted one opens its details without linking anywhere.
+
+Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. `connections()` takes any number of ids, so read a whole page of users in one call, and cache the answer briefly.
 
 If you would rather your user ids never left your site, send a stand-in:
 

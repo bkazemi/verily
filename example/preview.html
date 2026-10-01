@@ -296,6 +296,13 @@
         </div>
         <div class="state-grid">
           <div class="state">
+            <span class="eyebrow">Several accounts</span
+            ><verity-badge
+              backend-url="/api/verity"
+              connection-ids="signed current signed-in"
+            ></verity-badge>
+          </div>
+          <div class="state">
             <span class="eyebrow">Expired</span
             ><verity-badge backend-url="/api/verity" connection-id="expired"></verity-badge>
           </div>

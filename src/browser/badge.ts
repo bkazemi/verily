@@ -17,6 +17,7 @@ const styles = `
   a[href]:hover, button.badge:hover { background: var(--verity-hover, #f3f6f4); border-color: var(--verity-border, #dce2e0); }
   .badge:focus-visible { outline: 2px solid #357ce5; outline-offset: 2px; }
   .name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+  .more { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--verity-muted, #65726c); }
   .label { display: none; font-size: 11px; color: var(--verity-muted, #65726c); }
   .badge:hover .label, .badge:focus-within .label { display: inline; }
   .icon { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 750; }
@@ -79,7 +80,11 @@ function badgeSheet(): CSSStyleSheet {
  * badge that was pending and is now verified therefore resolves in place, rather than
  * being torn down and built again where the reader can see it happen.
  */
-function frame(element: HTMLElement, state: string): { pill: HTMLElement; mark: SVGSVGElement } {
+function frame(
+  element: HTMLElement,
+  state: string,
+  button = false,
+): { pill: HTMLElement; mark: SVGSVGElement } {
   let frame = frames.get(element);
 
   shown.delete(element);
@@ -95,7 +100,7 @@ function frame(element: HTMLElement, state: string): { pill: HTMLElement; mark: 
     element.replaceChildren(host);
   }
 
-  const tag = state === 'message' ? 'span' : state === 'connect' ? 'button' : 'a';
+  const tag = state === 'message' ? 'span' : state === 'connect' || button ? 'button' : 'a';
 
   if (!frame.pill || frame.pill.tagName.toLowerCase() !== tag) {
     frame.pill = document.createElement(tag);
@@ -143,8 +148,16 @@ export function badgeShown(element: HTMLElement): boolean {
 }
 
 /** Everything the pill draws: equal keys mean an identical pill. */
-function renderKey(evidence: Evidence, current: boolean, label: string): string {
+function renderKey(
+  evidence: Evidence,
+  current: boolean,
+  label: string,
+  more: number,
+  linked: boolean,
+): string {
   return JSON.stringify([
+    more,
+    linked,
     evidence.provider,
     evidence.providerName,
     externalName(evidence.external),
@@ -212,29 +225,40 @@ export function renderBadgeMessage(element: HTMLElement, message: string): void 
 /**
  * Draws the pill, or returns null when the host already shows exactly this evidence:
  * a periodic refresh that changes nothing must not disturb what is on screen.
+ *
+ * `more` is how many further accounts of the same subject stand behind the one shown, said
+ * as a count beside it. `linked` is whether the record has a page of its own a reader can
+ * open: an unlisted one has none, so its pill is a button and never a link to nowhere.
  */
-export function renderBadge(element: HTMLElement, evidence: Evidence): HTMLAnchorElement | null {
+export function renderBadge(
+  element: HTMLElement,
+  evidence: Evidence,
+  { more = 0, linked = true }: { more?: number; linked?: boolean } = {},
+): HTMLElement | null {
   const provider = evidence.providerName;
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
   const state = current ? 'verified' : evidence.status === 'revoked' ? 'revoked' : 'expired';
 
   const label = statusLabel(evidence, Date.now());
 
-  const key = renderKey(evidence, current, label);
+  const key = renderKey(evidence, current, label, more, linked);
 
   if (intact(element) && shown.get(element) === key) return null;
 
   const handle = externalName(evidence.external);
-  const { pill, mark } = frame(element, state);
-  const badge = pill as HTMLAnchorElement;
+  const { pill: badge, mark } = frame(element, state, !linked);
+  const others = more ? ` and ${more} more` : '';
 
   paintMark(mark, current ? 'current' : 'inactive');
-  badge.href = evidence.evidenceUrl;
-  badge.rel = 'noreferrer';
+
+  if (linked) {
+    (badge as HTMLAnchorElement).href = evidence.evidenceUrl;
+    (badge as HTMLAnchorElement).rel = 'noreferrer';
+  } else (badge as HTMLButtonElement).type = 'button';
 
   badge.setAttribute(
     'aria-label',
-    `${provider} ${handle}: ${label} | via: ${evidence.verifierName} | inspect verification`,
+    `${provider} ${handle}${others}: ${label} | via: ${evidence.verifierName} | inspect verification`,
   );
 
   // The provider and handle are already visible in the pill itself.
@@ -246,6 +270,9 @@ export function renderBadge(element: HTMLElement, evidence: Evidence): HTMLAncho
 
   // A provider with no mark of its own is named instead, so the pill never drops it.
   badge.append(divider, logo ?? span('name', provider), span('name', handle));
+
+  // The accounts behind the one shown, as a number. Each has its own card in the dialog.
+  if (more) badge.append(span('more', `+${more}`));
 
   if (!current) {
     const icon = span('icon', '');

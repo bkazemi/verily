@@ -97,6 +97,12 @@ export interface Connection {
   visibilityApprovedAt: number;
   authenticatedAt: number;
   approvedAt: number;
+  /**
+   * When the record was first made. A renewal moves every other time on the record forward
+   * and never this one, which is what says the order a subject's accounts were connected
+   * in. Absent on records written before it was kept.
+   */
+  connectedAt?: number;
   expiresAt: number;
   revokedAt?: number;
   /** Who removed it: the local holder, the external holder, or a withdrawal the provider read. */
@@ -305,6 +311,12 @@ export interface Evidence {
   verifierName: string;
   visibility: Visibility;
   status: Status;
+  /**
+   * When the record was first made, which no renewal changes. A subject's accounts are
+   * shown in this order, earliest first. For a record older than this field it is the
+   * earliest time the record still carries.
+   */
+  connectedAt: number;
   authenticatedAt: number;
   approvedAt: number;
   visibilityApprovedAt: number;
