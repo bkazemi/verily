@@ -179,7 +179,6 @@ export class VerityStore {
   private readonly auth: OwnerAuth;
   private readonly sites: Sites;
   private readonly local: LocalAccount;
-  private readonly formAction: string;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -198,8 +197,6 @@ export class VerityStore {
     );
 
     const siteOrigins = [...this.sites.sites.values()].map((site) => site.origin);
-
-    this.formAction = ["form-action 'self'", ...siteOrigins].join(' ');
 
     this.local = {
       id: 'site-owner',
@@ -248,8 +245,6 @@ export class VerityStore {
       // Every site's origin, since the library checks one list. That a subject's profile
       // is on its own site's origin is checked when its handoff arrives.
       profileOrigins: [new URL(env.OWNER_PROFILE_URL).origin, ...siteOrigins],
-      // A flow's result redirects the approval form on to the site it came from.
-      formTargets: siteOrigins,
       reportUrl: env.REPORT_URL,
       // A site session is the more specific: it was opened for this holder moments ago.
       authenticate: async (request) =>
@@ -300,12 +295,20 @@ export class VerityStore {
       response = html('Temporarily unavailable', '', 503);
     }
 
-    // A disconnect form redirects on to the holder's site, and Chromium holds a form's
-    // redirects to form-action, as the library does its own approval form's.
-    if (!new URL(request.url).pathname.startsWith('/api/verity/'))
+    // An approval or disconnect form redirects on to the holder's site, and Chromium holds
+    // a form's redirects to form-action. Only a holder that site sent here is told its
+    // origin, and only that one: named on every response, the policy would tell any visitor
+    // which sites this instance serves.
+    const policy = response.headers.get('Content-Security-Policy');
+    const found = policy ? await this.sites.session(request).catch(() => undefined) : undefined;
+
+    if (policy && found)
       response.headers.set(
         'Content-Security-Policy',
-        safeHeaders['Content-Security-Policy'].replace("form-action 'self'", this.formAction),
+        policy.replace(
+          /form-action [^;]*/,
+          (allowed) => `${allowed} ${this.site(found.session).origin}`,
+        ),
       );
 
     return response;

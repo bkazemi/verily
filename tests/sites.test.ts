@@ -371,7 +371,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     assert.match(
       review.headers.get('content-security-policy')!,
-      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test https:\/\/other\.test https:\/\/quiet\.test/,
+      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test$/,
     );
 
     const approved = await a.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
@@ -435,7 +435,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // Its disconnect form redirects on to the site, which form-action has to allow.
     assert.match(
       landing.headers.get('content-security-policy')!,
-      /form-action 'self' https:\/\/partner\.test https:\/\/other\.test https:\/\/quiet\.test$/,
+      /form-action 'self' https:\/\/partner\.test$/,
     );
 
     assert.match(settings, /<h1>Your connections<\/h1>/);
@@ -990,6 +990,68 @@ test('the site client carries a holder through the instance and reads the link b
     assert.equal(read['u-9']![0]!.external.handle, 'octocat');
     assert.equal(read['u-9']![0]!.siteName, 'Quiet');
     assert.equal(read['u-9']![0]!.local.reference, 'quiet-ABCD');
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('nothing the instance sends an outsider says which sites it serves', async () => {
+  const { mf, browser } = instance();
+
+  try {
+    // Each site's origin, and each way a page names a site.
+    const named = /partner|other\.test|quiet\.test|(on|Only|to) (Other|Quiet)\b/i;
+
+    /** Every header and the whole body, as one text to search. */
+    const everything = async (response: Awaited<ReturnType<Browser['fetch']>>) =>
+      `${[...response.headers].map(([name, value]) => `${name}: ${value}`).join('\n')}\n${await response.text()}`;
+
+    // A holder one site sent here, with a public record of the owner's to look at.
+    const member = browser('192.0.2.80');
+
+    await member.fetch(`/start?token=${handoff(await member.begin())}`);
+
+    const owner = browser('192.0.2.81');
+
+    await owner.post('/login', `key=${'a'.repeat(43)}`);
+    const flow = await owner.signIn('kind=connect');
+
+    await owner.post(`${flow}/approve`, 'action=approve&visibility=public');
+    const [record] = (await (await owner.fetch('/api/verity/mine')).json()) as { id: string }[];
+
+    const outsider = browser('192.0.2.82');
+
+    for (const path of [
+      '/',
+      '/nothing-here',
+      '/start?token=x',
+      '/site/connections',
+      '/begin?site=nowhere&purpose=connect',
+      '/api/verity/verify',
+      '/api/verity/published',
+      '/api/verity/style.css',
+      '/api/verity/mine',
+      `/api/verity/connections/${record!.id}`,
+      `/api/verity/connections/${record!.id}?format=json`,
+      `/api/verity/external-revoke/${record!.id}`,
+    ])
+      assert.doesNotMatch(await everything(await outsider.fetch(path)), named, path);
+
+    assert.doesNotMatch(await everything(await outsider.post('/login', 'key=wrong')), named);
+
+    // Signed in as the owner is an outsider to every site too.
+    assert.doesNotMatch(await everything(await owner.fetch('/')), named);
+    assert.doesNotMatch(await everything(await owner.fetch('/api/verity/verify')), named);
+
+    // The holder is told their own site, and no other.
+    const own = await everything(await member.fetch('/api/verity/verify'));
+
+    assert.match(
+      own,
+      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test\n/,
+    );
+
+    assert.doesNotMatch(own, /other\.test|quiet\.test/i);
   } finally {
     await mf.dispose();
   }
