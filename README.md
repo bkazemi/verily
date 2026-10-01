@@ -288,7 +288,19 @@ The authorize and return URLs the instance's operator registers for you are `<pr
 ></verity-connect>
 ```
 
-The element fires `verity-result` when a link is made, so read the user's connections again then. To let a user renew or remove a link, link to `verity.beginUrl('manage')`, which opens their links on the instance.
+The element fires `verity-result` when a link is made, so read the user's connections again then.
+
+Once a user has a link, show their badge in place of the pill, and give it the same two attributes. On the user's own page only: they mark the reader as the holder.
+
+```html
+<verity-badge
+  connections="[...the records, as JSON...]"
+  backend-url="https://verity.example/api/verity"
+  handoff-url="/api/verity/handoff"
+></verity-badge>
+```
+
+The badge's dialog then has Renew and Remove under each account, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verity-result` on each change. `verity.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
 
 **3. Read connections where you show them.**
 

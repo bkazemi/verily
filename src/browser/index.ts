@@ -12,7 +12,7 @@ import {
   type FlowView,
   type Methods,
 } from './connect-dialog.js';
-import { openEvidenceDialog } from './evidence-dialog.js';
+import { openEvidenceDialog, type Account, type Manage } from './evidence-dialog.js';
 
 export type { Evidence } from '../core/index.js';
 
@@ -31,6 +31,13 @@ export interface Result {
  */
 const latestGroup = new WeakMap<HTMLElement, Evidence[]>();
 const loaders = new WeakMap<HTMLElement, () => Promise<Evidence[]>>();
+
+/**
+ * What a host's dialog lets its reader do with the accounts shown, for a host whose page
+ * said its reader holds them: the holder's own badge, on a page only they are shown.
+ * Looked up when the dialog opens.
+ */
+const managers = new WeakMap<HTMLElement, Manage>();
 
 /** Where a host's records are no longer to be shown: an open dialog says so on its next read. */
 const unavailable = async (): Promise<Evidence[]> => {
@@ -88,7 +95,13 @@ function opens(element: HTMLElement, badge: HTMLElement) {
       return;
 
     event.preventDefault();
+    details(element);
+  };
+}
 
+/** Opens a host's dialog on the records it holds now. */
+function details(element: HTMLElement) {
+  {
     // The dialog opens on what the host holds, at full size, and the read that follows
     // either leaves it alone or replaces it. It is given the records themselves and groups
     // them into accounts each time it draws, so an account whose leading record runs out
@@ -113,8 +126,9 @@ function opens(element: HTMLElement, badge: HTMLElement) {
       },
       latestGroup.get(element),
       accounts,
+      managers.get(element),
     );
-  };
+  }
 }
 
 const live = (evidence: Evidence) =>
@@ -129,10 +143,13 @@ const live = (evidence: Evidence) =>
  * and the ways the others show it are listed beneath as further methods. Its lapsed
  * records are left out, having been replaced. Where none is verified, the latest one says
  * what became of it. Either way the account keeps the place of its first connection.
+ * Each entry names every record of the account not yet revoked, shown or not, so removing
+ * the account removes them all. One left behind, lapsed or unconfirmed, could be confirmed
+ * again later and bring the account back without its holder approving anything.
  *
  * A record from a backend older than `connectedAt` is placed by when it was approved.
  */
-function accounts(records: Evidence[]): Evidence[] {
+function accounts(records: Evidence[]): Account[] {
   const when = (e: Evidence) => e.connectedAt ?? e.approvedAt;
   const byAccount = new Map<string, Evidence[]>();
 
@@ -158,6 +175,7 @@ function accounts(records: Evidence[]): Evidence[] {
         ...base,
         connectedAt: when(sorted[0]!),
         attestations: { ...base.attestations, external },
+        links: sorted.filter((e) => e.status !== 'revoked').map((e) => e.id),
       };
     })
     .sort((a, b) => a.connectedAt - b.connectedAt);
@@ -395,14 +413,18 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
      * Opens the connect dialog over the current page. Resolves when it closes, with how
      * the last attempt in it ended. Call from a click: a sign-in method opens a window.
      */
-    openConnect(opener: HTMLElement = document.body): Promise<Result> {
+    openConnect(
+      opener: HTMLElement = document.body,
+      back?: () => void,
+      provider?: string,
+    ): Promise<Result> {
       if (remote && !handoffUrl)
         throw new Error('A backend on another origin requires a handoff URL');
 
       // Each opening is vouched for afresh, for whoever is signed in to this site now.
       session = undefined;
 
-      return openConnectDialog(opener, flows);
+      return openConnectDialog(opener, flows, back, provider);
     },
     /**
      * Draws the pill that opens the connect dialog. The host receives a `verity-result`
@@ -583,7 +605,12 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
         if (current()) withdraw(element);
       }
     },
-    disconnect: (id: string) => request(`/connections/${encodeURIComponent(id)}/disconnect`, {}),
+    disconnect(id: string) {
+      // On another origin this is vouched for afresh, as each opening of the dialog is.
+      if (remote) session = undefined;
+
+      return ask(`/connections/${encodeURIComponent(id)}/disconnect`, {});
+    },
     issueShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share`, {}),
     revokeShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share-revoke`, {}),
   };
@@ -762,7 +789,14 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
        * A badge may be placed before its connection is known: it then waits, showing the
        * pill's own frame, until `connection-id` names what it presents.
        */
-      static observedAttributes = ['backend-url', 'connection-id', 'connection-ids', 'connections'];
+      static observedAttributes = [
+        'backend-url',
+        'connection-id',
+        'connection-ids',
+        'connections',
+        'handoff-url',
+        'connect',
+      ];
 
       private handed?: unknown;
 
@@ -832,6 +866,37 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
           connectionId = this.getAttribute('connection-id');
 
         const written = this.getAttribute('connections');
+        const handoffUrl = this.getAttribute('handoff-url');
+
+        // The holder's own badge, where the page says so: its dialog connects another
+        // account, renews one and removes one, through the backend named. The host hears
+        // of each change in a `verity-result` event, to read its records again.
+        if (backendUrl && (handoffUrl !== null || this.getAttribute('connect') !== null)) {
+          const client = init({ backendUrl, handoffUrl: handoffUrl ?? undefined });
+
+          const changed = (detail: object) =>
+            this.dispatchEvent(
+              new CustomEvent('verity-result', { detail, bubbles: true, composed: true }),
+            );
+
+          managers.set(this, {
+            connect: (provider) => {
+              void client
+                .openConnect(this, () => details(this), provider)
+                .then((result) => {
+                  if (result.outcome === 'complete') changed(result);
+                });
+            },
+            // One at a time, each told as it goes: if a later one fails, the host still
+            // hears of those that went and reads its records again.
+            remove: async (ids) => {
+              for (const id of ids) {
+                await client.disconnect(id);
+                changed({ outcome: 'removed', connectionId: id });
+              }
+            },
+          });
+        } else managers.delete(this);
 
         if (this.handed !== undefined || written !== null) {
           let records = this.handed;

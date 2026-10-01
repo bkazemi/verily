@@ -77,6 +77,15 @@ class Element {
     this.parentNode = undefined;
   }
 
+  /** Puts elements in ahead of this one, where it sits. */
+  before(...added: Element[]) {
+    const siblings = this.parentNode!.children;
+
+    for (const one of added) one.parentNode = this.parentNode;
+
+    siblings.splice(siblings.indexOf(this), 0, ...added);
+  }
+
   get nextSibling(): Element | undefined {
     const siblings = this.parentNode?.children ?? [];
 
@@ -1175,6 +1184,12 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     getAttribute(name: string) {
       return this.attributes[name] ?? null;
     }
+
+    dispatched: { type: string; detail: unknown }[] = [];
+
+    dispatchEvent(event: { type: string; detail: unknown }) {
+      this.dispatched.push(event);
+    }
   }
 
   const element = (tag: string) => {
@@ -1200,6 +1215,16 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     Object,
     queueMicrotask,
     HTMLElement: Host,
+    CustomEvent: class {
+      detail: unknown;
+
+      constructor(
+        readonly type: string,
+        init: { detail: unknown },
+      ) {
+        this.detail = init.detail;
+      }
+    },
     customElements: {
       get: (name: string) => defined[name],
       define: (name: string, constructor: new () => Element) => (defined[name] = constructor),
@@ -1231,7 +1256,7 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
       // Held back on request, to model an answer that arrives after the page has moved on.
       await hold?.();
 
-      return { ok: id in served, json: async () => served[id] };
+      return { ok: id in served, json: async () => served[id], headers: { get: () => null } };
     },
   });
 
@@ -1267,7 +1292,7 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     }
   };
 
-  return { verity, asked, cards, defined, polls, upgrade };
+  return { verity, asked, cards, defined, polls, upgrade, body };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -1877,4 +1902,240 @@ test('an open dialog does not show a read the host moved on from while it was ou
   assert.equal(shown.length, 2);
   assert.match(shown[1]!.textContent, /@carol/);
   assert.ok(!opened.dialog.textContent.includes('@bob'));
+});
+
+test("a holder's own badge connects, renews and removes from its dialog, and comes back", async () => {
+  const { defined, asked, cards, body } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    disconnect: { ok: true },
+  });
+
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+    dispatched: { type: string; detail: unknown }[];
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const labelled = (within: Element, text: string) =>
+    within.find('button').find((b) => b.textContent === text);
+
+  // Anyone else's view of the same accounts: nothing to do but read.
+  const shown = new Badge();
+
+  shown.connections = [linked('a', 'alice', 100, { visibility: 'unlisted' })];
+  shown.connectedCallback();
+  await settle();
+
+  const read = await cards(shown);
+
+  assert.equal(labelled(read.dialog, 'Add account'), undefined);
+  assert.equal(labelled(read.dialog, 'Remove'), undefined);
+  read.dialog.close();
+
+  // The holder's own, which the page marks by naming where a handoff comes from.
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
+  badge.attributes['handoff-url'] = '/api/verity/handoff';
+
+  badge.connections = [
+    linked('a', 'alice', 100, { visibility: 'unlisted' }),
+    linked('b', 'bob', 200, { visibility: 'unlisted', status: 'revoked', revokedAt: 300 }),
+  ];
+
+  badge.connectedCallback();
+  await settle();
+
+  const { dialog, cards: accounts } = await cards(badge);
+
+  // An account still linked can be renewed or removed. One already removed cannot.
+  assert.ok(labelled(accounts[1]!, 'Renew'));
+  assert.ok(labelled(accounts[1]!, 'Remove'));
+  assert.equal(labelled(accounts[2]!, 'Remove'), undefined);
+
+  // Connecting another opens the connect dialog in this one's place, with a way back.
+  labelled(dialog, 'Add account')!.listeners['click']![0]!({});
+  await settle();
+
+  const open = () => body.all().filter((found) => found.tagName === 'dialog' && found.open);
+
+  assert.equal(dialog.open, false);
+
+  const [connect] = open();
+
+  assert.equal(connect!.find('h2')[0]!.textContent, 'Verify an account');
+
+  const back = connect!.find('button').find((b) => b.attributes['aria-label'] === 'Back')!;
+
+  back.listeners['click']![0]!({});
+  await settle();
+
+  const [details] = open();
+
+  assert.equal(details!.find('h2')[0]!.textContent, 'Verification details');
+
+  // Removing asks once more, then removes through the backend and tells the host.
+  const row = details!.all().filter((e) => e.className.includes('account'))[1]!;
+
+  labelled(row, 'Remove')!.listeners['click']![0]!({});
+  assert.match(row.textContent, /Remove this link\?/);
+  assert.equal(asked.includes('disconnect'), false);
+
+  labelled(row, 'Remove')!.listeners['click']![0]!({});
+  await settle();
+  await settle();
+
+  assert.deepEqual(asked.slice(-3), ['handoff', 'session', 'disconnect']);
+
+  const told = badge.dispatched.at(-1)!;
+
+  assert.equal(told.type, 'verity-result');
+  assert.equal(JSON.stringify(told.detail), '{"outcome":"removed","connectionId":"a"}');
+
+  // The dialog shows it removed at once, before the page hands over new records.
+  const after = details!.all().filter((e) => e.className.includes('account'))[1]!;
+
+  assert.match(after.textContent, /Revoked/i);
+  assert.equal(labelled(after, 'Remove'), undefined);
+});
+
+test('removing an account that stands on several records removes every one of them', async () => {
+  const { defined, asked, cards } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    disconnect: { ok: true },
+  });
+
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+    dispatched: { type: string; detail: unknown }[];
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const labelled = (within: Element, text: string) =>
+    within.find('button').find((b) => b.textContent === text);
+
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
+  badge.attributes['handoff-url'] = '/api/verity/handoff';
+
+  // One account shown two ways, signed in and by a published proof, with a third record
+  // that could not be confirmed lately and so is not shown. One card.
+  const alice = { id: 'ext-alice', handle: 'alice', profileUrl: 'https://github.com/alice' };
+
+  badge.connections = [
+    linked('a', 'alice', 100, { external: alice }),
+    linked('c', 'alice', 150, {
+      external: alice,
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: [
+          {
+            by: 'provider',
+            method: 'gist',
+            artifactUrl: 'https://gist.github.com/alice/abc',
+            expect: 'verity-token',
+            confirmedAt: 2,
+          },
+        ],
+      },
+    }),
+    linked('d', 'alice', 175, { external: alice, status: 'unconfirmed' }),
+    linked('e', 'alice', 50, { external: alice, status: 'revoked', revokedAt: 60 }),
+  ];
+
+  badge.connectedCallback();
+  await settle();
+
+  const { dialog, cards: accounts } = await cards(badge);
+
+  assert.equal(accounts.length, 2);
+
+  labelled(accounts[1]!, 'Remove')!.listeners['click']![0]!({});
+  labelled(accounts[1]!, 'Remove')!.listeners['click']![0]!({});
+
+  for (let i = 0; i < 9; i++) await settle();
+
+  // Every record still standing goes, the unconfirmed one too, and the host hears of each.
+  // The one already revoked is not asked for again.
+  assert.equal(asked.filter((id) => id === 'disconnect').length, 3);
+
+  assert.deepEqual(
+    badge.dispatched.slice(-3).map((told) => JSON.stringify(told.detail)),
+    [
+      '{"outcome":"removed","connectionId":"a"}',
+      '{"outcome":"removed","connectionId":"c"}',
+      '{"outcome":"removed","connectionId":"d"}',
+    ],
+  );
+
+  // Nothing is left to take the card up again: the account reads as removed.
+  const after = dialog.all().filter((e) => e.className.includes('account'));
+
+  assert.equal(after.length, 2);
+  assert.match(after[1]!.textContent, /Revoked/i);
+  assert.equal(labelled(after[1]!, 'Remove'), undefined);
+});
+
+test('an account shown as removed can still have its older unrevoked records removed', async () => {
+  const { defined, asked, cards } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    disconnect: { ok: true },
+  });
+
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+    dispatched: { type: string; detail: unknown }[];
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const labelled = (within: Element, text: string) =>
+    within.find('button').find((b) => b.textContent === text);
+
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
+  badge.attributes['handoff-url'] = '/api/verity/handoff';
+
+  // The record approved last was revoked and so speaks for the account, but an earlier
+  // one is only unconfirmed and could be confirmed again.
+  const alice = { id: 'ext-alice', handle: 'alice', profileUrl: 'https://github.com/alice' };
+
+  badge.connections = [
+    linked('a', 'alice', 100, { external: alice, status: 'unconfirmed', approvedAt: 800 }),
+    linked('b', 'alice', 200, { external: alice, status: 'revoked', revokedAt: 950 }),
+  ];
+
+  badge.connectedCallback();
+  await settle();
+
+  const { dialog, cards: accounts } = await cards(badge);
+
+  assert.match(accounts[1]!.textContent, /Revoked/i);
+
+  labelled(accounts[1]!, 'Remove')!.listeners['click']![0]!({});
+  labelled(accounts[1]!, 'Remove')!.listeners['click']![0]!({});
+
+  for (let i = 0; i < 6; i++) await settle();
+
+  assert.equal(asked.filter((id) => id === 'disconnect').length, 1);
+
+  assert.equal(
+    JSON.stringify(badge.dispatched.at(-1)!.detail),
+    '{"outcome":"removed","connectionId":"a"}',
+  );
+
+  // With nothing left to remove, the offer goes.
+  const [, after] = dialog.all().filter((e) => e.className.includes('account'));
+
+  assert.equal(labelled(after!, 'Remove'), undefined);
 });

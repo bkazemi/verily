@@ -1418,6 +1418,25 @@ test('the dialog on a site page connects with a session and a binding carried in
       ).status,
       200,
     );
+
+    // The holder removes their own link from the dialog too, and no other request about a
+    // connection is the dialog's to make.
+    const remove = (id: string, action = 'disconnect') =>
+      page(`/api/verity/connections/${id}/${action}`, { session, body: {} });
+
+    assert.equal((await remove('no-such-connection')).status, 404);
+    // Not the dialog's, so held to this origin like any other request, which the page is not on.
+    assert.equal((await remove(outcome.connectionId, 'share')).status, 403);
+    assert.equal((await remove(outcome.connectionId, 'visibility')).status, 403);
+
+    const removed = await remove(outcome.connectionId);
+
+    assert.equal(removed.status, 200);
+    assert.equal(removed.headers.get('access-control-allow-origin'), site);
+
+    const { '123': after } = await client.connections(['123']);
+
+    assert.equal(after!.find((link) => link.id === outcome.connectionId)!.status, 'revoked');
   } finally {
     await mf.dispose();
   }

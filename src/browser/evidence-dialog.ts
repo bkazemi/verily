@@ -42,6 +42,14 @@ export const styles = `
   dt { color: #6b786f; }
   dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .explanation { margin-top: 16px; }
+  .action { width: auto; height: auto; padding: 9px 14px; font: 600 13px/1.3 system-ui, sans-serif; color: #23312b; text-align: left; }
+  .action.primary { border-color: #245f43; background: #245f43; color: #fff; }
+  .action.primary:hover { background: #1d4f37; }
+  .action:disabled { opacity: .6; cursor: progress; }
+  .action.danger:hover { border-color: #b3261e; background: #fdecea; color: #b3261e; }
+  .row { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
+  .account .row { align-items: center; justify-content: start; margin-top: 12px; }
+  .account .action { padding: 5px 10px; font-size: 12px; }
   footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin-top: 14px; color: #9aa9a0; font-size: 11px; }
   .logo { display: block; height: 13px; }
   ${markStyles}
@@ -165,11 +173,86 @@ export function accountCard(
 }
 
 /**
+ * A record as a card shows it. Where the card speaks for several records of one account,
+ * `links` names every one not yet revoked, whether or not it is shown, so removing the
+ * account removes them all and none is left to take the card up again.
+ */
+export type Account = Evidence & { links?: string[] };
+
+/**
+ * What the holder of the accounts shown may do from the dialog, where the page that drew
+ * the badge said its reader is that holder.
+ */
+export interface Manage {
+  /** Opens what connects an account, in this dialog's place. Given a provider, starts on it. */
+  connect(provider?: string): void;
+  /** Removes the links named. Rejects if any could not be removed. */
+  remove(ids: string[]): Promise<void>;
+}
+
+/**
+ * The links removing an account would remove. The record shown may itself be revoked while
+ * older ones of the account are not, and those must stay removable, so this is not read
+ * from the status on the card.
+ */
+const removable = (evidence: Account) =>
+  evidence.links ?? (evidence.status === 'revoked' ? [] : [evidence.id]);
+
+/**
+ * Under a holder's own account: renewing it, which is showing the same account again, and
+ * removing it, which asks once more before it does. A removed link has nothing left to do.
+ */
+function manageRow(evidence: Account, manage: Manage) {
+  const row = node('div', '', 'row');
+
+  const act = (label: string, danger = false) => {
+    const control = node('button', label, danger ? 'action danger' : 'action');
+
+    control.type = 'button';
+
+    return control;
+  };
+
+  const offer = (note = '') => {
+    const renew = act('Renew');
+    const remove = act('Remove', true);
+
+    renew.onclick = () => manage.connect(evidence.provider);
+    remove.onclick = confirm;
+    row.replaceChildren(renew, remove, ...(note ? [node('span', note, 'muted')] : []));
+  };
+
+  const confirm = () => {
+    const cancel = act('Cancel');
+    const sure = act('Remove', true);
+
+    cancel.onclick = () => offer();
+
+    sure.onclick = async () => {
+      cancel.disabled = sure.disabled = true;
+
+      try {
+        await manage.remove(removable(evidence));
+      } catch {
+        offer('That did not go through.');
+      }
+    };
+
+    row.replaceChildren(node('span', 'Remove this link?', 'muted'), cancel, sure);
+    cancel.focus();
+  };
+
+  offer();
+
+  return row;
+}
+
+/**
  * One linked account: its state, how it was shown and when, on a card of its own. A
  * subject with several accounts gets one of these each, since a provider authenticates and
  * expires on its own terms and none of that may be read across to another's card.
  */
-function externalCard(evidence: Evidence) {
+function externalCard(evidence: Account, manage?: Manage) {
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
   const status = statusLabel(evidence, Date.now());
   const provider = evidence.providerName;
@@ -232,15 +315,28 @@ function externalCard(evidence: Evidence) {
     ...attestationNote(main, names),
     ...evidence.attestations.external.slice(1).flatMap((a) => attestationNote(a, names, true)),
     dates,
+    ...(manage && removable(evidence).length ? [manageRow(evidence, manage)] : []),
   );
+}
+
+/** Under the holder's accounts: the way to connect another, ahead of the closing note. */
+function addRow(manage: Manage) {
+  const add = node('button', 'Add account', 'action');
+  const row = node('div', '', 'row');
+
+  add.type = 'button';
+  add.onclick = () => manage.connect();
+  row.append(add);
+
+  return row;
 }
 
 /**
  * The subject once, then each account linked to it on its own card, in the order they
  * were connected. Every record given is of the one subject, which the caller has checked.
  */
-function render(content: HTMLElement, records: Evidence[]) {
-  const [first] = records as [Evidence, ...Evidence[]];
+function render(content: HTMLElement, records: Account[], manage?: Manage) {
+  const [first] = records as [Account, ...Account[]];
 
   // Each card says what it is. Without that the pair is two unlabelled boxes.
   const local = localSide(first.local, first.siteName);
@@ -262,7 +358,8 @@ function render(content: HTMLElement, records: Evidence[]) {
   content.replaceChildren(
     localCard,
     linkMark(),
-    ...records.map(externalCard),
+    ...records.map((record) => externalCard(record, manage)),
+    ...(manage ? [addRow(manage)] : []),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
     // the card they came from, and a second provider on this subject gets its own card.
     node(
@@ -289,7 +386,12 @@ export function openEvidenceDialog(
    * record speaks for an account depends on which are still good, and that changes with
    * the clock, not only with what is read.
    */
-  arrange: (records: Evidence[]) => Evidence[] = (records) => records,
+  arrange: (records: Evidence[]) => Account[] = (records) => records,
+  /**
+   * Given where whoever is looking holds these accounts: each then has its renewal and
+   * removal under it, and the dialog offers to connect another.
+   */
+  manage?: Manage,
 ): void {
   const existing = openDialogs.get(opener);
 
@@ -321,6 +423,27 @@ export function openEvidenceDialog(
   stamp.append(verityLogo(), node('span', version));
   header.append(heading, close);
   dialog.append(header, content, stamp);
+
+  /** Links removed from this dialog, shown as removed before the page hands over new records. */
+  const removed = new Map<string, number>();
+  let held: Evidence | Evidence[] | undefined;
+
+  const actions: Manage | undefined = manage && {
+    // The other dialog opens over this one before this one goes, so the page behind is
+    // never uncovered between the two.
+    connect(provider) {
+      manage.connect(provider);
+      dialog.close();
+    },
+    async remove(ids) {
+      await manage.remove(ids);
+
+      for (const id of ids) removed.set(id, Date.now());
+
+      if (held && dialog.open) draw(held);
+    },
+  };
+
   root.append(dialog);
   document.body.append(host);
   openDialogs.set(opener, dialog);
@@ -331,13 +454,24 @@ export function openEvidenceDialog(
 
   /** Redraws only for a record that reads differently from the one already on screen. */
   const draw = (given: Evidence | Evidence[]) => {
-    const records = arrange([given].flat());
+    held = given;
+
+    const records = arrange(
+      [given]
+        .flat()
+        .map((e) =>
+          removed.has(e.id) && e.status !== 'revoked'
+            ? { ...e, status: 'revoked' as const, revokedAt: removed.get(e.id) }
+            : e,
+        ),
+    );
+
     const key = JSON.stringify(records.map((e) => [e, statusLabel(e, Date.now())]));
 
     if (key === drawn) return;
 
     drawn = key;
-    render(content, records);
+    render(content, records, actions);
   };
 
   /**
