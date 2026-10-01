@@ -802,3 +802,67 @@ test('a method with nowhere to ask about withdrawal does not pretend to look', a
   assert.equal(await f.service.recheck(), 0);
   assert.equal((await f.service.published()).length, 1);
 });
+
+test('a record keeps when it was first connected, which a renewal never moves', async () => {
+  const f = fixture(),
+    { id } = await f.connect('public');
+
+  const made = (await f.service.read(id)).connectedAt;
+
+  assert.equal(made, 1000000);
+
+  const renew = async () => {
+    const flow = await f.service.start(alice, id, 'renew');
+
+    await f.service.callback(
+      new URL(flow.authorizationUrl!).searchParams.get('state')!,
+      flow.binding,
+      'code',
+    );
+
+    await f.service.approve(flow.flowId, flow.binding, alice, 'unlisted');
+  };
+
+  f.advance(600);
+  await renew();
+
+  const renewed = await f.service.read(id);
+
+  assert.equal(renewed.approvedAt, 1000600);
+  assert.equal(renewed.authenticatedAt, 1000600);
+  assert.equal(renewed.connectedAt, made);
+
+  // A record from before the time was kept, renewed since, with its other times moved on.
+  const strip = (changes: object) =>
+    f.storage.transaction(async (tx) => {
+      const { connectedAt: _connectedAt, ...older } = (await tx.get('connections', id))!;
+
+      await tx.put('connections', id, { ...older, ...changes });
+    });
+
+  // Its sign-in came before the approval that made the record, as a sign-in does.
+  await strip({ visibilityApprovedAt: 1000300, authenticatedAt: 999500 });
+
+  // Read before any upkeep, it answers with the earliest time it still carries.
+  assert.equal((await f.service.read(id)).connectedAt, 999500);
+
+  // Upkeep finds the moment in the audit trail and writes it down for good.
+  await f.service.prune();
+  assert.equal((await f.service.read(id)).connectedAt, made);
+  assert.equal((await f.storage.transaction((tx) => tx.get('connections', id)))!.connectedAt, made);
+
+  // The event outranks the earlier sign-in, which is only a guess at it.
+  assert.notEqual(made, 999500);
+
+  // With the trail gone too, the earliest time left is kept, and stays put through renewals.
+  await strip({ visibilityApprovedAt: 1000300, authenticatedAt: 1000600 });
+
+  await f.storage.transaction(async (tx) => {
+    for (const event of await tx.list('audit')) await tx.delete('audit', event.id);
+  });
+
+  await f.service.prune();
+  f.advance(200);
+  await renew();
+  assert.equal((await f.service.read(id)).connectedAt, 1000300);
+});

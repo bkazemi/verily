@@ -516,6 +516,7 @@ export class VerityService {
           visibilityApprovedAt: this.now(),
           authenticatedAt: flow.authenticatedAt!,
           approvedAt: this.now(),
+          connectedAt: this.now(),
           expiresAt: this.now() + (this.options.validityMs ?? 30 * 86400000),
           attestations: {
             local: this.declared(),
@@ -638,6 +639,7 @@ export class VerityService {
       verifierName: this.options.verifierName,
       visibility: connection.visibility,
       status: status(connection, this.now(), this.freshness),
+      connectedAt: connected(connection),
       authenticatedAt: connection.authenticatedAt,
       approvedAt: connection.approvedAt,
       visibilityApprovedAt: connection.visibilityApprovedAt,
@@ -1071,14 +1073,28 @@ export class VerityService {
       for (const flow of await tx.list('flows'))
         if (flow.expiresAt <= now) await tx.delete('flows', flow.id);
 
+      const audit = await tx.list('audit');
+
       for (const connection of await tx.list('connections')) {
         if ((connection.revokedAt ?? connection.expiresAt) + retentionMs <= now) {
           await tx.delete('connections', connection.id);
           await tx.delete('shares', connection.id);
+        } else if (connection.connectedAt === undefined) {
+          // A record from before its first connection was kept. The audit trail still has
+          // the moment, for as long as it retains it, and that is the answer. Only past
+          // that is the earliest time left on the record used, which is a guess: a sign-in
+          // comes before the approval that makes the record, so it must not outrank the
+          // event itself. Written once, here, so it stops moving.
+          const made = audit
+            .filter((event) => event.connectionId === connection.id && event.action === 'connect')
+            .map((event) => event.at);
+
+          connection.connectedAt = made.length ? Math.min(...made) : connected(connection);
+          await tx.put('connections', connection.id, connection);
         }
       }
 
-      for (const event of await tx.list('audit'))
+      for (const event of audit)
         if (event.at + retentionMs <= now) await tx.delete('audit', event.id);
     });
   }
@@ -1112,6 +1128,23 @@ export class VerityService {
       visibility,
     });
   }
+}
+
+/**
+ * When a record was first made. One written before that was kept is answered with the
+ * earliest time it still carries: every one of them is at or after the first connection,
+ * and each renewal moves them later, so the least of them is the closest.
+ */
+function connected(connection: Connection): number {
+  return (
+    connection.connectedAt ??
+    Math.min(
+      connection.approvedAt,
+      connection.authenticatedAt,
+      connection.visibilityApprovedAt,
+      ...(connection.attestations?.external.map((a) => a.confirmedAt) ?? []),
+    )
+  );
 }
 
 /** One proof waiting to be read again, and the method that reads it. */

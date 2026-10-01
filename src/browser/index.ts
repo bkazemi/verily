@@ -22,10 +22,212 @@ export interface Result {
 }
 
 /**
- * The most recent evidence read for a host, kept whether or not it changed the pill: a
- * renewal moves dates the pill never shows, and the dialog opens on those dates.
+ * What each host's dialog opens on and how it reads again, kept apart from the pill: the
+ * most recent records read for the host, and the way to read them afresh. Both are set on
+ * every presentation whether or not the pill changed, because new records often leave the
+ * pill looking the same, and a renewal moves dates the pill never shows. The click handler
+ * holds neither. It looks them up when clicked, so it is the same handler however the pill
+ * came to be drawn and cannot fall behind what the host was last given.
  */
-const latest = new WeakMap<HTMLElement, Evidence>();
+const latestGroup = new WeakMap<HTMLElement, Evidence[]>();
+const loaders = new WeakMap<HTMLElement, () => Promise<Evidence[]>>();
+
+/** Where a host's records are no longer to be shown: an open dialog says so on its next read. */
+const unavailable = async (): Promise<Evidence[]> => {
+  throw new Error('Unavailable');
+};
+
+/**
+ * How many times each host has been given something to present. A read that takes time
+ * can finish after the host has moved on: to other records, to none, or to the same ones
+ * asked for again. What it brings back then is about a host that no longer exists, so
+ * whoever started it checks it is still the latest before touching the host, whether it
+ * came back with records or with a failure.
+ */
+const generations = new WeakMap<HTMLElement, number>();
+
+/** Starts a presentation, and returns whether it is still the host's latest. */
+function begin(element: HTMLElement): () => boolean {
+  const mine = (generations.get(element) ?? 0) + 1;
+
+  generations.set(element, mine);
+
+  return () => generations.get(element) === mine;
+}
+
+/** Stops a host's dialog showing what the host no longer presents, from its next read on. */
+function forget(element: HTMLElement) {
+  begin(element);
+  latestGroup.delete(element);
+  loaders.set(element, unavailable);
+}
+
+/** Takes a host's records away: its pill says so now, and an open dialog when it next reads. */
+function withdraw(element: HTMLElement) {
+  forget(element);
+  renderBadgeMessage(element, 'Unavailable');
+}
+
+/**
+ * Makes a drawn pill open the dialog. A modified click is left alone, so it follows the
+ * pill's own link where it has one. Assigned, not added: the pill is kept across renders,
+ * so a listener per render would stack up on the same element.
+ */
+function opens(element: HTMLElement, badge: HTMLElement) {
+  badge.setAttribute('aria-haspopup', 'dialog');
+
+  badge.onclick = (event: MouseEvent) => {
+    if (
+      event.button !== 0 ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.altKey ||
+      typeof HTMLDialogElement === 'undefined'
+    )
+      return;
+
+    event.preventDefault();
+
+    // The dialog opens on what the host holds, at full size, and the read that follows
+    // either leaves it alone or replaces it. It is given the records themselves and groups
+    // them into accounts each time it draws, so an account whose leading record runs out
+    // is taken up at that moment by another of its records that is still good.
+    openEvidenceDialog(
+      element,
+      // Looked up at each read, so an open dialog follows a loader replaced under it. A
+      // read the host moved on from while it was out is not shown: the host's loader by
+      // then is asked instead, until one comes back to a host that has not changed.
+      async () => {
+        for (;;) {
+          const before = generations.get(element);
+
+          try {
+            const records = await (loaders.get(element) ?? unavailable)();
+
+            if (generations.get(element) === before) return records;
+          } catch (error) {
+            if (generations.get(element) === before) throw error;
+          }
+        }
+      },
+      latestGroup.get(element),
+      accounts,
+    );
+  };
+}
+
+const live = (evidence: Evidence) =>
+  evidence.status === 'verified' && evidence.expiresAt > Date.now();
+
+/**
+ * A subject's accounts, one entry for each, in the order they were connected, earliest
+ * first. Records are not accounts: the same account can stand on several, shown a second
+ * way, or revoked once and connected again. Those are one account and get one card.
+ *
+ * Where any of an account's records is verified now, the earliest of those speaks for it,
+ * and the ways the others show it are listed beneath as further methods. Its lapsed
+ * records are left out, having been replaced. Where none is verified, the latest one says
+ * what became of it. Either way the account keeps the place of its first connection.
+ *
+ * A record from a backend older than `connectedAt` is placed by when it was approved.
+ */
+function accounts(records: Evidence[]): Evidence[] {
+  const when = (e: Evidence) => e.connectedAt ?? e.approvedAt;
+  const byAccount = new Map<string, Evidence[]>();
+
+  for (const record of records) {
+    const key = JSON.stringify([record.provider, record.external.id]);
+
+    byAccount.set(key, [...(byAccount.get(key) ?? []), record]);
+  }
+
+  return [...byAccount.values()]
+    .map((held) => {
+      const sorted = [...held].sort((a, b) => when(a) - when(b));
+      const verified = sorted.filter(live);
+      const base = verified[0] ?? sorted.reduce((a, b) => (b.approvedAt > a.approvedAt ? b : a));
+      const external = [...base.attestations.external] as Evidence['attestations']['external'];
+
+      for (const other of verified.slice(1))
+        for (const attestation of other.attestations.external)
+          if (!external.some((shown) => shown.method === attestation.method))
+            external.push(attestation);
+
+      return {
+        ...base,
+        connectedAt: when(sorted[0]!),
+        attestations: { ...base.attestations, external },
+      };
+    })
+    .sort((a, b) => a.connectedAt - b.connectedAt);
+}
+
+/**
+ * One subject's accounts as a single pill: the first connected, then how many more stand
+ * behind it. The order is the order they were connected in, which a renewal never changes.
+ * Only accounts verified now are counted, and one of those leads when the first connected
+ * has lapsed, so the pill never puts a lapsed account forward while a good one sits behind
+ * a number. The lapsed ones are all still there in the dialog, each in its place.
+ *
+ * `load` gives the records afresh when the dialog opens and as it stays open.
+ */
+function presentGroup(element: HTMLElement, records: Evidence[], load: () => Promise<Evidence[]>) {
+  const ordered = accounts(records);
+  const verified = ordered.filter(live);
+  const lead = verified[0] ?? ordered[0]!;
+
+  latestGroup.set(element, records);
+  loaders.set(element, load);
+
+  const badge = renderBadge(element, lead, {
+    more: Math.max(verified.length - 1, 0),
+    linked: lead.visibility === 'public',
+  });
+
+  // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
+  if (badge) opens(element, badge);
+}
+
+/**
+ * The records as one subject's, each safe to draw, or nothing. Every link in them must be
+ * one a page may follow, and they must all describe the same subject: the dialog names
+ * the subject once, above every account, and may not put one subject's name over
+ * another's.
+ */
+function oneSubject(records: unknown): Evidence[] | undefined {
+  if (!Array.isArray(records) || !records.length || !records.every(validEvidence)) return undefined;
+
+  const [first] = records as [Evidence, ...Evidence[]];
+
+  return records.every(
+    (e) =>
+      readable(e) && e.siteName === first.siteName && e.local.reference === first.local.reference,
+  )
+    ? records
+    : undefined;
+}
+
+/**
+ * Presents records the page already holds, without asking any backend for them. This is
+ * how a site shows links only it can read: its own backend read them with its key and put
+ * them in the page for the readers it chose. Nothing here can check them again, so the
+ * page is what vouches for them, and an unlisted one is drawn with no link to follow.
+ */
+export function presentConnections(element: HTMLElement, records: unknown): void {
+  const subject = oneSubject(records);
+
+  // Nothing is awaited here, but a read still out for this host must not land on top.
+  begin(element);
+
+  if (!subject) {
+    withdraw(element);
+
+    return;
+  }
+
+  presentGroup(element, subject, async () => subject);
+}
 
 export function init({ backendUrl }: { backendUrl: string }) {
   const base = new URL(backendUrl, location.href);
@@ -202,8 +404,12 @@ export function init({ backendUrl }: { backendUrl: string }) {
       // never blinks the pill through an interim state.
       if (!evidence && !badgeShown(element)) renderBadgePending(element);
 
+      const current = begin(element);
+
       try {
         const e = evidence ?? (await client.getConnection(connectionId));
+
+        if (!current()) return;
 
         if (!validEvidence(e)) throw new Error('Invalid evidence response');
 
@@ -212,53 +418,61 @@ export function init({ backendUrl }: { backendUrl: string }) {
         // Validate both links before rendering any provider details.
         safeUrl(e.external.profileUrl);
         safeUrl(e.evidenceUrl);
-        latest.set(element, e);
+        // What the dialog draws has one more link in it than the pill, so it opens on the
+        // record only if that one is good too, and otherwise on what it reads.
+        latestGroup.set(element, readable(e) ? [e] : []);
+
+        loaders.set(element, async () => {
+          const fresh = await client.getConnection(e.id);
+
+          if (fresh.visibility !== 'public' || !readable(fresh)) throw new Error('Unavailable');
+
+          return [fresh];
+        });
+
         const badge = renderBadge(element, e);
 
-        // Nothing changed: the pill on screen, and its handler, still stand.
-        if (!badge) return;
-
-        badge.setAttribute('aria-haspopup', 'dialog');
-
-        // Assigned rather than added: the pill is kept across renders, so a listener per
-        // render would stack up on the same element.
-        badge.onclick = (event: MouseEvent) => {
-          if (
-            event.button !== 0 ||
-            event.ctrlKey ||
-            event.metaKey ||
-            event.shiftKey ||
-            event.altKey ||
-            typeof HTMLDialogElement === 'undefined'
-          )
-            return;
-
-          event.preventDefault();
-
-          // The pill was drawn from this record, so the dialog opens on it at full size
-          // and the check below either leaves it alone or replaces it.
-          const read = latest.get(element) ?? e;
-
-          openEvidenceDialog(
-            element,
-            async () => {
-              const fresh = await client.getConnection(read.id);
-
-              if (fresh.visibility !== 'public') throw new Error('Unavailable');
-
-              safeUrl(fresh.evidenceUrl);
-              safeUrl(fresh.external.profileUrl);
-
-              if (fresh.local.profileUrl) safeUrl(fresh.local.profileUrl);
-
-              return fresh;
-            },
-            readable(read),
-          );
-        };
+        // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
+        if (badge) opens(element, badge);
       } catch {
-        latest.delete(element);
-        renderBadgeMessage(element, 'Unavailable');
+        if (current()) withdraw(element);
+      }
+    },
+    /**
+     * Several of one subject's public connections as a single pill. One that cannot be
+     * read is left out, since the rest are still true without it; with none left, or with
+     * records of more than one subject, the pill says it is unavailable.
+     */
+    async mountBadges(element: HTMLElement, { connectionIds }: { connectionIds: string[] }) {
+      const ids = [...new Set(connectionIds)];
+
+      if (ids.length === 1) return client.mountBadge(element, { connectionId: ids[0]! });
+
+      if (!badgeShown(element)) renderBadgePending(element);
+
+      const read = async () => {
+        const answers = await Promise.allSettled(ids.map((id) => client.getConnection(id)));
+
+        const records = oneSubject(
+          answers
+            .filter((a): a is PromiseFulfilledResult<Evidence> => a.status === 'fulfilled')
+            .map((a) => a.value)
+            .filter((e) => e.visibility === 'public'),
+        );
+
+        if (!records) throw new Error('Unavailable');
+
+        return records;
+      };
+
+      const current = begin(element);
+
+      try {
+        const records = await read();
+
+        if (current()) presentGroup(element, records, read);
+      } catch {
+        if (current()) withdraw(element);
       }
     },
     disconnect: (id: string) => request(`/connections/${encodeURIComponent(id)}/disconnect`, {}),
@@ -382,6 +596,8 @@ function validEvidence(value: unknown): value is Evidence {
       (typeof value.revokedAt === 'number' && Number.isFinite(value.revokedAt))) &&
     ['verified', 'unconfirmed', 'expired', 'revoked'].includes(String(value.status)) &&
     ['public', 'unlisted'].includes(String(value.visibility)) &&
+    (value.connectedAt === undefined ||
+      (typeof value.connectedAt === 'number' && Number.isFinite(value.connectedAt))) &&
     ['authenticatedAt', 'approvedAt', 'expiresAt'].every(
       (k) => typeof value[k] === 'number' && Number.isFinite(value[k]),
     )
@@ -427,12 +643,38 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
        * A badge may be placed before its connection is known: it then waits, showing the
        * pill's own frame, until `connection-id` names what it presents.
        */
-      static observedAttributes = ['backend-url', 'connection-id'];
+      static observedAttributes = ['backend-url', 'connection-id', 'connection-ids', 'connections'];
+
+      private handed?: unknown;
+
+      /**
+       * Records the page already holds, drawn as given and never fetched: one subject's
+       * accounts, as the site's own backend read them. Also settable as JSON in the
+       * `connections` attribute, for a page rendered on the server.
+       */
+      get connections(): unknown {
+        return this.handed;
+      }
+
+      set connections(records: unknown) {
+        this.handed = records;
+        this.present();
+      }
 
       private timer?: ReturnType<typeof setInterval>;
       private queued = false;
 
       connectedCallback() {
+        // A page may set `connections` before this script has run. That lands on the
+        // element itself and hides the setter above from then on, so it is taken off and
+        // given to the setter, as it would have been had the script come first.
+        if (Object.hasOwn(this, 'connections')) {
+          const early = (this as { connections?: unknown }).connections;
+
+          delete (this as { connections?: unknown }).connections;
+          this.handed = early;
+        }
+
         this.present();
         this.timer = setInterval(() => this.refresh(), 30000);
       }
@@ -470,7 +712,34 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
         const backendUrl = this.getAttribute('backend-url'),
           connectionId = this.getAttribute('connection-id');
 
+        const written = this.getAttribute('connections');
+
+        if (this.handed !== undefined || written !== null) {
+          let records = this.handed;
+
+          if (records === undefined)
+            try {
+              records = JSON.parse(written!);
+            } catch {
+              records = undefined;
+            }
+
+          presentConnections(this, records);
+
+          return;
+        }
+
+        const ids = (this.getAttribute('connection-ids') ?? '').split(/\s+/).filter(Boolean);
+
+        if (ids.length) {
+          if (backendUrl) void init({ backendUrl }).mountBadges(this, { connectionIds: ids });
+
+          return;
+        }
+
         if (!connectionId) {
+          // Nothing is named any more, so nothing it named before is to be shown either.
+          forget(this);
           renderBadgePending(this);
 
           return;

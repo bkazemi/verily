@@ -1152,3 +1152,696 @@ test('a link in the instructions opens in a new tab, and only if it is http(s)',
   assert.equal(links[0]!.textContent, 'gist.github.com');
   assert.match(dialog.textContent, /Publish at gist\.github\.com or here\./);
 });
+
+/** A page with the badge script loaded, answering each connection id from `served`. */
+async function groupHarness(served: Record<string, unknown>, hold?: () => Promise<void>) {
+  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const body = new Element();
+  const asked: string[] = [];
+  const defined: Record<string, new () => Element> = {};
+  const polls: (() => void)[] = [];
+
+  /** Enough of an element for the badge's own class to extend and be constructed. */
+  class Host extends Element {
+    isConnected = true;
+
+    getAttribute(name: string) {
+      return this.attributes[name] ?? null;
+    }
+  }
+
+  const element = (tag: string) => {
+    const created = new Element();
+
+    created.tagName = tag;
+
+    return created;
+  };
+
+  const context = vm.createContext({
+    URL,
+    Date,
+    Promise,
+    setTimeout,
+    clearTimeout,
+    // Kept, so a test can run a dialog's periodic check when it chooses to.
+    setInterval: (handler: () => void) => polls.push(handler),
+    clearInterval: () => {},
+    CSSStyleSheet: class {
+      replaceSync() {}
+    },
+    Object,
+    queueMicrotask,
+    HTMLElement: Host,
+    customElements: {
+      get: (name: string) => defined[name],
+      define: (name: string, constructor: new () => Element) => (defined[name] = constructor),
+    },
+    HTMLAnchorElement: {
+      [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'a',
+    },
+    HTMLDialogElement: {
+      [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'dialog',
+    },
+    location: { href: 'https://site.test/profile', origin: 'https://site.test' },
+    document: {
+      body,
+      createElementNS: (_namespace: string, tag: string) => element(tag),
+      createElement: element,
+      createTextNode: (text: string) => {
+        const created = new Element();
+
+        created.textContent = text;
+
+        return created;
+      },
+    },
+    fetch: async (url: string) => {
+      const id = new URL(url).pathname.split('/').at(-1)!;
+
+      asked.push(id);
+
+      // Held back on request, to model an answer that arrives after the page has moved on.
+      await hold?.();
+
+      return { ok: id in served, json: async () => served[id] };
+    },
+  });
+
+  vm.runInContext(asset, context);
+
+  const verity = context.Verity as {
+    init(options: { backendUrl: string }): {
+      mountBadges(host: Element, options: { connectionIds: string[] }): Promise<void>;
+    };
+    presentConnections(host: Element, records: unknown): void;
+  };
+
+  /** Opens the dialog from a host's pill and returns its account cards, in order. */
+  const cards = async (host: Element) => {
+    const pill = [...host.find('a'), ...host.find('button')][0]!;
+
+    pill.listeners['click']![0]!({ button: 0, preventDefault() {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const dialog = body.all().find((found) => found.tagName === 'dialog')!;
+
+    return { dialog, cards: dialog.all().filter((found) => found.className.includes('account')) };
+  };
+
+  return { verity, asked, cards, defined, polls };
+}
+
+/** One of a subject's linked accounts, as evidence. */
+const linked = (id: string, handle: string, connectedAt: number, overrides: object = {}) => ({
+  id,
+  provider: 'github',
+  providerName: 'GitHub',
+  siteName: 'site.test',
+  verifierName: 'verifier.test',
+  local: { label: 'Alice', reference: 'member-1' },
+  external: { id: `ext-${id}`, handle, profileUrl: `https://github.com/${handle}` },
+  evidenceUrl: `https://verifier.test/api/verity/connections/${id}`,
+  status: 'verified',
+  visibility: 'public',
+  connectedAt,
+  authenticatedAt: 900,
+  approvedAt: 900,
+  expiresAt: Date.now() + 60000,
+  attestations: {
+    local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+    external: [{ by: 'provider', method: 'oauth', confirmedAt: 1 }],
+  },
+  ...overrides,
+});
+
+test('several accounts of one subject are one pill: the first connected, then how many more', async () => {
+  const { verity, cards } = await groupHarness({
+    // Listed out of order, and all renewed at the same moment since.
+    third: linked('third', 'carol', 300),
+    first: linked('first', 'alice', 100),
+    second: linked('second', 'bob', 200),
+  });
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ['third', 'first', 'second', 'missing'] });
+
+  // One mark, the first connected account, and the rest as a number. The id that could
+  // not be read is left out and takes nothing else down with it.
+  assert.equal(host.textContent, '@alice+2');
+  assert.equal(host.links().length, 1);
+  assert.equal(host.links()[0]!.href, 'https://verifier.test/api/verity/connections/first');
+  assert.match(host.links()[0]!.attributes['aria-label']!, /GitHub @alice and 2 more: Verified/);
+
+  // The one dialog: the subject once, then each account in the order it was connected.
+  const opened = await cards(host);
+
+  assert.equal(opened.cards.length, 4);
+  assert.match(opened.cards[0]!.textContent, /Alice/);
+
+  assert.deepEqual(
+    opened.cards.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave)/)![1]),
+    ['alice', 'bob', 'carol'],
+  );
+
+  assert.equal(opened.dialog.textContent.match(/Verification does not guarantee/g)!.length, 1);
+});
+
+test('a lapsed account never leads the pill or counts, but keeps its place in the dialog', async () => {
+  const { verity, cards } = await groupHarness({
+    first: linked('first', 'alice', 100, { status: 'expired', expiresAt: 1 }),
+    second: linked('second', 'bob', 200),
+    third: linked('third', 'carol', 300, { status: 'revoked', revokedAt: 5 }),
+    fourth: linked('fourth', 'dave', 400),
+  });
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ['first', 'second', 'third', 'fourth'] });
+
+  // Two are verified now: the earlier of them leads, and the other is the one more.
+  assert.equal(host.textContent, '@bob+1');
+
+  const opened = await cards(host);
+
+  assert.deepEqual(
+    opened.cards.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave)/)![1]),
+    ['alice', 'bob', 'carol', 'dave'],
+  );
+
+  assert.match(opened.cards[1]!.textContent, /Expired/);
+  assert.match(opened.cards[3]!.textContent, /Revoked/);
+
+  // With none verified, the first connected is shown as what it is, with no count.
+  const lapsed = await groupHarness({
+    first: linked('first', 'alice', 100, { status: 'expired', expiresAt: 1 }),
+    second: linked('second', 'bob', 200, { status: 'revoked', revokedAt: 5 }),
+  });
+
+  const none = new Element();
+
+  await lapsed.verity
+    .init({ backendUrl: 'https://verifier.test/api/verity' })
+    .mountBadges(none, { connectionIds: ['second', 'first'] });
+
+  assert.match(none.textContent, /^@aliceExpired$/);
+});
+
+test('accounts of different subjects, or none readable, are not presented as one', async () => {
+  const { verity } = await groupHarness({
+    mine: linked('mine', 'alice', 100),
+    theirs: linked('theirs', 'mallory', 200, {
+      local: { label: 'Mallory', reference: 'member-2' },
+    }),
+    elsewhere: linked('elsewhere', 'eve', 300, { siteName: 'other.test' }),
+    hidden: linked('hidden', 'bob', 400, { visibility: 'unlisted' }),
+  });
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+
+  for (const ids of [
+    ['mine', 'theirs'],
+    ['mine', 'elsewhere'],
+    ['nothing', 'nowhere'],
+  ]) {
+    const host = new Element();
+
+    await client.mountBadges(host, { connectionIds: ids });
+    assert.match(host.textContent, /Unavailable/, ids.join(' '));
+    assert.equal(host.links().length, 0);
+  }
+
+  // A record the public may not read is never drawn from a fetch, even beside one it may.
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ['mine', 'hidden'] });
+  assert.equal(host.textContent, '@alice');
+});
+
+test('records the page hands over are drawn without a fetch, unlisted ones with no link', async () => {
+  const { verity, asked, cards } = await groupHarness({});
+
+  const records = [
+    linked('second', 'bob', 200, { visibility: 'unlisted' }),
+    linked('first', 'alice', 100, { visibility: 'unlisted' }),
+  ];
+
+  const host = new Element();
+
+  verity.presentConnections(host, records);
+  assert.equal(host.textContent, '@alice+1');
+
+  // Nobody can open an unlisted record's page, so the pill is a button and links nowhere.
+  assert.equal(host.links().length, 0);
+  assert.equal(host.find('button').length, 1);
+
+  const opened = await cards(host);
+
+  assert.deepEqual(
+    opened.cards.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave)/)![1]),
+    ['alice', 'bob'],
+  );
+
+  // The verifier is named on each card and linked from none of them.
+  assert.equal(opened.dialog.textContent.match(/via: verifier\.test/g)!.length, 2);
+  assert.ok(opened.dialog.links().every((link) => !link.href.includes('verifier.test')));
+  assert.deepEqual(asked, []);
+
+  // A public record handed over keeps its link, and one alone is the pill it always was.
+  const shown = new Element();
+
+  verity.presentConnections(shown, [linked('only', 'alice', 100)]);
+  assert.equal(shown.textContent, '@alice');
+  assert.equal(shown.links()[0]!.href, 'https://verifier.test/api/verity/connections/only');
+
+  for (const bad of [
+    undefined,
+    [],
+    'records',
+    [{ id: 'x' }],
+    [records[0], linked('z', 'eve', 1, { local: { label: 'Eve', reference: 'member-9' } })],
+    [
+      linked('y', 'eve', 1, {
+        external: { id: 'e', handle: 'eve', profileUrl: 'javascript:alert(1)' },
+      }),
+    ],
+  ]) {
+    const refused = new Element();
+
+    verity.presentConnections(refused, bad);
+    assert.match(refused.textContent, /Unavailable/);
+  }
+
+  assert.deepEqual(asked, []);
+});
+
+test('one account on several records is one card, and counts once', async () => {
+  const { verity, cards } = await groupHarness({});
+
+  const gist = {
+    by: 'provider',
+    method: 'gist',
+    artifactUrl: 'https://gist.github.com/a/1',
+    confirmedAt: Date.now(),
+  };
+
+  const same = {
+    external: { id: 'gh-1', handle: 'alice', profileUrl: 'https://github.com/alice' },
+  };
+
+  const host = new Element();
+
+  verity.presentConnections(host, [
+    // The same GitHub account three times over: revoked once, connected again by signing
+    // in, and since shown a second way on a record of its own.
+    linked('old', 'alice', 100, { ...same, status: 'revoked', revokedAt: 150 }),
+    linked('again', 'alice', 200, same),
+    linked('proof', 'alice', 300, {
+      ...same,
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: [gist],
+      },
+    }),
+    linked('other', 'bob', 250),
+  ]);
+
+  // Two accounts, not four records: the first connected leads, and there is one more.
+  assert.equal(host.textContent, '@alice+1');
+
+  const opened = await cards(host);
+
+  assert.deepEqual(
+    opened.cards.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave)/)![1]),
+    ['alice', 'bob'],
+  );
+
+  // The account's card reads as verified, with both ways it is shown, and nothing of the
+  // record it replaced.
+  const card = opened.cards[1]!.textContent;
+
+  assert.match(card, /Verified/);
+  assert.match(card, /Signed in with GitHub/);
+  assert.match(card, /\+ Published a proof on GitHub/);
+  assert.ok(!card.includes('Revoked'));
+
+  // An account with nothing verified is one card too, saying what last became of it.
+  const lapsed = await groupHarness({});
+  const none = new Element();
+
+  lapsed.verity.presentConnections(none, [
+    linked('first', 'alice', 100, { ...same, status: 'expired', expiresAt: 1, approvedAt: 100 }),
+    linked('second', 'alice', 200, { ...same, status: 'revoked', revokedAt: 250, approvedAt: 200 }),
+  ]);
+
+  assert.match(none.textContent, /^@aliceRevoked$/);
+  assert.equal((await lapsed.cards(none)).cards.length, 2);
+
+  // Two different accounts with one provider stay two cards.
+  const two = await groupHarness({});
+  const pair = new Element();
+
+  two.verity.presentConnections(pair, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+  assert.equal(pair.textContent, '@alice+1');
+  assert.equal((await two.cards(pair)).cards.length, 3);
+});
+
+test('new records that leave the pill unchanged still open in the dialog', async () => {
+  const { verity, cards } = await groupHarness({});
+  const host = new Element();
+
+  verity.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+  assert.equal(host.textContent, '@alice+1');
+
+  // Bob is gone and Carol is there in his place: the same account leads, with one more.
+  verity.presentConnections(host, [linked('a', 'alice', 100), linked('c', 'carol', 300)]);
+  assert.equal(host.textContent, '@alice+1');
+
+  // The dialog opens on the new records and is still on them after its first check.
+  const opened = await cards(host);
+
+  assert.deepEqual(
+    opened.cards.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave)/)![1]),
+    ['alice', 'carol'],
+  );
+});
+
+test('connections set on a badge before its script has run are still presented', async () => {
+  const { defined } = await groupHarness({});
+
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const badge = new Badge();
+
+  // What a page leaves behind by assigning before the element is upgraded: a property of
+  // the element itself, in front of the class's own.
+  Object.defineProperty(badge, 'connections', {
+    value: [linked('a', 'alice', 100, { visibility: 'unlisted' })],
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  });
+
+  badge.connectedCallback();
+  await settle();
+  assert.equal(badge.textContent, '@alice');
+
+  // And a later assignment reaches the badge, which it could not while the first hid it.
+  badge.connections = [
+    linked('a', 'alice', 100, { visibility: 'unlisted' }),
+    linked('b', 'bob', 200, { visibility: 'unlisted' }),
+  ];
+
+  await settle();
+  assert.equal(badge.textContent, '@alice+1');
+});
+
+test('a badge that goes from one record to several opens its dialog on all of them', async () => {
+  const gist = {
+    by: 'provider',
+    method: 'gist',
+    artifactUrl: 'https://gist.github.com/a/1',
+    confirmedAt: Date.now(),
+  };
+
+  const { verity, cards } = await groupHarness({
+    a: linked('a', 'alice', 100),
+    lapsed: linked('lapsed', 'bob', 200, { status: 'expired', expiresAt: 1 }),
+    again: linked('again', 'alice', 300, {
+      external: { id: 'ext-a', handle: 'alice', profileUrl: 'https://github.com/alice' },
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: [gist],
+      },
+    }),
+  });
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ['a'] });
+  assert.equal(host.textContent, '@alice');
+
+  // A lapsed account and a second record of the first: neither changes the pill.
+  await client.mountBadges(host, { connectionIds: ['a', 'lapsed', 'again'] });
+  assert.equal(host.textContent, '@alice');
+
+  const opened = await cards(host);
+
+  assert.equal(opened.cards.length, 3);
+  assert.match(opened.cards[1]!.textContent, /\+ Published a proof on GitHub/);
+  assert.match(opened.cards[2]!.textContent, /@bob.*Expired/s);
+
+  // And back to one: the dialog follows that too.
+  const back = await groupHarness({
+    a: linked('a', 'alice', 100),
+    b: linked('b', 'bob', 200, { status: 'expired', expiresAt: 1 }),
+  });
+
+  const other = new Element();
+  const again = back.verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+
+  await again.mountBadges(other, { connectionIds: ['a', 'b'] });
+  await again.mountBadges(other, { connectionIds: ['a'] });
+  assert.equal((await back.cards(other)).cards.length, 2);
+});
+
+test('records taken away while the dialog is open stop being shown in it', async () => {
+  const { verity, cards, polls } = await groupHarness({});
+  const host = new Element();
+
+  verity.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+
+  const opened = await cards(host);
+
+  assert.equal(opened.cards.length, 3);
+
+  // The page clears them. The pill says so at once, and the dialog on its next check.
+  verity.presentConnections(host, []);
+  assert.match(host.textContent, /Unavailable/);
+
+  for (const poll of polls) poll();
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(opened.dialog.textContent, /Verification unavailable/);
+  assert.ok(!opened.dialog.textContent.includes('@alice'));
+});
+
+test('each account in an open dialog lapses at its own deadline', async () => {
+  const { verity, cards } = await groupHarness({});
+  const host = new Element();
+  const soon = Date.now();
+
+  verity.presentConnections(host, [
+    linked('a', 'alice', 100, { expiresAt: soon + 60 }),
+    linked('b', 'bob', 200, { expiresAt: soon + 140 }),
+    linked('c', 'carol', 300),
+  ]);
+
+  const opened = await cards(host);
+
+  const states = () =>
+    opened.dialog
+      .all()
+      .filter((e) => e.className === 'state')
+      .map((e) => e.textContent);
+
+  assert.deepEqual(states(), ['Verified', 'Verified', 'Verified']);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(states(), ['Expired', 'Verified', 'Verified']);
+
+  // The second deadline is watched too, without waiting for the next check.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(states(), ['Expired', 'Expired', 'Verified']);
+});
+
+test('an account whose leading record runs out is taken up by another of its records', async () => {
+  const { verity, cards } = await groupHarness({});
+  const host = new Element();
+
+  const same = {
+    external: { id: 'gh-1', handle: 'alice', profileUrl: 'https://github.com/alice' },
+  };
+
+  const gist = {
+    by: 'provider',
+    method: 'gist',
+    artifactUrl: 'https://gist.github.com/a/1',
+    confirmedAt: Date.now(),
+  };
+
+  verity.presentConnections(host, [
+    // One account on two records. The earlier one speaks for it, and runs out first.
+    linked('early', 'alice', 100, { ...same, expiresAt: Date.now() + 60 }),
+    linked('later', 'alice', 200, {
+      ...same,
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: [gist],
+      },
+    }),
+  ]);
+
+  const opened = await cards(host);
+
+  const card = () =>
+    opened.dialog.all().filter((found) => found.className.includes('account'))[1]!.textContent;
+
+  assert.equal(opened.cards.length, 2);
+  assert.match(card(), /Verified/);
+  assert.match(card(), /Signed in with GitHub/);
+
+  // Past the first record's deadline, with no check in between: still one card, still
+  // verified, now on the record that is.
+  await new Promise((resolve) => setTimeout(resolve, 110));
+
+  assert.equal(
+    opened.dialog.all().filter((found) => found.className.includes('account')).length,
+    2,
+  );
+
+  assert.match(card(), /Verified/);
+  assert.ok(!card().includes('Expired'));
+  assert.match(card(), /Published a proof on GitHub/);
+  assert.ok(!card().includes('Signed in with GitHub'));
+});
+
+test('a badge whose connection ids are cleared stops its open dialog showing them', async () => {
+  const { defined, cards, polls } = await groupHarness({
+    a: linked('a', 'alice', 100),
+    b: linked('b', 'bob', 200),
+  });
+
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    attributeChangedCallback(): void;
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const badge = new Badge();
+
+  badge.setAttribute('backend-url', 'https://verifier.test/api/verity');
+  badge.setAttribute('connection-ids', 'a b');
+  badge.connectedCallback();
+  await settle();
+  assert.equal(badge.textContent, '@alice+1');
+
+  const opened = await cards(badge);
+
+  assert.equal(opened.cards.length, 3);
+
+  // The page names no connections any more.
+  badge.removeAttribute('connection-ids');
+  badge.attributeChangedCallback();
+  await settle();
+
+  for (const poll of polls) poll();
+
+  await settle();
+  assert.match(opened.dialog.textContent, /Verification unavailable/);
+  assert.ok(!opened.dialog.textContent.includes('@alice'));
+});
+
+test('a read that finishes after the host has moved on changes nothing', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const { verity, cards, defined } = await groupHarness(
+    { a: linked('a', 'alice', 100), b: linked('b', 'bob', 200) },
+    () => gate,
+  );
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+
+  // Records handed over while a fetch for other ones is still out.
+  const replaced = new Element();
+  const slow = client.mountBadges(replaced, { connectionIds: ['a', 'b'] });
+
+  verity.presentConnections(replaced, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
+  assert.equal(replaced.textContent, '@carol');
+
+  // A fetch that will fail, overtaken the same way: its failure is not this host's either.
+  const failing = new Element();
+  const doomed = client.mountBadges(failing, { connectionIds: ['missing', 'gone'] });
+
+  verity.presentConnections(failing, [linked('d', 'dave', 400, { visibility: 'unlisted' })]);
+
+  // The ids cleared from a badge while its fetch is out.
+  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    attributeChangedCallback(): void;
+  };
+
+  const cleared = new Badge();
+
+  cleared.setAttribute('backend-url', 'https://verifier.test/api/verity');
+  cleared.setAttribute('connection-ids', 'a b');
+  cleared.connectedCallback();
+  await settle();
+  cleared.removeAttribute('connection-ids');
+  cleared.attributeChangedCallback();
+  await settle();
+
+  release();
+  await Promise.all([slow, doomed]);
+  await settle();
+
+  assert.equal(replaced.textContent, '@carol');
+  assert.equal(failing.textContent, '@dave');
+  assert.ok(!cleared.textContent.includes('@alice'));
+  assert.ok(!cleared.textContent.includes('Unavailable'));
+
+  // The dialog is on the newer records as well, and stays on them.
+  const opened = await cards(replaced);
+
+  assert.equal(opened.cards.length, 2);
+  assert.match(opened.cards[1]!.textContent, /@carol/);
+});
+
+test('an open dialog does not show a read the host moved on from while it was out', async () => {
+  let gate: Promise<void> | undefined;
+  let release!: () => void;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  const { verity, cards, polls } = await groupHarness(
+    { a: linked('a', 'alice', 100), b: linked('b', 'bob', 200) },
+    () => gate ?? Promise.resolve(),
+  );
+
+  const host = new Element();
+
+  await verity
+    .init({ backendUrl: 'https://verifier.test/api/verity' })
+    .mountBadges(host, { connectionIds: ['a', 'b'] });
+
+  const opened = await cards(host);
+
+  assert.equal(opened.cards.length, 3);
+
+  // The dialog's periodic check goes out, and is still out when the page hands the host
+  // different records.
+  gate = new Promise<void>((resolve) => (release = resolve));
+
+  for (const poll of polls) poll();
+
+  await settle();
+  verity.presentConnections(host, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
+  release();
+  gate = undefined;
+  await settle();
+  await settle();
+
+  const shown = opened.dialog.all().filter((found) => found.className.includes('account'));
+
+  assert.equal(shown.length, 2);
+  assert.match(shown[1]!.textContent, /@carol/);
+  assert.ok(!opened.dialog.textContent.includes('@bob'));
+});

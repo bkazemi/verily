@@ -88,6 +88,9 @@ const server = createServer((request, response) => {
           : id === 'unconfirmed'
             ? 'unconfirmed'
             : 'expired',
+      // Each was first connected on a different day, though all were renewed yesterday:
+      // the tile showing several as one pill orders them by this.
+      connectedAt: Date.now() - 86400000 * ({ 'signed-in': 30, current: 20, signed: 10 }[id] ?? 40),
       authenticatedAt: Date.now() - 86400000,
       approvedAt: Date.now() - 86400000,
       visibilityApprovedAt: Date.now() - 86400000,
