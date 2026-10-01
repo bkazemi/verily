@@ -1,5 +1,5 @@
 import { externalName, statusLabel, type Evidence } from '../core/index.js';
-import { markStyles, paintMark, verificationMark } from './mark.js';
+import { clockMark, dashMark, markStyles, paintMark, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
 
 const styles = `
@@ -20,6 +20,7 @@ const styles = `
   .label { display: none; font-size: 11px; color: var(--verity-muted, #65726c); }
   .badge:hover .label, .badge:focus-within .label { display: inline; }
   .icon { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 750; }
+  .icon .glyph { display: block; width: 12px; height: 12px; }
   .mark { display: block; flex-shrink: 0; width: 20px; height: 20px; }
   .mark.pending { opacity: .45; }
   /* A dim ring where the account will go; it only spins where motion is welcome. */
@@ -197,8 +198,9 @@ export function renderBadgeMessage(element: HTMLElement, message: string): void 
   pill.setAttribute('tabindex', '0');
   pill.setAttribute('role', 'status');
   pill.setAttribute('aria-label', message);
-  const icon = span('icon', '–');
+  const icon = span('icon', '');
 
+  icon.append(dashMark());
   icon.setAttribute('aria-hidden', 'true');
   const divider = span('divider', '');
 
@@ -246,7 +248,9 @@ export function renderBadge(element: HTMLElement, evidence: Evidence): HTMLAncho
   badge.append(divider, logo ?? span('name', provider), span('name', handle));
 
   if (!current) {
-    const icon = span('icon', state === 'expired' ? '◷' : '–');
+    const icon = span('icon', '');
+
+    icon.append(state === 'expired' ? clockMark() : dashMark());
 
     icon.setAttribute('aria-hidden', 'true');
     badge.append(span('label', label), icon);

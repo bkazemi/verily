@@ -62,3 +62,43 @@ export function verificationMark(tone: MarkTone = 'current'): SVGSVGElement {
 
   return svg;
 }
+
+/**
+ * A small drawing inside a status circle. Drawn, not typed: a character sits where its
+ * font's metrics put it, which is never quite the middle of the circle around it, and
+ * differently so on each platform. A drawing is centred by its own geometry, in the
+ * surrounding colour. Each one is drawn about the middle of the same sixteen-unit box.
+ */
+function statusMark(name: string, shapes: [string, Record<string, string>][]): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.6');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('class', `glyph ${name}`);
+  svg.setAttribute('focusable', 'false');
+
+  for (const [tag, attributes] of shapes) {
+    const shape = document.createElementNS(namespace, tag);
+
+    for (const [key, value] of Object.entries(attributes)) shape.setAttribute(key, value);
+
+    svg.append(shape);
+  }
+
+  return svg;
+}
+
+/** The clock on an expired record: a face, and hands at three o'clock. */
+export const clockMark = () =>
+  statusMark('clock', [
+    ['circle', { cx: '8', cy: '8', r: '6.2' }],
+    ['path', { d: 'M8 4.6V8h2.6' }],
+  ]);
+
+/** The dash on a record that is revoked or cannot be shown. */
+export const dashMark = () => statusMark('dash', [['path', { d: 'M4.4 8h7.2' }]]);

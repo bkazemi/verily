@@ -295,12 +295,38 @@ test('distributed badge renders current/expired/revoked evidence and fails close
   });
 
   assert.match(refused.textContent, /Unavailable/);
+
+  // Its dash is drawn too, about the middle of the same box as the clock.
+  const dash = refused.find('svg').at(-1)!;
+
+  assert.equal(dash.attributes['class'], 'glyph dash');
+  assert.equal(dash.attributes['viewBox'], '0 0 16 16');
+
+  assert.deepEqual(
+    dash.find('path').map((path) => path.attributes['d']),
+    ['M4.4 8h7.2'],
+  );
+
+  assert.ok(!refused.textContent.includes('–'));
   assert.equal(refused.links().length, 0);
 
   evidence = { ...evidence, expiresAt: 1 };
   await client.mountBadge(element, { connectionId: 'original' });
   assert.match(element.textContent, /Expired/);
-  assert.equal(element.find('svg').length, 2);
+  assert.equal(element.find('svg').length, 3);
+
+  // The clock is drawn, so it is centred by its own geometry and not by a font's.
+  const clock = element.find('svg').at(-1)!;
+
+  assert.equal(clock.attributes['class'], 'glyph clock');
+  assert.equal(clock.attributes['viewBox'], '0 0 16 16');
+
+  assert.deepEqual(
+    clock.find('circle').map((c) => [c.attributes['cx'], c.attributes['cy']]),
+    [['8', '8']],
+  );
+
+  assert.ok(!element.textContent.includes('◷'));
 
   assert.deepEqual(
     element
@@ -356,7 +382,9 @@ test('distributed badge renders current/expired/revoked evidence and fails close
 
   await client.mountBadge(element, { connectionId: 'original' });
   assert.match(element.textContent, /Revoked/);
-  assert.equal(element.find('svg').length, 2);
+  assert.equal(element.find('svg').at(-1)!.attributes['class'], 'glyph dash');
+  assert.ok(!element.textContent.includes('–'));
+  assert.equal(element.find('svg').length, 3);
 
   assert.deepEqual(
     element
