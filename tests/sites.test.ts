@@ -25,6 +25,8 @@ const sites = [
     origin: 'https://other.test',
     authorizeUrl: 'https://other.test/verity/authorize',
     returnUrl: 'https://other.test/verity/return',
+    // This site's holders are offered Discord and nothing else the instance has.
+    providers: ['discord'],
   },
 ];
 
@@ -64,6 +66,8 @@ function instance() {
         OWNER_KEY: 'a'.repeat(43),
         GITHUB_CLIENT_ID: 'test-client',
         GITHUB_CLIENT_SECRET: 'test-secret',
+        DISCORD_CLIENT_ID: 'discord-client',
+        DISCORD_CLIENT_SECRET: 'discord-secret',
         SITES: JSON.stringify(sites),
         SITE_PARTNER_KEY: partnerKey,
         SITE_OTHER_KEY: otherKey,
@@ -355,7 +359,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     assert.match(
       review.headers.get('content-security-policy')!,
-      /form-action 'self' https:\/\/github\.com https:\/\/partner\.test https:\/\/other\.test/,
+      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test https:\/\/other\.test/,
     );
 
     const approved = await a.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
@@ -716,6 +720,63 @@ test('the alarm deletes abandoned handoffs, expired sessions and idle buckets, a
     }
 
     assert.match(await (await session.fetch('/api/verity/verify')).text(), /Account on Partner/);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('a site that lists its providers has its holders offered those, and held to them', async () => {
+  const { mf, browser } = instance();
+
+  try {
+    const member = browser('192.0.2.30');
+
+    const token = handoff(
+      await member.begin('other'),
+      { site: 'other', profileUrl: 'https://other.test/u/alice' },
+      otherKey,
+    );
+
+    assert.equal((await member.fetch(`/start?token=${token}`)).status, 303);
+
+    const offered = await (await member.fetch('/api/verity/verify')).text();
+
+    assert.match(offered, /<h1>Verify with Discord<\/h1>/);
+    assert.match(offered, /Account on Other/);
+    assert.ok(!offered.includes('GitHub'));
+
+    // Asking for another provider by hand is refused, either way a flow can be started.
+    for (const method of ['oauth', 'backlink']) {
+      const query = `kind=connect&provider=github&method=${method}`;
+
+      assert.equal((await member.fetch(`/api/verity/sessions?${query}`)).status, 404, method);
+      assert.equal((await member.post('/api/verity/sessions', query)).status, 404, method);
+    }
+
+    assert.equal((await member.fetch('/api/verity/verify?provider=github')).status, 404);
+
+    // Asking for nothing runs the first one the site lists, not the first one configured.
+    for (const start of [
+      await member.fetch('/api/verity/sessions?kind=connect'),
+      await member.post('/api/verity/sessions', 'kind=connect'),
+    ]) {
+      assert.equal(start.status, 303);
+      assert.equal(new URL(start.headers.get('location')!).host, 'discord.com');
+    }
+
+    // A site that lists none keeps everything, as does the owner.
+    const all = browser('192.0.2.31');
+
+    await all.fetch(`/start?token=${handoff(await all.begin())}`);
+    const everything = await (await all.fetch('/api/verity/verify')).text();
+
+    assert.match(everything, /Sign in with GitHub/);
+    assert.match(everything, /Sign in with Discord/);
+
+    const owner = browser('192.0.2.32');
+
+    await owner.post('/login', `key=${'a'.repeat(43)}`);
+    assert.match(await (await owner.fetch('/api/verity/verify')).text(), /Sign in with GitHub/);
   } finally {
     await mf.dispose();
   }

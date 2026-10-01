@@ -343,6 +343,97 @@ test('a lost response is recovered with the same result, and a cancelled flow re
   assert.match(page.headers.get('location')!, /phase=cancelled/);
 });
 
+test('a subject is offered and held to the providers chosen for it', async () => {
+  const f = fixture({
+    providersFor: (local) => (local.siteName === 'Partner' ? ['notes'] : undefined),
+  });
+
+  const cookie = 'local=member';
+  const page = await (await f.request('/verify', { headers: { cookie } })).text();
+
+  assert.match(page, /<h1>Verify with Notes<\/h1>/);
+  assert.ok(!page.includes('GitHub'));
+
+  const methods = (await (await f.request('/methods', { headers: { cookie } })).json()) as {
+    methods: { provider: string }[];
+  };
+
+  assert.deepEqual(
+    methods.methods.map((m) => m.provider),
+    ['notes'],
+  );
+
+  assert.equal((await f.post('/sessions', 'kind=connect&provider=github', cookie)).status, 404);
+  assert.equal((await f.post('/sessions', 'kind=connect&method=oauth', cookie)).status, 404);
+
+  // Nothing asked for is the first one permitted, which here is not the first configured.
+  const started = await f.post('/sessions', 'kind=connect', cookie);
+
+  assert.match(started.headers.get('location')!, /\/api\/verity\/flows\//);
+
+  // A record made before its provider was taken away can no longer be renewed by it.
+  const open = fixture();
+  const flow = await open.approval('member');
+
+  await open.post(`${flow.path}/approve`, 'action=approve&visibility=public', flow.cookie);
+  const [record] = await open.app.service.mine(member);
+
+  const narrowed = createVerity({
+    ...open.app.service.options,
+    reportUrl: 'mailto:reports@verifier.test',
+    authenticate: async () => member,
+    providersFor: () => ['notes'],
+  });
+
+  const renew = await narrowed.handle(
+    new Request(`${origin}/api/verity/sessions`, {
+      method: 'POST',
+      headers: { origin },
+      body: `kind=renew&connectionId=${record!.id}`,
+    }),
+  );
+
+  assert.equal(renew.status, 404);
+
+  // Whoever holds the external account can still remove it, whatever the subject may use.
+  const removal = await narrowed.handle(
+    new Request(`${origin}/api/verity/sessions`, {
+      method: 'POST',
+      headers: { origin },
+      body: `kind=revoke&connectionId=${record!.id}`,
+    }),
+  );
+
+  assert.equal(removal.status, 303);
+
+  // Listed in the other order than configured, the list's order is the one that holds.
+  const reversed = fixture({ providersFor: () => ['notes', 'github', 'notes', 'absent'] });
+
+  const ordered = (await (await reversed.request('/methods', { headers: { cookie } })).json()) as {
+    methods: { provider: string }[];
+  };
+
+  assert.deepEqual(
+    ordered.methods.map((m) => m.provider),
+    ['notes', 'github'],
+  );
+
+  const listed = await (await reversed.request('/verify', { headers: { cookie } })).text();
+
+  assert.ok(listed.indexOf('Publish a proof on Notes') < listed.indexOf('Sign in with GitHub'));
+
+  assert.match(
+    (await reversed.post('/sessions', 'kind=connect', cookie)).headers.get('location')!,
+    /\/api\/verity\/flows\//,
+  );
+
+  // A subject nothing was chosen for keeps every method.
+  assert.match(
+    await (await f.request('/verify', { headers: { cookie: 'local=alice' } })).text(),
+    /Sign in with GitHub/,
+  );
+});
+
 test('a form target must be an origin', () => {
   assert.throws(
     () => fixture({ formTargets: ['https://partner.test/return'] }),

@@ -61,6 +61,12 @@ export interface ServerOptions extends ServiceOptions {
    * `finish` sends a holder, since an approval form's redirect is held to `form-action`.
    */
   formTargets?: string[];
+  /**
+   * The provider ids a subject may use, where not every subject gets every one: an
+   * instance serving several sites offers each site's subjects what that site chose.
+   * Undefined means all of them. Removal from the external side is never narrowed.
+   */
+  providersFor?(local: LocalAccount): string[] | undefined;
 }
 
 /** A flow that has ended, as `finish` is given it: all of it read from the stored flow. */
@@ -408,6 +414,56 @@ export function createVerity(options: ServerOptions) {
   }
 
   /**
+   * The configured methods a subject may use. Where a list was chosen for it, they come in
+   * that list's order, since the first is what a flow runs when nothing is asked for. A
+   * provider shown several ways keeps its methods together, in the order configured, and
+   * an id this instance does not configure is passed over.
+   */
+  function permitted(user: LocalAccount): Provider[] {
+    const ids = options.providersFor?.(user);
+
+    return ids
+      ? [...new Set(ids)].flatMap((id) => service.providers.filter((p) => p.id === id))
+      : service.providers;
+  }
+
+  /**
+   * The method a new flow runs, held to what its subject may use. Asking for nothing means
+   * the first one permitted, not the first one configured, and a flow on an existing record
+   * must be on a record whose provider the subject may still use.
+   */
+  async function choose(
+    user: LocalAccount | undefined,
+    connectionId: string | undefined,
+    choice: { provider?: string; method?: string },
+  ) {
+    // Nobody local started it, so there is nobody whose choices could narrow it.
+    if (!user) return choice;
+
+    const offered = permitted(user);
+
+    if (offered === service.providers) return choice;
+
+    if (connectionId) {
+      const held = (await service.read(connectionId, user)).provider;
+
+      if (!offered.some((p) => p.id === held)) throw new Unavailable();
+
+      if (choice.provider === undefined && choice.method === undefined) return choice;
+    }
+
+    const found = offered.find(
+      (p) =>
+        (choice.provider === undefined || p.id === choice.provider) &&
+        (choice.method === undefined || providerMethod(p) === choice.method),
+    );
+
+    if (!found) throw new Unavailable();
+
+    return { provider: found.id, method: providerMethod(found) };
+  }
+
+  /**
    * The methods a page offers. A flow on an existing record stays in its namespace, so
    * where the holder is signed in that record narrows the list; removing a link from the
    * external side refuses a standing proof, which anybody can hand back.
@@ -422,7 +478,7 @@ export function createVerity(options: ServerOptions) {
 
     if (user && id) namespace = (await service.read(id, user)).provider;
 
-    const offered = service.providers.filter(
+    const offered = (user ? permitted(user) : service.providers).filter(
       (p) =>
         (namespace === undefined || p.id === namespace) &&
         !(['revoke', 'share-revoke'].includes(kind) && isArtifactProvider(p) && p.expect),
@@ -654,30 +710,33 @@ export function createVerity(options: ServerOptions) {
         }
 
         if (path === '/sessions' && url.searchParams.get('kind') === 'connect') {
+          const user = await local(request);
+
           const flow = await service.start(
-            await local(request),
+            user,
             undefined,
             'connect',
-            {
+            await choose(user, undefined, {
               provider: url.searchParams.get('provider') ?? undefined,
               method: url.searchParams.get('method') ?? undefined,
-            },
+            }),
             await context(request, 'connect'),
           );
 
           return redirect(entry(flow), flowCookie(flow.binding));
         }
 
-        // What the in-page dialog offers: every configured method, for the signed-in holder.
+        // What the in-page dialog offers: every method the signed-in holder may use.
         if (path === '/methods') {
           const user = await local(request);
-          const several = service.providers.length > 1;
+          const offered = permitted(user);
+          const several = offered.length > 1;
 
           return json({
             siteName: service.siteOf(user),
             verifierName: options.verifierName,
             local: subject(user),
-            methods: service.providers.map((p) => ({
+            methods: offered.map((p) => ({
               provider: p.id,
               method: providerMethod(p),
               name: p.name,
@@ -807,9 +866,8 @@ export function createVerity(options: ServerOptions) {
         const asJson = request.headers.get('content-type')?.startsWith('application/json');
 
         if (path === '/connect') {
-          await local(request);
-
-          const provider = service.resolve(data.provider);
+          const user = await local(request);
+          const provider = service.resolve((await choose(user, undefined, data)).provider);
 
           return json({
             url: `${service.baseUrl}/verify?provider=${encodeURIComponent(provider.id)}`,
@@ -824,11 +882,16 @@ export function createVerity(options: ServerOptions) {
 
           const kind = data.kind as Flow['kind'];
 
+          const user = ['revoke', 'share-revoke'].includes(kind) ? undefined : await local(request);
+
           const flow = await service.start(
-            ['revoke', 'share-revoke'].includes(kind) ? undefined : await local(request),
+            user,
             data.connectionId || undefined,
             kind,
-            { provider: data.provider || undefined, method: data.method || undefined },
+            await choose(user, data.connectionId || undefined, {
+              provider: data.provider || undefined,
+              method: data.method || undefined,
+            }),
             await context(request, kind),
           );
 

@@ -62,6 +62,8 @@
     //     "origin": "https://partner.example",
     //     "authorizeUrl": "https://partner.example/verity/authorize",
     //     "returnUrl": "https://partner.example/verity/return",
+    //     // Optional: the provider ids its holders may use. Omit for all of them.
+    //     "providers": ["discord", "youtube"],
     //   },
     // ],
   },

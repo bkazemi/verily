@@ -28,6 +28,8 @@ export interface Site {
   returnUrl: string;
   /** Shared with the site's backend. Signs handoffs one way and results the other. */
   key: string;
+  /** The provider ids its holders may use. Absent means every one this instance offers. */
+  providers?: string[];
 }
 
 export type Purpose = 'connect' | 'manage';
@@ -82,7 +84,7 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
   const sites = new Map<string, Site>();
 
   for (const entry of list as Record<string, unknown>[]) {
-    const { id, name, origin, authorizeUrl, returnUrl } = entry ?? {};
+    const { id, name, origin, authorizeUrl, returnUrl, providers } = entry ?? {};
 
     if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id) || sites.has(id))
       throw new Error('Each site needs a unique id of lowercase letters, digits and hyphens');
@@ -102,6 +104,14 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
     if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(key))
       throw new Error(`Site ${id} needs a random base64url key of at least 32 bytes`);
 
+    if (
+      providers !== undefined &&
+      (!Array.isArray(providers) ||
+        !providers.length ||
+        providers.some((p) => typeof p !== 'string' || !p))
+    )
+      throw new Error(`Site ${id} must list at least one provider id, or none at all`);
+
     sites.set(id, {
       id,
       name,
@@ -109,6 +119,7 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
       authorizeUrl: authorizeUrl as string,
       returnUrl: returnUrl as string,
       key,
+      ...(providers ? { providers: providers as string[] } : {}),
     });
   }
 

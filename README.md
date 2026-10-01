@@ -238,6 +238,8 @@ Three options tie a flow to the site that sent the holder:
 | `finish({ id, context, local, result })` | Where to send the holder once a flow has ended, or `undefined` for the result page. It runs each time the result page loads, so it must depend only on what it is given.     |
 | `formTargets`                            | Origins `finish` may send a holder to. Browsers hold a form's redirects to `form-action`, and the approval form is what redirects, so these origins are added to the policy. |
 
+A fourth, `providersFor(local)`, returns the provider ids a subject may use, for a backend whose sites don't all offer the same ones. The subject is offered those alone, and a flow for any other is refused.
+
 `result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)), and [`example/tenant.ts`](example/tenant.ts) is everything such a site does: sign a handoff for its signed-in user and check the result that comes back.
 
 ## Operations

@@ -267,6 +267,11 @@ export class VerityStore {
             }
           : undefined;
       },
+      // A site's holders get the providers that site chose. The owner has no site.
+      providersFor: (local) =>
+        local.id.includes(':')
+          ? this.sites.sites.get(local.id.split(':')[0]!)?.providers
+          : undefined,
       finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
     });
 
