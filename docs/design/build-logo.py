@@ -1,8 +1,13 @@
 """Verity logotype: the V mark as the 'V', 'erity' set in Rubik and outlined.
 
-Regenerates verity-logo.svg / verity-logo-inverted.svg. The wordmark ships as
-outlines so the files carry no font dependency; Rubik is OFL, see
+Regenerates verity-logo.svg / verity-logo-inverted.svg / verity-logo-plate.svg. The
+wordmark ships as outlines so the files carry no font dependency; Rubik is OFL, see
 docs/licenses/rubik.txt.
+
+The plate version carries its own dark background, so it reads the same on any page. It is
+the one the README uses: a README is shown on pages that are always light as well as on
+ones that follow the reader's theme, and a logo that swaps with the theme loses its letters
+on the first kind.
 
     pip install fonttools uharfbuzz
     curl -o rubik-400.ttf https://fonts.gstatic.com/s/rubik/v31/iJWZBXyIfDnIV5PNhY1KTN7Z-Yh-B4i1UA.ttf
@@ -45,7 +50,8 @@ RED = [A_out, TIP, C_out, C_in, INNER, A_in]
 GRN = [P1_out, TIP, P2_out, P2_in, INNER, P1_in]
 M = {"left": A_out[0], "right": C_out[0], "mid_top": TL[1], "tip": TIP[1]}
 
-def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", out="logo.svg"):
+def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", out="logo.svg",
+          plate=None):
     path = f"rubik-{weight}.ttf"
     tt = TTFont(path); gs = tt.getGlyphSet(); order = tt.getGlyphOrder()
     s = (CAP + overshoot) / (M["tip"] - M["mid_top"])
@@ -74,10 +80,14 @@ def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", 
     def poly(ps): return "M" + " ".join(f"{a:g} {b:g}" for a, b in map(T, ps)) + "Z"
 
     y0, y1 = CAP - ASC, CAP - DESC
-    vb = f"0 {y0:g} {right:g} {y1 - y0:g}"
+    pad = round(right * 0.07) if plate else 0    # room around the logotype inside its plate
+    vb = f"{-pad:g} {y0 - pad:g} {right + 2 * pad:g} {y1 - y0 + 2 * pad:g}"
+    back = (f'  <rect x="{-pad:g}" y="{y0 - pad:g}" width="{right + 2 * pad:g}" '
+            f'height="{y1 - y0 + 2 * pad:g}" rx="{round(pad * 0.9):g}" fill="{plate}" />\n') if plate else ""
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" role="img" '
            f'aria-labelledby="verity-logo-title">\n'
            f'  <title id="verity-logo-title">Verity</title>\n'
+           f'{back}'
            f'  <path d="{poly(RED)}" fill="#D3444C" />\n'
            f'  <path d="{poly(GRN)}" fill="#149766" />\n'
            f'  <path d="{word_d}" fill="{word}" />\n</svg>\n')
@@ -87,3 +97,4 @@ def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", 
 if __name__ == "__main__":
     build(tighten=70, out="verity-logo.svg")
     build(tighten=70, word="#ffffff", out="verity-logo-inverted.svg")
+    build(tighten=70, word="#ffffff", plate="#0d1117", out="verity-logo-plate.svg")

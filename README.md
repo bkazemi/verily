@@ -1,8 +1,5 @@
 <h1 align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/design/verity-logo-inverted.svg" />
-    <img src="docs/design/verity-logo.svg" alt="Verity" width="280" />
-  </picture>
+  <img src="docs/design/verity-logo-plate.svg" alt="Verity" width="320" />
 </h1>
 
 <p align="center">
