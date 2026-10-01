@@ -636,8 +636,11 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
        * Evidence an embed already fetched, handed over before the badge is presented so
        * its first paint is the finished pill rather than a placeholder replaced a round
        * trip later. It seeds one paint only; every later refresh is fetched.
+       *
+       * Declared only: a field of the class would be set afresh when the element is
+       * upgraded, wiping evidence a page assigned before this script had run.
        */
-      evidence?: Evidence;
+      declare evidence?: Evidence;
 
       /**
        * A badge may be placed before its connection is known: it then waits, showing the
