@@ -18,6 +18,7 @@ import {
   type LocalAccount,
   type Provider,
   type RedirectProvider,
+  type Visibility,
 } from '../core/index.js';
 import { VerityService, Unavailable, type ServiceOptions } from './service.js';
 import { copyScript } from './copy.js';
@@ -67,6 +68,13 @@ export interface ServerOptions extends ServiceOptions {
    * Undefined means all of them. Removal from the external side is never narrowed.
    */
   providersFor?(local: LocalAccount): string[] | undefined;
+  /**
+   * The visibilities a subject may choose, where a site does not offer both. Undefined
+   * means both. With one, the approval page states it and offers no choice, and there is
+   * nothing for a visibility flow to change. A record made before the choice was narrowed
+   * keeps the visibility it has.
+   */
+  visibilityFor?(local: LocalAccount): Visibility[] | undefined;
 }
 
 /** A flow that has ended, as `finish` is given it: all of it read from the stored flow. */
@@ -282,18 +290,22 @@ function safeUrl(value: string) {
 }
 
 /**
- * The holder's choice of who may read the record. A subject from another site is told what
- * each choice means there: that site shows a public link on the holder's profile, and keeps
- * an unlisted one in its own records, since it cannot read the evidence either.
+ * The holder's choice of who may read the record, or the one visibility there is when the
+ * subject has no choice. A subject from another site is told what each means there: that
+ * site can read an unlisted link and decides who on it sees the link, and nobody else can
+ * read it at all, while a public one is readable by anyone anywhere.
  */
-function visibilityChoice(local: LocalAccount) {
+function visibilityChoice(local: LocalAccount, allowed: Visibility[]) {
   const unlisted = local.siteName
-    ? `Kept between you and ${local.siteName}'s records. No badge appears on your profile.`
+    ? `Only ${local.siteName} can read this link, and it chooses who there sees it. Nobody else can.`
     : 'Anyone with a sharing link can view and forward it. No link is created until you choose to share.';
 
   const shown = local.siteName
-    ? `Public: ${local.siteName} shows the badge on your profile, and anyone can view both sides of this link`
+    ? `Public: anyone can view both sides of this link, on ${local.siteName} or anywhere else`
     : 'Public: anyone can view both sides of this link';
+
+  if (allowed.length === 1)
+    return `<input type="hidden" name="visibility" value="${allowed[0]}"><p class="fine">${escape(allowed[0] === 'unlisted' ? `Unlisted. ${unlisted}` : `${shown}.`)}</p>`;
 
   return `<fieldset><legend>Evidence visibility</legend><label><input type="radio" name="visibility" value="unlisted" checked>Unlisted</label><p>${escape(unlisted)}</p><label><input type="radio" name="visibility" value="public">${escape(shown)}</label></fieldset>`;
 }
@@ -425,6 +437,15 @@ export function createVerity(options: ServerOptions) {
     return ids
       ? [...new Set(ids)].flatMap((id) => service.providers.filter((p) => p.id === id))
       : service.providers;
+  }
+
+  /** The visibilities a subject may choose: both, unless fewer were chosen for it. */
+  function visibilities(user: LocalAccount): Visibility[] {
+    const chosen = options.visibilityFor?.(user);
+
+    return chosen
+      ? (['unlisted', 'public'] as const).filter((v) => chosen.includes(v))
+      : ['unlisted', 'public'];
   }
 
   /**
@@ -577,6 +598,7 @@ export function createVerity(options: ServerOptions) {
         local: subject(flow.local!),
         external: flow.external,
         ...(joined ? { joined: { visibility: joined.visibility } } : {}),
+        visibilities: visibilities(flow.local!),
       });
     }
 
@@ -665,6 +687,9 @@ export function createVerity(options: ServerOptions) {
           const user = external ? undefined : await local(request);
           const id = kind === 'connect' ? '' : path.split('/').at(-1)!;
           const offered = await offer(kind, id, user, url.searchParams.get('provider'));
+
+          // With one visibility there is nothing for the holder to change it to.
+          if (kind === 'visibility' && visibilities(user!).length < 2) throw new Unavailable();
 
           // One form per method. With one on offer the provider is all there is to name.
           const forms = offered
@@ -810,7 +835,7 @@ export function createVerity(options: ServerOptions) {
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/approve">
-            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!)}
+            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!))}
             <button name="action" value="approve">${['revoke', 'share-revoke'].includes(flow.kind) ? (flow.kind === 'share-revoke' ? 'Revoke sharing link' : 'Revoke connection') : flow.kind === 'renew' ? 'Renew connection' : joined ? 'Add to connection' : 'Confirm connection'}</button>
             <button name="action" value="cancel">Cancel</button></form><p><a href="${escape(prefix)}/verify">Use a different external account</a></p>`,
             ),
@@ -884,6 +909,8 @@ export function createVerity(options: ServerOptions) {
 
           const user = ['revoke', 'share-revoke'].includes(kind) ? undefined : await local(request);
 
+          if (kind === 'visibility' && visibilities(user!).length < 2) throw new Unavailable();
+
           const flow = await service.start(
             user,
             data.connectionId || undefined,
@@ -935,12 +962,18 @@ export function createVerity(options: ServerOptions) {
           // loading it does: whoever signed the holder in may have ended that session since.
           if (!asJson && flow.result) return await ended(flow);
 
+          const user = ['revoke', 'share-revoke'].includes(flow.kind)
+            ? undefined
+            : await local(request);
+
           const id = await service.approve(
             flow.id,
             binding(request),
-            ['revoke', 'share-revoke'].includes(flow.kind) ? undefined : await local(request),
+            user,
             data.visibility as 'public' | 'unlisted',
             data.action === 'cancel',
+            // Held to what the subject may choose where the approval sets the visibility.
+            user && visibilities(user),
           );
 
           if (asJson)

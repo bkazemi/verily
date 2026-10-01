@@ -981,6 +981,48 @@ test('closing the dialog while an approval is out still reports the connection i
   assert.deepEqual({ ...(await result) }, { outcome: 'complete', connectionId: 'c9' });
 });
 
+test('a holder with one visibility to choose is shown it, not offered a choice, and it is what is sent', async () => {
+  for (const only of ['public', 'unlisted'] as const) {
+    const sent: string[] = [];
+
+    const { dialog, press } = await connectHarness(async (path, body) => {
+      if (path === '/methods') return connectMethods;
+
+      if (path === '/sessions') return { ...approvalView, visibilities: [only] };
+
+      sent.push(body!);
+
+      return { outcome: 'complete', connectionId: 'c9' };
+    });
+
+    await press('Sign in with GitHub');
+
+    assert.equal(dialog.all().filter((e) => e.tagName === 'input').length, 0);
+
+    assert.match(
+      dialog.textContent,
+      only === 'public' ? /Public: anyone/ : /Unlisted: only people/,
+    );
+
+    assert.doesNotMatch(dialog.textContent, only === 'public' ? /Unlisted/ : /Public/);
+
+    await press('Confirm connection');
+    assert.equal(JSON.parse(sent[0]!).visibility, only);
+  }
+
+  // Told of both, or told nothing by an older backend, it offers the choice as before.
+  for (const visibilities of [['unlisted', 'public'], undefined]) {
+    const { dialog, press } = await connectHarness(async (path) => {
+      if (path === '/methods') return connectMethods;
+
+      return { ...approvalView, ...(visibilities ? { visibilities } : {}) };
+    });
+
+    await press('Sign in with GitHub');
+    assert.equal(dialog.all().filter((e) => e.tagName === 'input').length, 2);
+  }
+});
+
 test('cancel cannot race a confirmation that is still out', async () => {
   const answers: ((value: unknown) => void)[] = [];
 

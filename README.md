@@ -31,6 +31,13 @@ It doesn't sign anyone into your site, and it doesn't establish legal identity.
 4. A `<verity-badge>` on their profile shows the external account. Clicking it opens the evidence.
 5. Verity keeps the record honest: published proofs are re-read, records expire, and either side can revoke.
 
+## Two ways to use it
+
+- **Run it yourself.** Your site hosts Verity beside its own backend and registers its own app with each sign-in provider. Everything from [Install](#install) to [Operations](#operations) is this. Nothing else is needed, and nothing depends on anyone else's server.
+- **Use an instance someone else runs.** The instance holds the provider apps and the records, and your site registers nothing with any provider. Your backend makes two calls. See [Using a hosted instance](#using-a-hosted-instance).
+
+Both give your backend the same records in the same shape, so the code that shows them does not change if you move from one to the other.
+
 ## Install
 
 ```sh
@@ -226,6 +233,70 @@ A static site only needs the script and the badge markup; the backend runs somew
 
 Run the backend on a domain readers can connect to your site, because `PUBLIC_ORIGIN` is shown as the verifier. If your site sets a Content Security Policy, allow the backend in `connect-src`.
 
+## Using a hosted instance
+
+A site can use an instance someone else runs. The instance's operator registers your site and gives you its id and a key. You register nothing with any sign-in provider, store no Verity records and run no Verity backend. Your backend sends a signed-in user to the instance and reads their connections back.
+
+```ts
+import { createSiteClient } from '@bkazemi/verity/site';
+
+const verity = createSiteClient({
+  instance: 'https://verity.example',
+  site: 'your-site-id',
+  key: process.env.VERITY_SITE_KEY,
+});
+```
+
+The client has no dependencies and uses only Web Crypto and `fetch`, so it runs on Node, Next.js, Workers, Deno and Bun. Use it only on your backend: the key is what the instance believes.
+
+**1. Link to the instance.** Put a link on your settings page, to `verity.beginUrl()`, or to `verity.beginUrl('manage')` for a user who wants to renew or remove a link.
+
+**2. Add the authorize endpoint.** The instance sends the user to the authorize URL you registered, with a `state`. Check your own session, then vouch for that user:
+
+```ts
+// GET /verity/authorize
+const user = await yourSession(request);
+if (!user) return redirect('/login');
+
+const { url } = await verity.authorize(new URL(request.url).searchParams.get('state'), {
+  id: user.id, // private and stable; the instance never shows it
+  label: user.displayName,
+  reference: user.handle, // durable and safe to show; never an email
+});
+
+return redirect(url);
+```
+
+**3. Add the return endpoint.** When the user is done they arrive at the return URL you registered. Send them wherever you like:
+
+```ts
+// GET /verity/return
+return redirect('/settings');
+```
+
+**4. Read connections where you show them.**
+
+```ts
+const { [user.id]: connections } = await verity.connections([user.id]);
+const verified = connections.filter((c) => c.status === 'verified');
+```
+
+Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. A public one can also be shown with the [badge](#show-the-badge), pointed at the instance. `connections()` takes any number of ids, so read a whole page of users in one call, and cache the answer briefly.
+
+If you would rather your user ids never left your site, send a stand-in:
+
+```ts
+import { pseudonym } from '@bkazemi/verity/site';
+
+const id = await pseudonym(process.env.VERITY_ID_SECRET, user.id);
+```
+
+The same secret and user always give the same stand-in, so nothing is stored. That secret must never change, so keep one for this alone.
+
+The return carries a signed `result` saying what the user did. A site that reads its connections, as above, can ignore it. A site that keeps its own copy checks it with `verity.result(token)`, and must also check that it is for the signed-in user and for the handoff it is waiting on; [`example/tenant.ts`](example/tenant.ts) does this.
+
+**Moving to your own instance.** Hosting Verity yourself replaces `verity.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Set up the server](#set-up-the-server). Records are not moved between instances, so users verify again.
+
 ## Serving other sites
 
 One backend can serve sites that don't run Verity themselves, so none of them registers anything with a sign-in provider. A subject from such a site names it in `LocalAccount.siteName`, and every page, proof line and record describing that subject uses the name in place of the `siteName` option. The backend stays the verifier.
@@ -238,9 +309,9 @@ Three options tie a flow to the site that sent the holder:
 | `finish({ id, context, local, result })` | Where to send the holder once a flow has ended, or `undefined` for the result page. It runs each time the result page loads, so it must depend only on what it is given.     |
 | `formTargets`                            | Origins `finish` may send a holder to. Browsers hold a form's redirects to `form-action`, and the approval form is what redirects, so these origins are added to the policy. |
 
-A fourth, `providersFor(local)`, returns the provider ids a subject may use, for a backend whose sites don't all offer the same ones. The subject is offered those alone, and a flow for any other is refused.
+Two more narrow what a subject is offered, for a backend whose sites don't all want the same. `providersFor(local)` returns the provider ids a subject may use: it is offered those alone, in that order, and a flow for any other is refused. `visibilityFor(local)` returns the visibilities it may choose: with one, the approval page states it and offers no choice.
 
-`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)), and [`example/tenant.ts`](example/tenant.ts) is everything such a site does: sign a handoff for its signed-in user and check the result that comes back.
+`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
 
 ## Operations
 

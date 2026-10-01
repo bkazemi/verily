@@ -74,6 +74,10 @@
         "default": "./dist/browser.js"
       }
     },
+    "./site": {
+      "types": "./dist/site/index.d.ts",
+      "default": "./dist/site/index.js"
+    },
     "./verity.js": "./dist/verity.js"
   }
 }

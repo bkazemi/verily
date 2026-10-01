@@ -33,6 +33,8 @@ export interface FlowView {
   local?: Subject;
   external?: ExternalAccount;
   joined?: { visibility: 'public' | 'unlisted' };
+  /** What the holder may choose. Absent, from an older backend, means either. */
+  visibilities?: ('public' | 'unlisted')[];
   reason?: string;
   connectionId?: string;
 }
@@ -482,6 +484,14 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
     const parts: Node[] = [subjectCard(flow.local!), linkMark(), external];
     const choice = node('fieldset');
 
+    const visibilityText = {
+      unlisted: 'Unlisted: only people you share a link with can view it',
+      public: 'Public: anyone can view both sides of this link',
+    };
+
+    // The backend refuses any other, so the dialog neither offers one nor sends one.
+    const only = flow.visibilities?.length === 1 ? flow.visibilities[0] : undefined;
+
     if (flow.joined)
       parts.push(
         node(
@@ -489,13 +499,14 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
           `This account is already linked here. Confirming adds this method to that connection, and it stays ${flow.joined.visibility}.`,
         ),
       );
+    else if (only)
+      // Nothing to choose, so the one visibility there is gets said, not offered.
+      parts.push(node('p', visibilityText[only]));
     else {
       choice.append(node('legend', 'Evidence visibility'));
 
-      for (const [value, text] of [
-        ['unlisted', 'Unlisted: only people you share a link with can view it'],
-        ['public', 'Public: anyone can view both sides of this link'],
-      ] as const) {
+      for (const value of ['unlisted', 'public'] as const) {
+        const text = visibilityText[value];
         const option = node('label');
         const radio = Object.assign(node('input'), { type: 'radio', name: 'visibility', value });
 
@@ -528,7 +539,7 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
       deciding = true;
       const other = control === confirm ? cancel : confirm;
       const picked = choice.querySelector<HTMLInputElement>('input:checked');
-      const visibility = picked?.value === 'public' ? 'public' : 'unlisted';
+      const visibility = only ?? (picked?.value === 'public' ? 'public' : 'unlisted');
 
       other.disabled = true;
 

@@ -12,6 +12,9 @@ export const sessionMs = 3600000;
 /** How long a result stays acceptable. A flow expires sooner, so every retry of one is covered. */
 const resultMs = 10 * 60000;
 
+/** How many subjects one read may name. */
+const maxReadIds = 50;
+
 const stateCookie = 'verity_handoff';
 const sessionCookie = 'verity_site';
 
@@ -30,6 +33,8 @@ export interface Site {
   key: string;
   /** The provider ids its holders may use. Absent means every one this instance offers. */
   providers?: string[];
+  /** The visibilities its holders may choose. Absent means both. */
+  visibility?: Visibility[];
 }
 
 export type Purpose = 'connect' | 'manage';
@@ -84,7 +89,7 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
   const sites = new Map<string, Site>();
 
   for (const entry of list as Record<string, unknown>[]) {
-    const { id, name, origin, authorizeUrl, returnUrl, providers } = entry ?? {};
+    const { id, name, origin, authorizeUrl, returnUrl, providers, visibility } = entry ?? {};
 
     if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id) || sites.has(id))
       throw new Error('Each site needs a unique id of lowercase letters, digits and hyphens');
@@ -112,6 +117,14 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
     )
       throw new Error(`Site ${id} must list at least one provider id, or none at all`);
 
+    if (
+      visibility !== undefined &&
+      (!Array.isArray(visibility) ||
+        !visibility.length ||
+        visibility.some((v) => v !== 'public' && v !== 'unlisted'))
+    )
+      throw new Error(`Site ${id} must list "public", "unlisted" or both, or no visibility at all`);
+
     sites.set(id, {
       id,
       name,
@@ -120,6 +133,7 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
       returnUrl: returnUrl as string,
       key,
       ...(providers ? { providers: providers as string[] } : {}),
+      ...(visibility ? { visibility: visibility as Visibility[] } : {}),
     });
   }
 
@@ -296,6 +310,37 @@ export class Sites {
       purpose,
       cookies: [setCookie(sessionCookie, session, sessionMs), setCookie(stateCookie, '', 0)],
     };
+  }
+
+  /**
+   * Checks a site backend's request to read its own subjects' connections: a token under
+   * that site's key, marked as a read so that a handoff token, which passes through a
+   * browser, is never one. The ids are the site's own, as it sends them in a handoff, and
+   * are only ever looked up under its prefix, so no site reaches another's subjects.
+   */
+  read(token: string): { site: Site; ids: string[] } | undefined {
+    const site = this.sites.get(String(peek(token)?.site ?? ''));
+
+    if (!site) return undefined;
+
+    const payload = open(site.key, token);
+    const now = Date.now();
+
+    if (
+      !payload ||
+      payload.site !== site.id ||
+      payload.op !== 'read' ||
+      typeof payload.exp !== 'number' ||
+      payload.exp * 1000 <= now ||
+      payload.exp * 1000 > now + handoffMs ||
+      !Array.isArray(payload.ids) ||
+      !payload.ids.length ||
+      payload.ids.length > maxReadIds ||
+      !payload.ids.every((id) => string(id, 400))
+    )
+      return undefined;
+
+    return { site, ids: [...new Set(payload.ids as string[])] };
   }
 
   /** This browser's site session, whether or not it has returned yet. */

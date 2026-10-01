@@ -268,10 +268,8 @@ export class VerityStore {
           : undefined;
       },
       // A site's holders get the providers that site chose. The owner has no site.
-      providersFor: (local) =>
-        local.id.includes(':')
-          ? this.sites.sites.get(local.id.split(':')[0]!)?.providers
-          : undefined,
+      providersFor: (local) => this.siteOf(local)?.providers,
+      visibilityFor: (local) => this.siteOf(local)?.visibility,
       finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
     });
 
@@ -351,6 +349,8 @@ export class VerityStore {
       if (url.pathname === '/disconnect') return this.disconnect(request);
     }
 
+    if (request.method === 'GET' && url.pathname === '/site/connections') return this.read(request);
+
     if (request.method === 'GET' && url.pathname === '/begin') {
       const begun = await this.sites.begin(
         url.searchParams.get('site'),
@@ -426,6 +426,46 @@ export class VerityStore {
     }
 
     return signIn();
+  }
+
+  /** The site a subject belongs to, by its id's prefix. The owner's id has none. */
+  private siteOf(local: LocalAccount): Site | undefined {
+    return local.id.includes(':') ? this.sites.sites.get(local.id.split(':')[0]!) : undefined;
+  }
+
+  /**
+   * A site's backend reading its own subjects' connections, unlisted ones included, which
+   * nobody else can read. This is what lets a site show a link to its own users without the
+   * link being public. A refused request counts against the caller's address, and a good
+   * one against the site's own allowance, apart from the one its holders' handoffs share.
+   */
+  private async read(request: Request): Promise<Response> {
+    const asked = this.sites.read(
+      request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '',
+    );
+
+    if (
+      !(await allow(this.ctx.storage, [
+        asked
+          ? { key: `read/${asked.site.id}`, limit: limits.read }
+          : { key: client(request), limit: limits.client },
+      ]))
+    )
+      return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    if (!asked) return html('Unavailable', '', 404);
+
+    // No prototype, so an id such as `__proto__` is an entry like any other.
+    const connections: Record<string, Evidence[]> = Object.create(null);
+
+    for (const id of asked.ids)
+      connections[id] = await this.app.service.mine({
+        id: `${asked.site.id}:${id}`,
+      } as LocalAccount);
+
+    return new Response(JSON.stringify({ connections }), {
+      headers: { ...safeHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   private site(session: { site: string }): Site {
@@ -542,8 +582,8 @@ export class VerityStore {
 
     const shown = site
       ? e.visibility === 'public'
-        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><p class="fine">${escape(site.name)} shows this badge on your profile.</p>`
-        : `<p class="fine">${escape(site.name)} keeps this connection in its records and shows no badge.</p>`
+        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><p class="fine">Anyone can view this connection, on ${escape(site.name)} or anywhere else.</p>`
+        : `<p class="fine">Only ${escape(site.name)} can read this connection, and it chooses who there sees it.</p>`
       : e.visibility === 'public'
         ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>`
         : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
@@ -553,7 +593,7 @@ export class VerityStore {
         ? ''
         : `<p><a href="/api/verity/renew/${escape(e.id)}">Renew this connection</a></p>
       <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
-      <p><a href="/api/verity/visibility/${escape(e.id)}">Change visibility</a></p>
+      ${site?.visibility?.length === 1 ? '' : `<p><a href="/api/verity/visibility/${escape(e.id)}">Change visibility</a></p>`}
       ${
         site
           ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`

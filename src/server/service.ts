@@ -462,6 +462,12 @@ export class VerityService {
     local: LocalAccount | undefined,
     visibility: Visibility,
     cancel = false,
+    /**
+     * The visibilities this subject may choose, where it may not choose either. Checked at
+     * the point the record's visibility is set, inside the transaction that decides whether
+     * this approval makes a record or joins one, so no change in between gets past it.
+     */
+    allowed?: Visibility[],
   ) {
     if (!['public', 'unlisted'].includes(visibility)) throw new Unavailable();
 
@@ -496,6 +502,8 @@ export class VerityService {
         connection = joined;
         this.recordMethod(connection, flow, provider);
       } else if (flow.kind === 'connect') {
+        if (allowed && !allowed.includes(visibility)) throw new Unavailable();
+
         // The id exists before the record does, because a hosted proof is addressed by it.
         const connectionId = secret();
 
@@ -540,6 +548,8 @@ export class VerityService {
           connection.revokedAt = this.now();
           connection.revocationReason = 'external';
         } else if (flow.kind === 'visibility') {
+          if (allowed && !allowed.includes(visibility)) throw new Unavailable();
+
           connection.visibility = visibility;
           connection.visibilityApprovedAt = this.now();
         }

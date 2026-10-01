@@ -1,10 +1,14 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { createSiteClient } from '@bkazemi/verity/site';
 
 /**
  * A site that uses a public Verity instance instead of hosting its own: everything such a
- * site's backend does, and nothing more. It signs a handoff for its signed-in user, sends
- * them to the instance, and takes a signed result back. It registers nothing with any
- * sign-in provider and runs no Verity code of its own.
+ * site's backend does, and nothing more. It vouches for its signed-in user, sends them to
+ * the instance, and takes a signed result back, all through the site client. It registers
+ * nothing with any sign-in provider and runs no Verity backend of its own.
+ *
+ * This site shows public links as badges, so it keeps each result. A site that shows its
+ * users' links itself can skip that and ask the instance with `client.connections()`.
  */
 export interface TenantOptions {
   /** This site's own origin, as registered with the instance. */
@@ -31,38 +35,7 @@ interface User {
   /** The one transaction this user's next result must belong to. */
   pending?: string;
   /** The last result applied, so the same one arriving again is accepted and changes nothing. */
-  consumed?: { txn: string; payload: string };
-}
-
-const mac = (key: string, payload: Buffer) => createHmac('sha256', key).update(payload).digest();
-
-function sign(key: string, payload: object) {
-  const bytes = Buffer.from(JSON.stringify(payload));
-
-  return `${bytes.toString('base64url')}.${mac(key, bytes).toString('base64url')}`;
-}
-
-/** The payload and its exact bytes, if the MAC verifies. */
-function open(key: string, token: string) {
-  const [payload, given, ...rest] = token.split('.');
-
-  if (!payload || !given || rest.length) return undefined;
-
-  const bytes = Buffer.from(payload, 'base64url');
-  const signature = Buffer.from(given, 'base64url');
-  const expected = mac(key, bytes);
-
-  if (signature.length !== expected.length || !timingSafeEqual(signature, expected))
-    return undefined;
-
-  try {
-    return {
-      raw: bytes.toString(),
-      value: JSON.parse(bytes.toString()) as Record<string, unknown>,
-    };
-  } catch {
-    return undefined;
-  }
+  consumed?: { txn: string; token: string };
 }
 
 const escape = (value: string) =>
@@ -72,6 +45,12 @@ const escape = (value: string) =>
   );
 
 export function createTenant(options: TenantOptions) {
+  const client = createSiteClient({
+    instance: options.instance,
+    site: options.site,
+    key: options.key,
+  });
+
   const users = new Map<string, User>();
   const sessions = new Map<string, string>();
 
@@ -108,65 +87,50 @@ export function createTenant(options: TenantOptions) {
     return users.get(sessions.get(token ?? '') ?? '');
   }
 
-  const begin = (purpose: 'connect' | 'manage') =>
-    `${options.instance}/begin?${new URLSearchParams({ site: options.site, purpose })}`;
+  const begin = (purpose: 'connect' | 'manage') => client.beginUrl(purpose);
 
   /**
-   * Signs a handoff for this user, binding the state the instance gave this browser. Minting
-   * one records its transaction as the user's pending one, which supersedes any before it.
+   * Where to send this user with a handoff that vouches for them, binding the state the
+   * instance gave this browser. Its transaction becomes the user's pending one, which
+   * supersedes any before it.
    */
-  function authorize(user: User, state: string) {
-    const txn = randomBytes(16).toString('base64url');
-
-    user.pending = txn;
-
-    return sign(options.key, {
-      site: options.site,
-      state,
+  async function authorize(user: User, state: string) {
+    const { url, txn } = await client.authorize(state, {
       id: user.id,
       kind: 'account',
       label: user.name,
       reference: user.handle,
       profileUrl: `${options.origin}/u/${user.handle}`,
-      txn,
-      exp: Math.floor(Date.now() / 1000) + 240,
     });
+
+    user.pending = txn;
+
+    return url;
   }
 
   /**
-   * Takes a result for this user, or refuses it. It must be signed with this site's key and
-   * unexpired, for this user, and for their pending transaction, which it then consumes. The
-   * one result last consumed may arrive again, since a retry delivers the same token, and
-   * changes nothing. Anything else is stale or not theirs, and changes nothing either.
+   * Takes a result for this user, or refuses it. The client checks the instance signed it
+   * for this site and that it is in date. Because this site stores what a result says, it
+   * must also be for this user and for their pending transaction, which it then consumes.
+   * The one result last consumed may arrive again, since a retry delivers the same token,
+   * and changes nothing. Anything else is stale or not theirs, and changes nothing either.
    */
-  function receive(user: User, token: string): boolean {
-    const opened = open(options.key, token);
+  async function receive(user: User, token: string): Promise<boolean> {
+    const result = await client.result(token);
 
-    if (!opened) return false;
+    if (!result || result.id !== user.id) return false;
 
-    const result = opened.value;
-
-    if (
-      result.site !== options.site ||
-      result.id !== user.id ||
-      typeof result.exp !== 'number' ||
-      result.exp * 1000 <= Date.now() ||
-      typeof result.txn !== 'string'
-    )
-      return false;
-
-    if (user.consumed?.txn === result.txn) return user.consumed.payload === opened.raw;
+    if (user.consumed?.txn === result.txn) return user.consumed.token === token;
 
     if (user.pending !== result.txn) return false;
 
     user.pending = undefined;
-    user.consumed = { txn: result.txn, payload: opened.raw };
+    user.consumed = { txn: result.txn, token };
 
-    if (result.outcome !== 'complete' || typeof result.connection !== 'string') return true;
+    if (result.outcome !== 'complete' || !result.connection) return true;
 
     if (result.operation === 'disconnect') user.links.delete(result.connection);
-    else if (result.visibility === 'public' || result.visibility === 'unlisted')
-      user.links.set(result.connection, result.visibility);
+    else if (result.visibility) user.links.set(result.connection, result.visibility);
 
     return true;
   }
@@ -242,13 +206,11 @@ export function createTenant(options: TenantOptions) {
 
       if (!user || !state) return see('/');
 
-      return see(
-        `${options.instance}/start?${new URLSearchParams({ token: authorize(user, state) })}`,
-      );
+      return see(await authorize(user, state));
     }
 
     if (url.pathname === '/verity/return') {
-      if (!user || !receive(user, url.searchParams.get('result') ?? ''))
+      if (!user || !(await receive(user, url.searchParams.get('result') ?? '')))
         return page('Result not accepted', '<p>That result is stale or not yours.</p>', 400);
 
       return see(`/u/${user.handle}`);

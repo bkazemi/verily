@@ -102,8 +102,8 @@ test('a subject with its own site is described by that site, and the instance on
   pages.push(await review.text());
   assert.match(pages.at(-1)!, /Account on Partner/);
   assert.match(pages.at(-1)!, /Partner receives the result\. Verified via verifier\.test\./);
-  assert.match(pages.at(-1)!, /Kept between you and Partner&#39;s records/);
-  assert.match(pages.at(-1)!, /Public: Partner shows the badge on your profile/);
+  assert.match(pages.at(-1)!, /Only Partner can read this link, and it chooses who there sees it/);
+  assert.match(pages.at(-1)!, /Public: anyone can view both sides of this link, on Partner or/);
   assert.ok(!pages.at(-1)!.includes('sharing link'));
 
   const approved = await f.post(
@@ -431,6 +431,143 @@ test('a subject is offered and held to the providers chosen for it', async () =>
   assert.match(
     await (await f.request('/verify', { headers: { cookie: 'local=alice' } })).text(),
     /Sign in with GitHub/,
+  );
+});
+
+test('a subject held to one visibility is not offered the other, and cannot ask for it', async () => {
+  const f = fixture({
+    visibilityFor: (local) => (local.siteName === 'Partner' ? ['unlisted'] : undefined),
+  });
+
+  const flow = await f.approval('member');
+  const page = await (await f.request(flow.path, { headers: { cookie: flow.cookie } })).text();
+
+  // The in-page dialog is told the same, so it neither offers nor sends the other.
+  const view = (await (
+    await f.request(`${flow.path}?format=json`, { headers: { cookie: flow.cookie } })
+  ).json()) as { visibilities: string[] };
+
+  assert.deepEqual(view.visibilities, ['unlisted']);
+  assert.match(page, /<input type="hidden" name="visibility" value="unlisted">/);
+  assert.match(page, /Unlisted\. Only Partner can read this link/);
+  assert.ok(!page.includes('type="radio"'));
+  assert.ok(!page.includes('value="public"'));
+
+  // Asked for by hand, the other visibility is refused and the flow is still there to approve.
+  assert.equal(
+    (await f.post(`${flow.path}/approve`, 'action=approve&visibility=public', flow.cookie)).status,
+    404,
+  );
+
+  assert.equal((await f.app.service.mine(member)).length, 0);
+  await f.post(`${flow.path}/approve`, 'action=approve&visibility=unlisted', flow.cookie);
+
+  const [record] = await f.app.service.mine(member);
+
+  assert.equal(record!.visibility, 'unlisted');
+
+  // With one visibility there is nothing to change it to, by page or by form.
+  assert.equal(
+    (await f.request(`/visibility/${record!.id}`, { headers: { cookie: 'local=member' } })).status,
+    404,
+  );
+
+  assert.equal(
+    (await f.post('/sessions', `kind=visibility&connectionId=${record!.id}`, 'local=member'))
+      .status,
+    404,
+  );
+
+  // Renewing carries a visibility it never applies, so it is not held to the list.
+  const renewal = await f.approval('member', `kind=renew&connectionId=${record!.id}`);
+
+  assert.equal(
+    (await f.post(`${renewal.path}/approve`, 'action=approve&visibility=unlisted', renewal.cookie))
+      .status,
+    200,
+  );
+
+  // A subject nothing was chosen for still chooses, public included.
+  const free = await f.approval('alice');
+  const choice = await (await f.request(free.path, { headers: { cookie: free.cookie } })).text();
+
+  assert.match(choice, /type="radio" name="visibility" value="public"/);
+
+  assert.equal(
+    (await f.post(`${free.path}/approve`, 'action=approve&visibility=public', free.cookie)).status,
+    200,
+  );
+});
+
+test('a visibility is held to the list even when the record it would have joined goes away', async () => {
+  const artifact = { ...fakeArtifactProvider(), id: 'github', name: 'GitHub' };
+
+  const f = fixture({
+    providers: [fakeProvider(), artifact],
+    visibilityFor: () => ['unlisted'],
+  });
+
+  // A record first shown by signing in, then a second flow showing the same account another way.
+  const first = await f.approval('member');
+
+  await f.post(`${first.path}/approve`, 'action=approve&visibility=unlisted', first.cookie);
+  const [record] = await f.app.service.mine(member);
+
+  const begun = await f.post(
+    '/sessions',
+    'kind=connect&provider=github&method=gist',
+    'local=member',
+  );
+
+  const cookie = `${begun.headers.get('set-cookie')!.split(';')[0]!}; local=member`;
+  const path = begun.headers.get('location')!.replace('/api/verity', '');
+  const stored = await f.storage.transaction((tx) => tx.get('flows', path.split('/').at(-1)!));
+
+  artifact.artifacts.set('https://notes.test/proof', stored!.expect!);
+  await f.post(`${path}/submit`, 'artifact=https://notes.test/proof', cookie);
+
+  // It would join the record, which is why its page offers no visibility at all.
+  assert.match(
+    await (await f.request(path, { headers: { cookie } })).text(),
+    /already linked here/,
+  );
+
+  // The record is revoked after the request has read the flow and before it approves, so
+  // the approval makes a new record where it had been going to join one.
+  const transaction = f.storage.transaction.bind(f.storage);
+  let seen = 0;
+
+  f.storage.transaction = (async (work: never) => {
+    if (++seen === 2) {
+      f.storage.transaction = transaction;
+      await f.app.service.revoke(record!.id, member);
+    }
+
+    return transaction(work);
+  }) as typeof f.storage.transaction;
+
+  assert.equal(
+    (await f.post(`${path}/approve`, 'action=approve&visibility=public', cookie)).status,
+    404,
+  );
+
+  assert.equal(seen, 2);
+
+  const after = await f.app.service.mine(member);
+
+  assert.equal(after.length, 1);
+  assert.equal(after[0]!.status, 'revoked');
+  assert.ok(after.every((e) => e.visibility === 'unlisted'));
+
+  // The visibility it may have still works, and makes the new record.
+  assert.equal(
+    (await f.post(`${path}/approve`, 'action=approve&visibility=unlisted', cookie)).status,
+    200,
+  );
+
+  assert.deepEqual(
+    (await f.app.service.mine(member)).map((e) => e.visibility),
+    ['unlisted', 'unlisted'],
   );
 });
 

@@ -37,6 +37,12 @@ try {
     assert.equal(typeof linkProvider, 'function'); assert.equal(typeof discordProvider, 'function'); assert.equal(typeof youtubeProvider, 'function');
     assert.equal(githubLinkProvider().id, 'github');
     assert.equal(typeof PostgresStorage, 'function'); assert.equal(typeof status, 'function'); assert.equal(typeof init, 'function');
+    const { createSiteClient, pseudonym } = await import('@bkazemi/verity/site');
+    assert.equal(typeof pseudonym, 'function');
+    assert.equal(
+      createSiteClient({ instance: 'https://verity.example', site: 'example', key: 'k'.repeat(43) }).beginUrl(),
+      'https://verity.example/begin?site=example&purpose=connect',
+    );
     console.log(createRequire(import.meta.url).resolve('@bkazemi/verity/verity.js'));
   `,
   );
@@ -45,6 +51,11 @@ try {
     join(directory, 'consumer.ts'),
     `
     import { createVerity, PostgresStorage, Pool, init, type ServerOptions, type Evidence, type Storage } from '@bkazemi/verity';
+    import { createSiteClient, type SiteClient, type SiteResult } from '@bkazemi/verity/site';
+    const site: SiteClient = createSiteClient({ instance: 'https://verity.example', site: 'example', key: 'k'.repeat(43) });
+    const read: Promise<Record<string, Evidence[]>> = site.connections(['a']);
+    const returned: Promise<SiteResult | undefined> = site.result('token');
+    void [read, returned];
     const storage: Storage = new PostgresStorage(new Pool());
     const create: (options: ServerOptions) => ReturnType<typeof createVerity> = createVerity;
     const client = init({ backendUrl: '/api/verity' });

@@ -6,10 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions, Response as WorkerResponse } from 'miniflare';
 import { buildWorker } from './fixtures/worker.js';
+import { createSiteClient } from '../src/site/index.js';
 
 const origin = 'https://verifier.test';
 const partnerKey = 'r'.repeat(43);
 const otherKey = 'o'.repeat(43);
+const quietKey = 'q'.repeat(43);
 
 const sites = [
   {
@@ -27,6 +29,15 @@ const sites = [
     returnUrl: 'https://other.test/verity/return',
     // This site's holders are offered Discord and nothing else the instance has.
     providers: ['discord'],
+  },
+  {
+    id: 'quiet',
+    name: 'Quiet',
+    origin: 'https://quiet.test',
+    authorizeUrl: 'https://quiet.test/verity/authorize',
+    returnUrl: 'https://quiet.test/verity/return',
+    // This site's holders make unlisted links only, which the site reads with its key.
+    visibility: ['unlisted'],
   },
 ];
 
@@ -71,6 +82,7 @@ function instance() {
         SITES: JSON.stringify(sites),
         SITE_PARTNER_KEY: partnerKey,
         SITE_OTHER_KEY: otherKey,
+        SITE_QUIET_KEY: quietKey,
       },
       outboundService: async (request: { url: string }) => {
         if (request.url === 'https://github.com/login/oauth/access_token')
@@ -359,7 +371,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     assert.match(
       review.headers.get('content-security-policy')!,
-      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test https:\/\/other\.test/,
+      /form-action 'self' https:\/\/github\.com https:\/\/discord\.com https:\/\/partner\.test https:\/\/other\.test https:\/\/quiet\.test/,
     );
 
     const approved = await a.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
@@ -423,12 +435,17 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // Its disconnect form redirects on to the site, which form-action has to allow.
     assert.match(
       landing.headers.get('content-security-policy')!,
-      /form-action 'self' https:\/\/partner\.test https:\/\/other\.test$/,
+      /form-action 'self' https:\/\/partner\.test https:\/\/other\.test https:\/\/quiet\.test$/,
     );
 
     assert.match(settings, /<h1>Your connections<\/h1>/);
     assert.match(settings, /Account on Partner/);
-    assert.match(settings, /Partner keeps this connection in its records and shows no badge/);
+
+    assert.match(
+      settings,
+      /Only Partner can read this connection, and it chooses who there sees it/,
+    );
+
     assert.match(settings, /action="\/disconnect"/);
     assert.ok(!settings.includes('verity-badge'));
     assert.ok(!settings.includes('Sign out'));
@@ -777,6 +794,202 @@ test('a site that lists its providers has its holders offered those, and held to
 
     await owner.post('/login', `key=${'a'.repeat(43)}`);
     assert.match(await (await owner.fetch('/api/verity/verify')).text(), /Sign in with GitHub/);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('a site held to unlisted links reads its own subjects with its key, and nobody else can', async () => {
+  const { mf, browser } = instance();
+
+  try {
+    const member = browser('192.0.2.40');
+
+    const token = handoff(
+      await member.begin('quiet'),
+      { site: 'quiet', id: 'u-1', profileUrl: undefined },
+      quietKey,
+    );
+
+    assert.equal((await member.fetch(`/start?token=${token}`)).status, 303);
+
+    const flow = await member.signIn(
+      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+    );
+
+    const page = await (await member.fetch(flow)).text();
+
+    assert.match(page, /Unlisted\. Only Quiet can read this link/);
+    assert.ok(!page.includes('value="public"'));
+
+    assert.equal(
+      (await member.post(`${flow}/approve`, 'action=approve&visibility=public')).status,
+      404,
+    );
+
+    const approved = await member.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
+    const connected = result(approved.headers.get('location')!, quietKey);
+
+    assert.equal(connected.visibility, 'unlisted');
+
+    // Nothing about it is readable by the public, or listed anywhere.
+    assert.equal(
+      (
+        await browser('192.0.2.41').fetch(
+          `/api/verity/connections/${connected.connection}?format=json`,
+        )
+      ).status,
+      404,
+    );
+
+    assert.deepEqual(await (await member.fetch('/api/verity/published')).json(), []);
+
+    // The settings page offers no change of visibility either.
+    await member.fetch(
+      `/start?token=${handoff(await member.begin('quiet', 'manage'), { site: 'quiet', id: 'u-1', profileUrl: undefined, txn: 'txn-2' }, quietKey)}`,
+    );
+
+    const settings = await (await member.fetch('/')).text();
+
+    assert.match(settings, /Only Quiet can read this connection/);
+    assert.ok(!settings.includes('Change visibility'));
+
+    /** A read as the site's backend sends it: no cookies, a token in the header. */
+    const read = (bearer: string | undefined, ip = '192.0.2.50') =>
+      mf.dispatchFetch(`${origin}/site/connections`, {
+        headers: {
+          'cf-connecting-ip': ip,
+          ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+        },
+      });
+
+    const asking = (overrides: Record<string, unknown> = {}, key = quietKey) =>
+      sign({ site: 'quiet', op: 'read', ids: ['u-1', 'u-2'], exp: now() + 60, ...overrides }, key);
+
+    const answer = await read(asking());
+
+    assert.equal(answer.status, 200);
+    assert.equal(answer.headers.get('cache-control'), 'no-store');
+    assert.equal(answer.headers.get('access-control-allow-origin'), null);
+
+    const body = (await answer.json()) as {
+      connections: Record<
+        string,
+        {
+          id: string;
+          provider: string;
+          visibility: string;
+          status: string;
+          external: { handle: string };
+        }[]
+      >;
+    };
+
+    assert.deepEqual(Object.keys(body.connections), ['u-1', 'u-2']);
+    assert.deepEqual(body.connections['u-2'], []);
+    assert.equal(body.connections['u-1']!.length, 1);
+    assert.equal(body.connections['u-1']![0]!.id, connected.connection);
+    assert.equal(body.connections['u-1']![0]!.provider, 'github');
+    assert.equal(body.connections['u-1']![0]!.external.handle, 'octocat');
+    assert.equal(body.connections['u-1']![0]!.visibility, 'unlisted');
+    assert.equal(body.connections['u-1']![0]!.status, 'verified');
+    // The private id the site sent never comes back inside a record.
+    assert.ok(!JSON.stringify(body.connections['u-1']).includes('quiet:u-1'));
+
+    // Another site's key reads only under that site's own prefix, where this subject is not.
+    const other = await read(asking({ site: 'partner', ids: ['u-1', 'quiet:u-1'] }, partnerKey));
+
+    assert.deepEqual(await other.json(), { connections: { 'u-1': [], 'quiet:u-1': [] } });
+
+    // An id that names something on every object comes back as an entry like any other.
+    const odd = await read(asking({ ids: ['__proto__', 'constructor', 'u-1'] }));
+    const oddBody = JSON.parse(await odd.text()) as { connections: Record<string, unknown[]> };
+
+    assert.deepEqual(Object.keys(oddBody.connections), ['__proto__', 'constructor', 'u-1']);
+    assert.deepEqual(oddBody.connections['__proto__'], []);
+
+    const bad: [string, string | undefined][] = [
+      ['no token', undefined],
+      ['another key', asking({}, partnerKey)],
+      ['a handoff token', handoff('s', { site: 'quiet', id: 'u-1' }, quietKey)],
+      ['no read mark', asking({ op: undefined })],
+      ['an expired token', asking({ exp: now() - 1 })],
+      ['a token too far ahead', asking({ exp: now() + 400 })],
+      ['no ids', asking({ ids: [] })],
+      ['too many ids', asking({ ids: Array.from({ length: 51 }, (_, i) => `u-${i}`) })],
+      ['an id that is not a string', asking({ ids: [1] })],
+      ['an unregistered site', asking({ site: 'nowhere' })],
+    ];
+
+    for (const [i, [name, bearer]] of bad.entries())
+      assert.equal((await read(bearer, `192.0.2.${60 + i}`)).status, 404, name);
+
+    // Refused reads count against the caller's address, good ones against the site.
+    for (let i = 0; i < 29; i++) await read(undefined, '192.0.2.99');
+
+    assert.equal((await read(undefined, '192.0.2.99')).status, 404);
+    assert.equal((await read(undefined, '192.0.2.99')).status, 429);
+    assert.equal((await read(asking(), '192.0.2.99')).status, 200);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('the site client carries a holder through the instance and reads the link back', async () => {
+  const { mf, browser } = instance();
+
+  try {
+    const client = createSiteClient({
+      instance: origin,
+      site: 'quiet',
+      key: quietKey,
+      fetch: ((url: string, init: { headers: Record<string, string> }) =>
+        mf.dispatchFetch(url, { headers: init.headers })) as unknown as typeof fetch,
+    });
+
+    const member = browser('192.0.2.70');
+
+    // The site's button, then its authorize endpoint, which is one call.
+    const begun = await member.fetch(client.beginUrl());
+    const state = new URL(begun.headers.get('location')!).searchParams.get('state')!;
+
+    const handed = await client.authorize(state, {
+      id: 'u-9',
+      kind: 'account',
+      label: 'Alice',
+      reference: 'quiet-ABCD',
+    });
+
+    assert.equal((await member.fetch(handed.url)).status, 303);
+    assert.deepEqual({ ...(await client.connections(['u-9'])) }, { 'u-9': [] });
+
+    const flow = await member.signIn(
+      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+    );
+
+    const approved = await member.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
+
+    // The site's return endpoint can check the result, or ignore it and read instead.
+    const returned = await client.result(
+      new URL(approved.headers.get('location')!).searchParams.get('result')!,
+    );
+
+    assert.equal(returned!.id, 'u-9');
+    assert.equal(returned!.txn, handed.txn);
+    assert.equal(returned!.outcome, 'complete');
+
+    const read = await client.connections(['u-9', 'u-10', '__proto__']);
+
+    assert.deepEqual(Object.keys(read), ['u-9', 'u-10', '__proto__']);
+
+    assert.deepEqual(read['u-10'], []);
+    assert.equal(read['u-9']!.length, 1);
+    assert.equal(read['u-9']![0]!.id, returned!.connection);
+    assert.equal(read['u-9']![0]!.status, 'verified');
+    assert.equal(read['u-9']![0]!.visibility, 'unlisted');
+    assert.equal(read['u-9']![0]!.external.handle, 'octocat');
+    assert.equal(read['u-9']![0]!.siteName, 'Quiet');
+    assert.equal(read['u-9']![0]!.local.reference, 'quiet-ABCD');
   } finally {
     await mf.dispose();
   }

@@ -6,8 +6,11 @@ interface Bucket {
   expiresAt: number;
 }
 
-/** Requests a minute for one signed-in holder, one client without a session, and one site. */
-export const limits = { session: 60, client: 30, site: 600 };
+/**
+ * Requests a minute for one signed-in holder, one client without a session, one site's
+ * holders, and one site's backend reading its subjects' connections.
+ */
+export const limits = { session: 60, client: 30, site: 600, read: 600 };
 
 const windowMs = 60000;
 
