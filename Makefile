@@ -29,7 +29,9 @@ bump:
 	sed -i "s/'v$(subst .,\.,$(CURRENT))'/'v$(VERSION)'/" src/version.ts
 	sed -i 's/verity@$(subst .,\.,$(CURRENT))/verity@$(VERSION)/g' README.md
 
+# The example imports the package by name, so the type check needs the build's output.
 verify:
+	npm run build
 	npm run check
 	npm run format:check
 	npm test
