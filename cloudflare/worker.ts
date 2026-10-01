@@ -110,10 +110,12 @@ const limitedGets = ['/begin', '/start', '/api/verity/sessions', '/api/verity/ca
 const maxBodyBytes = 65536;
 
 /**
- * What the connect dialog on a registered site's own page may ask for: the methods, and a
- * connect flow's start, state, proof and approval. Everything else stays same-origin.
+ * What the dialogs on a registered site's own page may ask for: the methods, a connect
+ * flow's start, state, proof and approval, and the removal of one of the holder's own
+ * links. Everything else stays same-origin.
  */
-const dialogPaths = /^\/api\/verity\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?)$/;
+const dialogPaths =
+  /^\/api\/verity\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/disconnect)$/;
 
 /** Carries a flow's binding for a page on another origin, where the cookie cannot. */
 const flowHeader = 'X-Verity-Flow';

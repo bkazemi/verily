@@ -56,11 +56,8 @@ const connectStyles = `
   ${styles}
   .steps > p:first-child { margin-top: 0; }
   .choices { display: grid; gap: 8px; margin-top: 16px; }
-  .action { width: auto; height: auto; padding: 9px 14px; font: 600 13px/1.3 system-ui, sans-serif; color: #23312b; text-align: left; }
-  .action.primary { border-color: #245f43; background: #245f43; color: #fff; }
-  .action.primary:hover { background: #1d4f37; }
-  .action:disabled { opacity: .6; cursor: progress; }
-  .row { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
+  /* With a way back beside it, the heading sits by that and not in the middle. */
+  header.backed h2 { margin-right: auto; }
   .choices .action { display: flex; align-items: center; gap: 8px; }
   .choices .more { margin-left: auto; color: #6b786f; font-weight: 500; font-size: 12px; }
   .row.start { justify-content: start; }
@@ -147,7 +144,17 @@ const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
  * step runs in a small window, and the dialog picks the flow back up once it returns.
  * Resolves when the dialog closes, with how the last flow ended.
  */
-export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise<Result> {
+export function openConnectDialog(
+  opener: HTMLElement,
+  api: ConnectApi,
+  /**
+   * Given when this dialog was opened from another, which it stands in place of: the
+   * header then has a way back, and `back` is called once this dialog has closed by it.
+   */
+  back?: () => void,
+  /** The provider to start on, where the holder already said which account they mean. */
+  provider?: string,
+): Promise<Result> {
   const existing = openDialogs.get(opener);
 
   if (existing?.open) {
@@ -181,9 +188,25 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
   document.body.append(host);
   openDialogs.set(opener, dialog);
 
+  let returning = false;
+
+  if (back) {
+    const before = node('button', '‹');
+
+    before.type = 'button';
+    before.setAttribute('aria-label', 'Back');
+    header.className = 'backed';
+    header.replaceChildren(before, heading, close);
+
+    before.onclick = () => {
+      returning = true;
+      dialog.close();
+    };
+  }
+
   let outcome: Result = { outcome: 'cancelled' };
   let methods: Methods | undefined;
-  let group: string | undefined;
+  let group = provider;
   let popup: Window | null = null;
   let poll: ReturnType<typeof setInterval> | undefined;
   /** An approval sent and not yet answered: the dialog's result waits for it. */
@@ -283,6 +306,10 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
     if (!current(asked)) return;
 
     const all = methods.methods;
+
+    // A provider asked for that this holder is not offered leaves every option open.
+    if (group !== undefined && !all.some((m) => m.provider === group)) group = undefined;
+
     const count = (provider: string) => all.filter((m) => m.provider === provider).length;
     const list = node('div', '', 'choices');
     const drawn = new Set<string>();
@@ -609,6 +636,8 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
         openDialogs.delete(opener);
         host.remove();
         opener.firstElementChild?.shadowRoot?.querySelector<HTMLElement>('button')?.focus();
+
+        if (returning) back!();
 
         // Closed with an approval still out: its answer decides the result.
         void Promise.resolve(approving)
