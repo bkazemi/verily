@@ -1160,10 +1160,17 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
   const asked: string[] = [];
   const defined: Record<string, new () => Element> = {};
   const polls: (() => void)[] = [];
+  let early: Record<string, unknown> = {};
 
   /** Enough of an element for the badge's own class to extend and be constructed. */
   class Host extends Element {
     isConnected = true;
+
+    constructor() {
+      super();
+      // An upgraded element already carries whatever the page assigned to it.
+      Object.assign(this, early);
+    }
 
     getAttribute(name: string) {
       return this.attributes[name] ?? null;
@@ -1249,7 +1256,18 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     return { dialog, cards: dialog.all().filter((found) => found.className.includes('account')) };
   };
 
-  return { verity, asked, cards, defined, polls };
+  /** Constructs an element as an upgrade does: over properties the page set beforehand. */
+  const upgrade = (name: string, assigned: Record<string, unknown>) => {
+    early = assigned;
+
+    try {
+      return new defined[name]!();
+    } finally {
+      early = {};
+    }
+  };
+
+  return { verity, asked, cards, defined, polls, upgrade };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -1561,6 +1579,21 @@ test('connections set on a badge before its script has run are still presented',
 
   await settle();
   assert.equal(badge.textContent, '@alice+1');
+});
+
+test('evidence set on a badge before its script has run seeds its first paint', async () => {
+  // The fetch never answers, so only the evidence handed over can have drawn the pill.
+  const { upgrade } = await groupHarness({}, () => new Promise(() => {}));
+
+  const badge = upgrade('verity-badge', { evidence: linked('a', 'alice', 100) }) as Element & {
+    connectedCallback(): void;
+  };
+
+  badge.attributes['backend-url'] = 'https://verity.test';
+  badge.attributes['connection-id'] = 'a';
+  badge.connectedCallback();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(badge.textContent, '@alice');
 });
 
 test('a badge that goes from one record to several opens its dialog on all of them', async () => {
