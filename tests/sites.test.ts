@@ -1056,3 +1056,36 @@ test('nothing the instance sends an outsider says which sites it serves', async 
     await mf.dispose();
   }
 });
+
+test('a site with a missing or malformed key is left out, and the rest are still served', async () => {
+  const { registry } = await import('../cloudflare/sites.js');
+
+  const site = (id: string) => ({
+    id,
+    name: `${id}.test`,
+    origin: `https://${id}.test`,
+    authorizeUrl: `https://${id}.test/authorize`,
+    returnUrl: `https://${id}.test/return`,
+  });
+
+  const errors: unknown[] = [];
+  const error = console.error;
+
+  console.error = (...said: unknown[]) => errors.push(said);
+
+  try {
+    const sites = registry([site('good'), site('padded'), site('missing')], {
+      SITE_GOOD_KEY: randomBytes(32).toString('base64url'),
+      // What plain base64 gives: the right bytes, in the wrong alphabet.
+      SITE_PADDED_KEY: randomBytes(32).toString('base64'),
+    });
+
+    assert.deepEqual([...sites.keys()], ['good']);
+    assert.equal(errors.length, 2);
+  } finally {
+    console.error = error;
+  }
+
+  // A mistake in the list itself still refuses to start.
+  assert.throws(() => registry([{ ...site('bad'), origin: 'http://bad.test' }], {}));
+});
