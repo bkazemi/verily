@@ -229,12 +229,79 @@ export function presentConnections(element: HTMLElement, records: unknown): void
   presentGroup(element, subject, async () => subject);
 }
 
-export function init({ backendUrl }: { backendUrl: string }) {
+export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUrl?: string }) {
   const base = new URL(backendUrl, location.href);
 
   if (!['https:', 'http:'].includes(base.protocol)) throw new Error('Invalid backend URL');
 
   base.pathname = base.pathname.replace(/\/$/, '');
+
+  /**
+   * A backend on another origin: an instance this site is registered with. Its cookies
+   * are another site's on this page, so the dialog carries what they would have. The
+   * session comes from trading a handoff, which this site's own backend signs for its
+   * signed-in user at `handoffUrl`, and each flow's binding comes back in a header.
+   */
+  const remote = base.origin !== location.origin;
+  const bindings = new Map<string, string>();
+  let session: Promise<string> | undefined;
+
+  async function openSession(): Promise<string> {
+    const handed = await fetch(new URL(handoffUrl!, location.href), {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+
+    const vouched: unknown = handed.ok ? await handed.json() : undefined;
+
+    if (!record(vouched) || typeof vouched.token !== 'string')
+      throw new Error('Verity request unavailable');
+
+    const traded = await fetch(`${base.href}/site/session`, {
+      method: 'POST',
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: vouched.token }),
+    });
+
+    const opened: unknown = traded.ok ? await traded.json() : undefined;
+
+    if (!record(opened) || typeof opened.session !== 'string')
+      throw new Error('Verity request unavailable');
+
+    return opened.session;
+  }
+
+  /** One of the dialog's requests. `flow` names the flow whose binding goes with it. */
+  async function ask(path: string, data?: Record<string, string>, flow?: string): Promise<unknown> {
+    if (!remote) return request(path, data);
+
+    const binding = flow && bindings.get(flow);
+
+    const response = await fetch(`${base.href}${path}`, {
+      credentials: 'omit',
+      cache: 'no-store',
+      method: data ? 'POST' : 'GET',
+      headers: {
+        Authorization: `Bearer ${await (session ??= openSession())}`,
+        ...(binding ? { 'X-Verity-Flow': binding } : {}),
+        ...(data ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    });
+
+    if (!response.ok) throw new Error('Verity request unavailable');
+
+    const answer: unknown = await response.json();
+    const bound = response.headers.get('X-Verity-Flow');
+
+    // Only starting a flow sets a binding, and the answer names the flow it is for.
+    if (bound && record(answer) && typeof answer.id === 'string') bindings.set(answer.id, bound);
+
+    return answer;
+  }
 
   async function request(path: string, data?: Record<string, string>): Promise<unknown> {
     const response = await fetch(`${base.href}${path}`, {
@@ -257,7 +324,7 @@ export function init({ backendUrl }: { backendUrl: string }) {
   /** The connect flow as the dialog drives it, every answer checked before it is drawn. */
   const flows: ConnectApi = {
     async methods() {
-      const data = await request('/methods');
+      const data = await ask('/methods');
 
       if (!record(data) || !record(data.local) || !Array.isArray(data.methods))
         throw new Error('Invalid methods response');
@@ -267,15 +334,17 @@ export function init({ backendUrl }: { backendUrl: string }) {
       return data as unknown as Methods;
     },
     start: async (provider, method) =>
-      flowView(await request('/sessions', { kind: 'connect', provider, method })),
-    read: async (id) => flowView(await request(`/flows/${encodeURIComponent(id)}?format=json`)),
+      flowView(await ask('/sessions', { kind: 'connect', provider, method })),
+    read: async (id) =>
+      flowView(await ask(`/flows/${encodeURIComponent(id)}?format=json`, undefined, id)),
     submit: async (id, artifact) =>
-      flowView(await request(`/flows/${encodeURIComponent(id)}/submit`, { artifact })),
+      flowView(await ask(`/flows/${encodeURIComponent(id)}/submit`, { artifact }, id)),
     async approve(id, visibility, cancel) {
-      const data = await request(`/flows/${encodeURIComponent(id)}/approve`, {
-        action: cancel ? 'cancel' : 'approve',
-        visibility,
-      });
+      const data = await ask(
+        `/flows/${encodeURIComponent(id)}/approve`,
+        { action: cancel ? 'cancel' : 'approve', visibility },
+        id,
+      );
 
       if (!record(data)) throw new Error('Invalid approval response');
 
@@ -283,6 +352,42 @@ export function init({ backendUrl }: { backendUrl: string }) {
         ? { outcome: 'complete', connectionId: data.connectionId }
         : { outcome: 'cancelled' };
     },
+    /**
+     * With the backend on another origin, the sign-in window opens on the backend first.
+     * The page there asks for the flow's binding and keeps it as a cookie of its own
+     * origin, which is where the provider's callback looks for it, and then goes on to the
+     * provider. The binding is sent to the backend's origin alone.
+     */
+    ...(remote
+      ? {
+          enter(popup: Window, flow: FlowView) {
+            const receive = (event: MessageEvent) => {
+              if (
+                event.source !== popup ||
+                event.origin !== base.origin ||
+                !record(event.data) ||
+                event.data.type !== 'verity-enter'
+              )
+                return;
+
+              window.removeEventListener('message', receive);
+
+              popup.postMessage(
+                {
+                  type: 'verity-enter',
+                  flow: flow.id,
+                  binding: bindings.get(flow.id),
+                  url: flow.authorizationUrl,
+                },
+                base.origin,
+              );
+            };
+
+            window.addEventListener('message', receive);
+            popup.location.href = `${base.href}/site/enter`;
+          },
+        }
+      : {}),
   };
 
   const client = {
@@ -291,8 +396,11 @@ export function init({ backendUrl }: { backendUrl: string }) {
      * the last attempt in it ended. Call from a click: a sign-in method opens a window.
      */
     openConnect(opener: HTMLElement = document.body): Promise<Result> {
-      if (base.origin !== location.origin)
-        throw new Error('Management requires a same-origin backend');
+      if (remote && !handoffUrl)
+        throw new Error('A backend on another origin requires a handoff URL');
+
+      // Each opening is vouched for afresh, for whoever is signed in to this site now.
+      session = undefined;
 
       return openConnectDialog(opener, flows);
     },
@@ -306,7 +414,7 @@ export function init({ backendUrl }: { backendUrl: string }) {
       pill.setAttribute('aria-haspopup', 'dialog');
 
       pill.onclick = async () => {
-        if (typeof HTMLDialogElement === 'undefined') {
+        if (typeof HTMLDialogElement === 'undefined' && !remote) {
           location.href = `${base.href}/verify`;
 
           return;
@@ -605,11 +713,15 @@ function validEvidence(value: unknown): value is Evidence {
 }
 
 if (typeof customElements !== 'undefined' && !customElements.get('verity-connect')) {
-  /** The pill a signed-in holder clicks to connect an account, in a dialog over the page. */
+  /**
+   * The pill a signed-in holder clicks to connect an account, in a dialog over the page.
+   * A site registered with an instance on another origin names it in `backend-url` and
+   * adds `handoff-url`, its own endpoint that vouches for its signed-in user.
+   */
   customElements.define(
     'verity-connect',
     class extends HTMLElement {
-      static observedAttributes = ['backend-url'];
+      static observedAttributes = ['backend-url', 'handoff-url'];
 
       connectedCallback() {
         this.present();
@@ -622,7 +734,11 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-connect
       private present() {
         const backendUrl = this.getAttribute('backend-url');
 
-        if (backendUrl) init({ backendUrl }).mountConnect(this);
+        if (backendUrl)
+          init({
+            backendUrl,
+            handoffUrl: this.getAttribute('handoff-url') ?? undefined,
+          }).mountConnect(this);
       }
     },
   );

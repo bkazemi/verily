@@ -679,6 +679,35 @@ test('requests are limited per session, per client and per site, GETs that creat
     assert.equal((await fresh.fetch('/begin?site=partner&purpose=connect')).status, 429);
     assert.equal((await fresh.fetch('/begin?site=other&purpose=connect')).status, 303);
 
+    // A dialog's handoff arrives with no cookie to say whose it is, and still counts
+    // against the site that signed it. One that does not verify spends nothing of a site's.
+    const trade = (key: string) =>
+      mf.dispatchFetch(`${origin}/api/verity/site/session`, {
+        method: 'POST',
+        body: JSON.stringify({
+          token: sign(
+            {
+              site: 'partner',
+              op: 'dialog',
+              id: '9',
+              label: 'Alice',
+              reference: 'alice',
+              txn: 'limited',
+              exp: now() + 120,
+            },
+            key,
+          ),
+        }),
+        headers: {
+          'cf-connecting-ip': '203.0.113.201',
+          origin: 'https://partner.test',
+          'content-type': 'application/json',
+        },
+      });
+
+    assert.equal((await trade(otherKey)).status, 404);
+    assert.equal((await trade(partnerKey)).status, 429);
+
     // A handoff goes against the site it is for, not the one this browser has a session with.
     assert.equal((await holder.fetch('/begin?site=other&purpose=connect')).status, 303);
 
@@ -1088,4 +1117,308 @@ test('a site with a missing or malformed key is left out, and the rest are still
 
   // A mistake in the list itself still refuses to start.
   assert.throws(() => registry([{ ...site('bad'), origin: 'http://bad.test' }], {}));
+});
+
+test('the dialog on a site page connects with a session and a binding carried in headers', async () => {
+  const { mf, browser } = instance();
+
+  try {
+    const site = 'https://partner.test';
+
+    const dialogToken = (overrides: Record<string, unknown> = {}, key = partnerKey) =>
+      sign(
+        {
+          site: 'partner',
+          op: 'dialog',
+          id: '123',
+          label: 'Alice',
+          reference: 'alice',
+          txn: 'dialog-1',
+          exp: now() + 120,
+          ...overrides,
+        },
+        key,
+      );
+
+    /** A request as the site's page sends it: its origin, no cookie, what it holds in headers. */
+    const page = (
+      path: string,
+      init: {
+        from?: string;
+        session?: string;
+        binding?: string;
+        body?: object | string;
+        method?: string;
+        ip?: string;
+      } = {},
+    ) =>
+      mf.dispatchFetch(`${origin}${path}`, {
+        method: init.method ?? (init.body ? 'POST' : 'GET'),
+        body:
+          typeof init.body === 'string'
+            ? init.body
+            : init.body
+              ? JSON.stringify(init.body)
+              : undefined,
+        redirect: 'manual',
+        headers: {
+          'cf-connecting-ip': init.ip ?? '192.0.2.40',
+          origin: init.from ?? site,
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...(init.session ? { authorization: `Bearer ${init.session}` } : {}),
+          ...(init.binding ? { 'x-verity-flow': init.binding } : {}),
+        },
+      });
+
+    // A browser asks first, and is told nothing about which origins are sites.
+    for (const from of [site, 'https://stranger.test']) {
+      const asked = await page('/api/verity/site/session', { method: 'OPTIONS', from });
+
+      assert.equal(asked.status, 204);
+      assert.equal(asked.headers.get('access-control-allow-origin'), from);
+      assert.match(asked.headers.get('access-control-allow-headers')!, /Authorization/);
+    }
+
+    // Every handoff that is not this site's own, marked for the dialog and in date, is refused.
+    for (const [token, from] of [
+      [dialogToken({ txn: 'bad-1' }), 'https://other.test'],
+      [dialogToken({ txn: 'bad-2' }, otherKey), site],
+      [dialogToken({ txn: 'bad-3', op: 'read' }), site],
+      [dialogToken({ txn: 'bad-4', op: undefined }), site],
+      [dialogToken({ txn: 'bad-5', exp: now() - 1 }), site],
+      [dialogToken({ txn: 'bad-6', profileUrl: 'https://other.test/u/alice' }), site],
+    ] as const)
+      assert.equal((await page('/api/verity/site/session', { body: { token }, from })).status, 404);
+
+    const traded = await page('/api/verity/site/session', { body: { token: dialogToken() } });
+
+    assert.equal(traded.status, 200);
+    assert.equal(traded.headers.get('access-control-allow-origin'), site);
+    assert.equal(traded.headers.get('set-cookie'), null);
+
+    const { session } = (await traded.json()) as { session: string };
+
+    // The handoff works once.
+    assert.equal(
+      (await page('/api/verity/site/session', { body: { token: dialogToken() } })).status,
+      404,
+    );
+
+    // A dialog handoff is not a redirect handoff, nor the other way round.
+    const b = browser('192.0.2.41');
+
+    await b.begin();
+    assert.equal((await b.fetch(`/start?token=${dialogToken({ txn: 'dialog-2' })}`)).status, 403);
+
+    // The session is good from its own site's origin and from nowhere else.
+    assert.equal(
+      (await page('/api/verity/methods', { session, from: 'https://other.test' })).status,
+      404,
+    );
+
+    const methods = await page('/api/verity/methods', { session });
+
+    assert.equal(methods.status, 200);
+    assert.equal(((await methods.json()) as { siteName: string }).siteName, 'Partner');
+
+    // It reaches the dialog's requests and nothing else the library serves.
+    assert.equal((await page('/api/verity/mine', { session })).status, 404);
+
+    assert.equal(
+      (
+        await page('/api/verity/sessions', {
+          session,
+          body: { kind: 'renew', connectionId: 'x', provider: 'github' },
+        })
+      ).status,
+      404,
+    );
+
+    const started = await page('/api/verity/sessions', {
+      session,
+      body: { kind: 'connect', provider: 'github', method: 'oauth' },
+    });
+
+    assert.equal(started.status, 200);
+    assert.equal(started.headers.get('set-cookie'), null);
+    assert.equal(started.headers.get('access-control-expose-headers'), 'X-Verity-Flow');
+
+    const binding = started.headers.get('x-verity-flow')!;
+    const flow = (await started.json()) as { id: string; authorizationUrl: string };
+    const state = new URL(flow.authorizationUrl).searchParams.get('state')!;
+
+    // Without its binding the flow is nobody's.
+    assert.equal((await page(`/api/verity/flows/${flow.id}?format=json`, { session })).status, 404);
+
+    // The sign-in window: a page of this origin that takes the binding from the site's page.
+    const popup = browser('192.0.2.40');
+    const entered = await popup.fetch('/api/verity/site/enter');
+
+    assert.equal(entered.status, 200);
+    assert.match(entered.headers.get('content-security-policy')!, /script-src 'self'/);
+    assert.doesNotMatch(await entered.text(), /partner/i);
+
+    // The window's own script sends the binding: JSON, from this origin, saying where the
+    // page that handed it over is.
+    const enter = async (
+      from: string,
+      sent: { flow: string; binding: string } = { flow: flow.id, binding },
+      headers: Record<string, string> = { origin, 'content-type': 'application/json' },
+    ) => {
+      const response = await mf.dispatchFetch(`${origin}/api/verity/site/enter`, {
+        method: 'POST',
+        body: JSON.stringify({ ...sent, origin: from }),
+        headers: { 'cf-connecting-ip': '192.0.2.40', ...headers },
+      });
+
+      for (const header of response.headers.getSetCookie()) {
+        const [name, value] = header.split(';')[0]!.split('=') as [string, string];
+
+        popup.cookies.set(name, value);
+      }
+
+      return response.status;
+    };
+
+    // Sent by a page on any other origin, the binding is not taken.
+    assert.equal(await enter('https://stranger.test'), 404);
+    assert.equal(await enter('https://other.test'), 404);
+
+    // Nor from anything but that script. A form can post from a sandboxed frame, whose
+    // origin is opaque, or from another site, and can name any origin in its body. No form
+    // can send JSON, and no other page can send this origin.
+    for (const headers of [
+      { origin: 'null', 'content-type': 'text/plain' },
+      { origin: 'null', 'content-type': 'application/json' },
+      { 'content-type': 'application/json' },
+      { origin, 'content-type': 'text/plain' },
+      { origin: site, 'content-type': 'application/json' },
+    ] as Record<string, string>[])
+      assert.equal(await enter(site, undefined, headers), 403, JSON.stringify(headers));
+
+    assert.equal(popup.cookies.size, 0);
+
+    assert.equal(await enter(site), 204);
+    assert.equal([...popup.cookies.values()][0], binding);
+
+    const callback = await popup.fetch(`/api/verity/callback?state=${state}&code=fixture`);
+
+    assert.equal(callback.status, 303);
+
+    // The window signed in and can do no more: approving is the dialog's, with the session.
+    assert.equal(
+      (
+        await popup.post(
+          `${callback.headers.get('location')!}/approve`,
+          'action=approve&visibility=unlisted',
+        )
+      ).status,
+      404,
+    );
+
+    const review = await page(`/api/verity/flows/${flow.id}?format=json`, { session, binding });
+    const view = (await review.json()) as { phase: string; external: { handle: string } };
+
+    assert.equal(view.phase, 'approval');
+    assert.equal(view.external.handle, 'octocat');
+
+    const approved = await page(`/api/verity/flows/${flow.id}/approve`, {
+      session,
+      binding,
+      body: { action: 'approve', visibility: 'unlisted' },
+    });
+
+    assert.equal(approved.status, 200);
+
+    const outcome = (await approved.json()) as { outcome: string; connectionId: string };
+
+    assert.equal(outcome.outcome, 'complete');
+
+    // The site reads the link back with its key, as it does one made through a redirect.
+    const client = createSiteClient({
+      instance: origin,
+      site: 'partner',
+      key: partnerKey,
+      fetch: ((url: string, init: RequestInit) =>
+        mf.dispatchFetch(url, init as never)) as unknown as typeof fetch,
+    });
+
+    const { '123': links } = await client.connections(['123']);
+
+    assert.equal(links!.length, 1);
+    assert.equal(links![0]!.id, outcome.connectionId);
+    assert.equal(links![0]!.visibility, 'unlisted');
+
+    // The dialog only connects, whatever a body says twice: the kind held to is the one
+    // the library will read, which is the last.
+    assert.equal(
+      (
+        await page('/api/verity/sessions', {
+          session,
+          body: `{"kind":"connect","kind":"renew","connectionId":"${outcome.connectionId}"}`,
+        })
+      ).status,
+      404,
+    );
+
+    // A request that is refused is counted against its sender, so guessing sessions is
+    // limited like anything else from an address with no session.
+    const guess = () =>
+      page('/api/verity/sessions', {
+        session: 'g'.repeat(43),
+        body: { kind: 'connect', provider: 'github', method: 'oauth' },
+        ip: '192.0.2.77',
+      });
+
+    for (let i = 0; i < 30; i++) assert.equal((await guess()).status, 404);
+
+    const limited = await guess();
+
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get('access-control-allow-origin'), site);
+
+    // A sign-in refused at the provider ends that flow and nothing else. The window is
+    // not sent back to the site, the dialog reads how the flow ended, and it can start
+    // another with the same session.
+    const second = await page('/api/verity/sessions', {
+      session,
+      body: { kind: 'connect', provider: 'github', method: 'oauth' },
+    });
+
+    const secondBinding = second.headers.get('x-verity-flow')!;
+    const refusedFlow = (await second.json()) as { id: string; authorizationUrl: string };
+
+    popup.cookies.clear();
+
+    assert.equal(await enter(site, { flow: refusedFlow.id, binding: secondBinding }), 204);
+
+    const denied = await popup.fetch(
+      `/api/verity/callback?state=${new URL(refusedFlow.authorizationUrl).searchParams.get('state')!}&error=access_denied`,
+    );
+
+    const ended = await popup.fetch(denied.headers.get('location')!);
+
+    assert.equal(ended.status, 200);
+    assert.match(await ended.text(), /data-outcome="cancelled"/);
+
+    const read = await page(`/api/verity/flows/${refusedFlow.id}?format=json`, {
+      session,
+      binding: secondBinding,
+    });
+
+    assert.equal(read.status, 200);
+    assert.equal(((await read.json()) as { phase: string }).phase, 'cancelled');
+
+    assert.equal(
+      (
+        await page('/api/verity/sessions', {
+          session,
+          body: { kind: 'connect', provider: 'github', method: 'oauth' },
+        })
+      ).status,
+      200,
+    );
+  } finally {
+    await mf.dispose();
+  }
 });

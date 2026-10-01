@@ -11,7 +11,7 @@ import {
 } from '../src/server/index.js';
 import { CloudflareStorage } from './storage.js';
 import { OwnerAuth } from './auth.js';
-import { registry, Sites, type Site, peek } from './sites.js';
+import { registry, sessionCookie, Sites, type Site, peek } from './sites.js';
 import { allow, client, limits, prune } from './limits.js';
 import type { LocalAccount, LocalKind } from '../src/core/index.js';
 
@@ -109,6 +109,96 @@ const limitedGets = ['/begin', '/start', '/api/verity/sessions', '/api/verity/ca
 /** Matches the library's own bound: large enough for a pasted key, small enough to buffer. */
 const maxBodyBytes = 65536;
 
+/**
+ * What the connect dialog on a registered site's own page may ask for: the methods, and a
+ * connect flow's start, state, proof and approval. Everything else stays same-origin.
+ */
+const dialogPaths = /^\/api\/verity\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?)$/;
+
+/** Carries a flow's binding for a page on another origin, where the cookie cannot. */
+const flowHeader = 'X-Verity-Flow';
+
+/** A session or a binding as this instance mints them, and nothing that could bend a header. */
+const opaque = /^[A-Za-z0-9_-]{16,200}$/;
+
+/**
+ * Lets the page that asked read the answer. These requests carry no cookie and are given
+ * none, so naming whichever origin asked gives nothing away, least of all which origins
+ * are registered sites: what a caller may do is decided by the token it holds.
+ */
+function shared(response: Response, request: Request): Response {
+  const answer = new Response(response.body, response);
+
+  answer.headers.set('Access-Control-Allow-Origin', request.headers.get('origin') ?? '*');
+  answer.headers.set('Access-Control-Expose-Headers', flowHeader);
+  answer.headers.append('Vary', 'Origin');
+
+  return answer;
+}
+
+const preflight = (request: Request) =>
+  shared(
+    new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Methods': 'GET, POST',
+        'Access-Control-Allow-Headers': `Authorization, Content-Type, ${flowHeader}`,
+        'Access-Control-Max-Age': '600',
+      },
+    }),
+    request,
+  );
+
+const data = (value: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(value), {
+    headers: { ...safeHeaders, 'Content-Type': 'application/json', ...headers },
+  });
+
+/**
+ * A JSON object from a request's body, or an empty one. Only a body sent as JSON is read:
+ * a form cannot send that type, so nothing here can be reached by a form on another page.
+ */
+async function fields(request: Request): Promise<Record<string, unknown>> {
+  if (!request.headers.get('content-type')?.startsWith('application/json')) return {};
+
+  return parsed(await request.text()) ?? {};
+}
+
+/** The JSON object a text holds, or undefined if it holds anything else. */
+function parsed(text: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Run in the sign-in window a site's dialog opens. The window is on this origin, so the
+ * flow's binding can be a cookie here, where the provider's callback will look for it. The
+ * page that opened the window sends the binding, and this script says which origin that
+ * page is on. The instance takes the binding only if that origin is the site the flow
+ * belongs to, so a page elsewhere cannot have someone sign in to a flow it started.
+ */
+const enterScript = `const status=document.getElementById('status');const fail=()=>{status.textContent='This window could not start the sign-in. Close it and try again.'};let taken=false;if(!window.opener)fail();else{window.addEventListener('message',async(event)=>{const d=event.data;if(taken||event.source!==window.opener||!d||d.type!=='verity-enter'||typeof d.flow!=='string'||typeof d.binding!=='string'||typeof d.url!=='string')return;taken=true;let target;try{target=new URL(d.url)}catch{return fail()}if(target.protocol!=='https:')return fail();const response=await fetch('/api/verity/site/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow:d.flow,binding:d.binding,origin:event.origin})}).catch(()=>undefined);if(!response||!response.ok)return fail();location.replace(target.href)});window.opener.postMessage({type:'verity-enter'},'*')}`;
+
+const enterPage = () =>
+  new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Verity</title><link rel="stylesheet" href="/api/verity/style.css?v=${styleVersion}"><body><main class="single">${logo}<h1>Sign in</h1><p id="status">Opening the sign-in page.</p></main><script src="/api/verity/site/enter.js"></script></body></html>`,
+    {
+      headers: {
+        ...safeHeaders,
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy':
+          "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      },
+    },
+  );
+
 /** Buffer only bounded request bodies before passing them to the library. */
 async function boundedBody(request: Request): Promise<ArrayBuffer | undefined> {
   if (!request.body) return;
@@ -149,6 +239,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.origin !== env.PUBLIC_ORIGIN) return html('Unavailable', '', 404);
+
+    // Asked by a browser before a page on another origin may send the dialog's headers.
+    if (
+      request.method === 'OPTIONS' &&
+      (dialogPaths.test(url.pathname) || url.pathname === '/api/verity/site/session')
+    )
+      return preflight(request);
 
     if (!['GET', 'POST'].includes(request.method)) return html('Unavailable', '', 405);
 
@@ -319,6 +416,23 @@ export class VerityStore {
 
     if (url.origin !== this.env.PUBLIC_ORIGIN) return html('Unavailable', '', 404);
 
+    // The sign-in window's own script, and nothing else. It sets a cookie that decides
+    // whose flow this browser signs in to, so it is held to the origin the browser itself
+    // reports, before a missing or opaque one is read as ours below: a form in a sandboxed
+    // frame has an opaque origin, and can put any origin it likes in its body.
+    if (request.method === 'POST' && url.pathname === '/api/verity/site/enter') {
+      if (
+        request.headers.get('origin') !== this.env.PUBLIC_ORIGIN ||
+        !request.headers.get('content-type')?.startsWith('application/json')
+      )
+        return html('Unavailable', '', 403);
+
+      if (!(await this.allowed(request, url)))
+        return html('Too many requests', '<p>Try again later.</p>', 429);
+
+      return this.enter(request);
+    }
+
     if (
       request.method === 'POST' &&
       url.pathname.startsWith('/api/verity/') &&
@@ -330,8 +444,38 @@ export class VerityStore {
       request = new Request(request, { headers });
     }
 
+    // The connect dialog on a site's own page, which counts its requests once it knows
+    // whose they are.
+    if (request.headers.has('authorization') && dialogPaths.test(url.pathname))
+      return shared(await this.dialog(request, url), request);
+
     if (!(await this.allowed(request, url)))
       return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    if (request.method === 'POST' && url.pathname === '/api/verity/site/session') {
+      const opened = await this.sites.dialog(
+        String((await fields(request)).token ?? ''),
+        request.headers.get('origin'),
+        (local) => this.app.service.validateLocal(local),
+        (site) => allow(this.ctx.storage, [{ key: `site/${site.id}`, limit: limits.site }]),
+      );
+
+      return shared(
+        opened === 'limited'
+          ? html('Too many requests', '<p>Try again later.</p>', 429)
+          : opened
+            ? data({ session: opened.session })
+            : html('Unavailable', '', 404),
+        request,
+      );
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/verity/site/enter') return enterPage();
+
+    if (request.method === 'GET' && url.pathname === '/api/verity/site/enter.js')
+      return new Response(enterScript, {
+        headers: { ...safeHeaders, 'Content-Type': 'text/javascript' },
+      });
 
     if (request.method === 'POST') {
       if (url.pathname === '/login') {
@@ -429,6 +573,104 @@ export class VerityStore {
     }
 
     return signIn();
+  }
+
+  /**
+   * One request from the connect dialog on a site's own page. The page holds the session
+   * and the flow's binding and sends them as headers, because this instance's cookies are
+   * another site's on that page and a browser may not send them. Here they are put where
+   * the library looks for them, and a binding the library sets comes back as a header. The
+   * session works only from its own site's origin, and only for the dialog's requests.
+   */
+  private async dialog(request: Request, url: URL): Promise<Response> {
+    // Counted against the sender's address, as a refused read is: a request turned away
+    // here never reaches the counting a served one gets, and each costs a lookup.
+    const unavailable = async () =>
+      (await allow(this.ctx.storage, [{ key: client(request), limit: limits.client }]))
+        ? html('Unavailable', '', 404)
+        : html('Too many requests', '<p>Try again later.</p>', 429);
+
+    const session = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '';
+    const binding = request.headers.get(flowHeader) ?? '';
+    const post = request.method === 'POST';
+    const body = post ? await request.text() : undefined;
+
+    if (!opaque.test(session) || (binding && !opaque.test(binding))) return unavailable();
+
+    // A GET of a flow is its page unless JSON is asked for, and a GET of /sessions starts one.
+    if (post) {
+      if (!request.headers.get('content-type')?.startsWith('application/json'))
+        return unavailable();
+
+      // The dialog only connects. Every other kind of flow has a page of its own here.
+      // Parsed as the library parses it, so the kind checked is the kind it will run.
+      if (url.pathname === '/api/verity/sessions' && parsed(body!)?.kind !== 'connect')
+        return unavailable();
+    } else if (
+      url.pathname !== '/api/verity/methods' &&
+      !(
+        /^\/api\/verity\/flows\/[^/]+$/.test(url.pathname) &&
+        url.searchParams.get('format') === 'json'
+      )
+    )
+      return unavailable();
+
+    const inner = new Request(request.url, {
+      method: request.method,
+      headers: {
+        cookie: `${sessionCookie}=${session}${binding ? `; ${this.app.flowCookieName}=${binding}` : ''}`,
+        origin: this.env.PUBLIC_ORIGIN,
+        'cf-connecting-ip': request.headers.get('cf-connecting-ip') ?? '',
+        ...(post ? { 'content-type': 'application/json' } : {}),
+      },
+      body,
+    });
+
+    const found = await this.sites.open(inner);
+
+    if (!found || this.site(found.session).origin !== request.headers.get('origin'))
+      return unavailable();
+
+    if (!(await this.allowed(inner, url)))
+      return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    const response = await this.app.handle(inner);
+    const answer = new Response(response.body, response);
+
+    const set = response.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`${this.app.flowCookieName}=`))
+      ?.slice(this.app.flowCookieName.length + 1)
+      .split(';')[0];
+
+    answer.headers.delete('Set-Cookie');
+
+    if (set) answer.headers.set(flowHeader, set);
+
+    return answer;
+  }
+
+  /**
+   * Gives the sign-in window the binding of a flow a site's dialog started, as the cookie
+   * the provider's callback checks. `origin` is where the page that sent the binding is,
+   * as the window's own script saw it. It must be the site the flow's subject belongs to.
+   */
+  private async enter(request: Request): Promise<Response> {
+    const { flow: id, binding, origin } = await fields(request);
+
+    if (typeof id !== 'string' || typeof binding !== 'string' || !opaque.test(binding))
+      return html('Unavailable', '', 404);
+
+    const flow = await this.app.service.flow(id, binding).catch(() => undefined);
+    const site = flow?.local && this.siteOf(flow.local);
+
+    if (!flow || flow.kind !== 'connect' || !site || site.origin !== origin)
+      return html('Unavailable', '', 404);
+
+    return new Response(null, {
+      status: 204,
+      headers: { ...safeHeaders, 'Set-Cookie': this.app.flowCookie(binding) },
+    });
   }
 
   /** The site a subject belongs to, by its id's prefix. The owner's id has none. */

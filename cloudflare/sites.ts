@@ -16,7 +16,8 @@ const resultMs = 10 * 60000;
 const maxReadIds = 50;
 
 const stateCookie = 'verity_handoff';
-const sessionCookie = 'verity_site';
+
+export const sessionCookie = 'verity_site';
 
 /** A site that sends its users here instead of hosting Verity itself. */
 export interface Site {
@@ -64,6 +65,12 @@ export interface SiteSession {
   /** The flow whose result this session returned with. No other flow's result is signed. */
   returned?: string;
   operation?: Operation;
+  /**
+   * Opened for the dialog on the site's own page, which reads how each flow ended for
+   * itself. No flow returns to the site from it, so no flow's end closes it, and the
+   * holder can try again in the same dialog.
+   */
+  dialog?: true;
 }
 
 /** A loopback origin may be plain HTTP, as the library allows its own base URL to be. */
@@ -198,6 +205,42 @@ const string = (value: unknown, max = 500): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
 
 /**
+ * The subject a handoff vouches for, as the library will hold it, or undefined if the
+ * handoff describes one badly. `validate` is the library's own check of the subject, which
+ * the union of every site's origin would not make alone.
+ */
+function subject(
+  site: Site,
+  payload: Record<string, unknown>,
+  validate: (local: LocalAccount) => LocalAccount,
+): LocalAccount | undefined {
+  if (
+    !string(payload.id, 400) ||
+    !string(payload.label) ||
+    !string(payload.reference) ||
+    (payload.kind !== undefined && !['account', 'page', 'site'].includes(String(payload.kind))) ||
+    (payload.profileUrl !== undefined &&
+      (typeof payload.profileUrl !== 'string' ||
+        !URL.canParse(payload.profileUrl) ||
+        new URL(payload.profileUrl).origin !== site.origin))
+  )
+    return undefined;
+
+  try {
+    return validate({
+      id: `${site.id}:${payload.id}`,
+      ...(payload.kind ? { kind: payload.kind as LocalKind } : {}),
+      label: payload.label,
+      reference: payload.reference,
+      ...(payload.profileUrl ? { profileUrl: payload.profileUrl as string } : {}),
+      siteName: site.name,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Handoffs from registered sites, the sessions they open, and the results sent back. The
  * site vouches for its signed-in user; this is where that is checked, and a handoff is
  * bound to the browser that asked for it, the way OAuth binds a callback with `state`.
@@ -260,32 +303,13 @@ export class Sites {
       !held ||
       // The state this browser was given, which a browser sent someone else's link lacks.
       !timingSafeEqual(Buffer.from(hash(held)), Buffer.from(hash(payload.state))) ||
-      !string(payload.id, 400) ||
-      !string(payload.label) ||
-      !string(payload.reference) ||
-      !string(payload.txn) ||
-      (payload.kind !== undefined && !['account', 'page', 'site'].includes(String(payload.kind))) ||
-      (payload.profileUrl !== undefined &&
-        (typeof payload.profileUrl !== 'string' ||
-          !URL.canParse(payload.profileUrl) ||
-          new URL(payload.profileUrl).origin !== site.origin))
+      !string(payload.txn)
     )
       return undefined;
 
-    let local: LocalAccount;
+    const local = subject(site, payload, validate);
 
-    try {
-      local = validate({
-        id: `${site.id}:${payload.id}`,
-        ...(payload.kind ? { kind: payload.kind as LocalKind } : {}),
-        label: payload.label,
-        reference: payload.reference,
-        ...(payload.profileUrl ? { profileUrl: payload.profileUrl as string } : {}),
-        siteName: site.name,
-      });
-    } catch {
-      return undefined;
-    }
+    if (!local) return undefined;
 
     const session = secret();
     const txn = payload.txn;
@@ -316,6 +340,75 @@ export class Sites {
       purpose,
       cookies: [setCookie(sessionCookie, session, sessionMs), setCookie(stateCookie, '', 0)],
     };
+  }
+
+  /**
+   * Redeems a handoff a site's own page presents, for the connect dialog on that page, and
+   * returns the session it opens. There is no redirect to bind with a state. The site's
+   * backend gave the token to its signed-in user's page, and a browser sends that page's
+   * origin with the request, so the token is marked for this use, taken only from the
+   * site's origin, and works once. The session is the same as a redirect opens, carried by
+   * the page in a header because the cookie would be another site's on that page.
+   *
+   * `admit` counts the handoff against the site that signed it, and is asked only once it
+   * has verified, before anything is stored: the request has no cookie to say whose it is,
+   * and a token that does not verify must spend nothing of the site it names. A handoff
+   * not admitted is 'limited', and is not used up.
+   */
+  async dialog(
+    token: string,
+    origin: string | null,
+    validate: (local: LocalAccount) => LocalAccount,
+    admit: (site: Site) => Promise<boolean>,
+  ): Promise<{ site: Site; session: string } | 'limited' | undefined> {
+    const site = this.sites.get(String(peek(token)?.site ?? ''));
+
+    if (!site || origin !== site.origin) return undefined;
+
+    const payload = open(site.key, token);
+    const now = Date.now();
+
+    if (
+      !payload ||
+      payload.site !== site.id ||
+      payload.op !== 'dialog' ||
+      typeof payload.exp !== 'number' ||
+      payload.exp * 1000 <= now ||
+      payload.exp * 1000 > now + handoffMs ||
+      !string(payload.txn)
+    )
+      return undefined;
+
+    const local = subject(site, payload, validate);
+
+    if (!local) return undefined;
+
+    if (!(await admit(site))) return 'limited';
+
+    const session = secret();
+    const txn = payload.txn;
+
+    // Kept until the token would have expired anyway, so the token works once.
+    const used = `site/state/${hash(`dialog ${site.id} ${txn}`)}`;
+
+    const opened = await this.storage.transaction(async (tx) => {
+      if (await tx.get(used)) return false;
+
+      await tx.put<State>(used, { site: site.id, purpose: 'connect', expiresAt: now + handoffMs });
+
+      await tx.put<SiteSession>(`site/session/${hash(session)}`, {
+        site: site.id,
+        purpose: 'connect',
+        txn,
+        local,
+        expiresAt: now + sessionMs,
+        dialog: true,
+      });
+
+      return true;
+    });
+
+    return opened ? { site, session } : undefined;
   }
 
   /**
@@ -392,6 +485,13 @@ export class Sites {
     if (!site || !context?.txn || !local) return undefined;
 
     if (!['connect', 'renew', 'visibility'].includes(result.kind)) return undefined;
+
+    // The sign-in window of a dialog shows the flow's own result page and goes nowhere.
+    if (
+      context.session?.startsWith('site/session/') &&
+      (await this.storage.get<SiteSession>(context.session))?.dialog
+    )
+      return undefined;
 
     // Another flow's return, or a disconnect, already speaks for this transaction. This
     // flow ended all the same, however it ended, and its holder sees the result page.

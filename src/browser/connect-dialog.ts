@@ -45,6 +45,11 @@ export interface ConnectApi {
   read(id: string): Promise<FlowView>;
   submit(id: string, artifact: string): Promise<FlowView>;
   approve(id: string, visibility: 'public' | 'unlisted', cancel: boolean): Promise<Result>;
+  /**
+   * Sends the sign-in window on its way, where going straight to the provider would not
+   * do. Absent, the window is pointed at the flow's `authorizationUrl`.
+   */
+  enter?(popup: Window, flow: FlowView): void;
 }
 
 const connectStyles = `
@@ -398,7 +403,9 @@ export function openConnectDialog(opener: HTMLElement, api: ConnectApi): Promise
   function signIn(flow: FlowView) {
     if (!popup || popup.closed) return failure('The sign-in window was closed.');
 
-    popup.location.href = flow.authorizationUrl!;
+    if (api.enter) api.enter(popup, flow);
+    else popup.location.href = flow.authorizationUrl!;
+
     const cancel = button('Cancel');
 
     cancel.onclick = () => void choose();

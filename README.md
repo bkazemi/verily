@@ -254,32 +254,43 @@ const verity = createSiteClient({
 
 The client has no dependencies and uses only Web Crypto and `fetch`, so it runs on Node, Next.js, Workers, Deno and Bun. Use it only on your backend: the key is what the instance believes.
 
-**1. Link to the instance.** Put a link on your settings page, to `verity.beginUrl()`, or to `verity.beginUrl('manage')` for a user who wants to renew or remove a link.
-
-**2. Add the authorize endpoint.** The instance sends the user to the authorize URL you registered, with a `state`. Check your own session, then vouch for that user:
+**1. Mount the handler.** It serves the endpoints the instance and the pill need. Give it your own session lookup, and mount it on every path under one prefix:
 
 ```ts
-// GET /verity/authorize
-const user = await yourSession(request);
-if (!user) return redirect('/login');
+const handle = verity.handler({
+  authenticate: async (request) => {
+    const user = await yourSession(request);
+    if (!user) return undefined;
 
-const { url } = await verity.authorize(new URL(request.url).searchParams.get('state'), {
-  id: user.id, // private and stable; the instance never shows it
-  label: user.displayName,
-  reference: user.handle, // durable and safe to show; never an email
+    return {
+      id: user.id, // private and stable; the instance never shows it
+      label: user.displayName,
+      reference: user.handle, // durable and safe to show; never an email
+    };
+  },
+  signInUrl: '/login', // where a signed-out user is sent
+  returnUrl: '/settings', // where a user lands when they come back
 });
 
-return redirect(url);
+// GET and POST /api/verity/*
+app.all('/api/verity/*', (request) => handle(request));
 ```
 
-**3. Add the return endpoint.** When the user is done they arrive at the return URL you registered. Send them wherever you like:
+The authorize and return URLs the instance's operator registers for you are `<prefix>/authorize` and `<prefix>/return`.
 
-```ts
-// GET /verity/return
-return redirect('/settings');
+**2. Show the connect pill.** The user verifies in a dialog on your page, without leaving it. Only the provider's own sign-in opens in a small window:
+
+```html
+<script src="/assets/verity.js" defer></script>
+<verity-connect
+  backend-url="https://verity.example/api/verity"
+  handoff-url="/api/verity/handoff"
+></verity-connect>
 ```
 
-**4. Read connections where you show them.**
+The element fires `verity-result` when a link is made, so read the user's connections again then. To let a user renew or remove a link, link to `verity.beginUrl('manage')`, which opens their links on the instance.
+
+**3. Read connections where you show them.**
 
 ```ts
 const { [user.id]: connections } = await verity.connections([user.id]);
@@ -294,19 +305,17 @@ To show them, hand the records to the badge. It draws them as given and fetches 
 
 From script, set the property instead: `badge.connections = records`. Send a page only the records its reader may see: whatever is in the page, the reader has. Several records become one badge, as under [Show the badge](#show-the-badge), and an unlisted one opens its details without linking anywhere.
 
-Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. `connections()` takes any number of ids, so read a whole page of users in one call, and cache the answer briefly.
+Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. `connections()` takes any number of ids, so read a whole page of users in one call. Pass `cacheMs` to the client to reuse an answer for that long, and `{ fresh: true }` to a call that must not.
 
-If you would rather your user ids never left your site, send a stand-in:
+If you would rather your user ids never left your site, give the client a secret:
 
 ```ts
-import { pseudonym } from '@bkazemi/verity/site';
-
-const id = await pseudonym(process.env.VERITY_ID_SECRET, user.id);
+const verity = createSiteClient({ instance, site, key, idSecret: process.env.VERITY_ID_SECRET });
 ```
 
-The same secret and user always give the same stand-in, so nothing is stored. That secret must never change, so keep one for this alone.
+Every id you pass is then your own, and the instance is sent a stand-in. A subject with no `reference` gets one made the same way. The same secret and user always give the same stand-in, so nothing is stored. That secret must never change, so keep one for this alone.
 
-The return carries a signed `result` saying what the user did. A site that reads its connections, as above, can ignore it. A site that keeps its own copy checks it with `verity.result(token)`, and must also check that it is for the signed-in user and for the handoff it is waiting on; [`example/tenant.ts`](example/tenant.ts) does this.
+A site that would rather write its own endpoints can: `verity.authorize(state, subject)` signs the redirect handoff, `verity.handoff(subject)` the pill's, and `verity.result(token)` checks what a user returns with.
 
 **Moving to your own instance.** Hosting Verity yourself replaces `verity.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Set up the server](#set-up-the-server). Records are not moved between instances, so users verify again.
 

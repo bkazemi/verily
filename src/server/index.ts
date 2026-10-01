@@ -1055,7 +1055,17 @@ export function createVerity(options: ServerOptions) {
     return response;
   }
 
-  return { service, handle: secured };
+  return {
+    service,
+    handle: secured,
+    /**
+     * The flow binding, for a host that carries it some way other than this handler's own
+     * cookie: the cookie's name, to read a binding from a request or a response, and the
+     * header that sets it in a browser.
+     */
+    flowCookieName: cookieName,
+    flowCookie,
+  };
 }
 
 /** Mount on your chosen Node router. Public origin is configured, never inferred from Host. */
