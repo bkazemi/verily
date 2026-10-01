@@ -48,13 +48,13 @@ main {
 }
 
 /*
- * The logotype, above the page's own heading. Sized by cap height rather than by the box
- * around it, which the descender of the y makes taller than the word looks. The word is
- * drawn in currentColor, so it takes the ink colour of whichever scheme is in use.
+ * The logotype, above the page's own heading, on its own dark plate. Sized so the word is
+ * the height it was without the plate, whose margin makes the box that much taller. The
+ * word is white in either scheme: the plate is what it is read against, not the page.
  */
 .logo {
   display: block;
-  height: 1.75rem;
+  height: 2.5rem;
   margin-bottom: 1.5rem;
 }
 

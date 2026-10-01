@@ -42,7 +42,7 @@ export const styles = `
   dt { color: #6b786f; }
   dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
   .explanation { margin-top: 16px; }
-  footer { display: flex; align-items: center; justify-content: end; gap: 6px; margin-top: 14px; color: #9aa9a0; font-size: 11px; }
+  footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin-top: 14px; color: #9aa9a0; font-size: 11px; }
   .logo { display: block; height: 13px; }
   ${markStyles}
 `;

@@ -1,7 +1,7 @@
 /**
  * The Verity logotype, from docs/design/verity-logo.svg. The word is Rubik reduced to
- * outlines, so nothing here asks a font host for anything, and it is drawn in currentColor
- * so it takes the ink of whatever it sits in.
+ * outlines, so nothing here asks a font host for anything. As parts it is drawn in
+ * currentColor, so in a dialog it takes the ink of whatever it sits in.
  *
  * Kept as the parts rather than one blob because the two sides draw it differently: a page
  * assembled as a string wants markup, and the badge builds DOM and never sets innerHTML.
@@ -25,8 +25,18 @@ export const logoPaths: readonly { d: string; fill: string }[] = [
   },
 ];
 
-/** The logotype as markup, for the pages this library serves as strings. */
+/** Room around the logotype inside its plate, as docs/design/verity-logo-plate.svg has it. */
+const pad = 195;
+
+/**
+ * The logotype as markup, for the pages this library serves as strings. Here the word is
+ * always white, on a dark plate of its own, so it is one colour whichever scheme the page
+ * is in. This is docs/design/verity-logo-plate.svg, and the README shows the same.
+ */
 export const logo =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${logoViewBox}" class="logo" role="img" aria-label="Verity">` +
-  logoPaths.map(({ d, fill }) => `<path d="${d}" fill="${fill}"/>`).join('') +
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-26 - pad} ${2785 + 2 * pad} ${916 + 2 * pad}" class="logo" role="img" aria-label="Verity">` +
+  `<rect x="${-pad}" y="${-26 - pad}" width="${2785 + 2 * pad}" height="${916 + 2 * pad}" rx="176" fill="#0d1117"/>` +
+  logoPaths
+    .map(({ d, fill }) => `<path d="${d}" fill="${fill === 'currentColor' ? '#ffffff' : fill}"/>`)
+    .join('') +
   '</svg>';

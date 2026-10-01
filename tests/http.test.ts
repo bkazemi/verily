@@ -105,6 +105,17 @@ test('HTTP full flow and visibility across HTML/JSON, generic secret failures an
   assert.equal(await (await f.request(`/s/${token}`)).text(), expected);
 });
 
+test('a served page draws the logotype white on its own plate, in either colour scheme', async () => {
+  const f = fixture();
+  const page = await (await f.request('/verify', { headers: { cookie: 'local=alice' } })).text();
+  const logo = page.match(/<svg[^>]*class="logo".*?<\/svg>/s)![0];
+
+  assert.match(logo, /<rect [^>]*fill="#0d1117"\/>/);
+  assert.match(logo, /fill="#ffffff"/);
+  // Nothing in it follows the page's text colour, which is what changes with the scheme.
+  assert.ok(!logo.includes('currentColor'));
+});
+
 test('forged origins, missing local authentication, and cross-account mutations fail', async () => {
   const f = fixture(),
     id = await f.connect('public');
