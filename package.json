@@ -36,6 +36,7 @@
     "esbuild": "^0.25.0",
     "eslint": "10.10.0",
     "miniflare": "5.20260915.0-alpha",
+    "playwright-core": "^1.63.0",
     "prettier": "3.9.6",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",

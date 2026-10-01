@@ -13,6 +13,7 @@ import {
   type Evidence,
   type ExternalAccount,
   type Flow,
+  type FlowResult,
   type LocalAccount,
   type Method,
   type Provider,
@@ -122,6 +123,12 @@ export class VerityService {
     if (local.kind !== undefined && !['account', 'page', 'site'].includes(local.kind))
       throw new Error('Invalid local subject kind');
 
+    if (
+      local.siteName !== undefined &&
+      (typeof local.siteName !== 'string' || !local.siteName || local.siteName.length > 500)
+    )
+      throw new Error('Invalid local subject site name');
+
     if (local.profileUrl) {
       const url = new URL(local.profileUrl);
 
@@ -135,6 +142,11 @@ export class VerityService {
     }
 
     return structuredClone(local);
+  }
+
+  /** The site a subject belongs to: its own name where it has one, else this instance's. */
+  siteOf(local: Pick<LocalAccount, 'siteName'>): string {
+    return local.siteName ?? this.options.siteName;
   }
 
   /**
@@ -165,8 +177,16 @@ export class VerityService {
     connectionId?: string,
     kind: Flow['kind'] = 'connect',
     choice: { provider?: string; method?: string } = {},
+    context?: Record<string, string>,
   ) {
     if (kind === 'connect' && !local) throw new Unavailable();
+
+    if (
+      context !== undefined &&
+      (typeof context !== 'object' ||
+        Object.values(context).some((v) => typeof v !== 'string' || v.length > 500))
+    )
+      throw new Error('Invalid flow context');
 
     if (local) local = this.validateLocal(local);
 
@@ -187,6 +207,9 @@ export class VerityService {
       phase: 'pending',
       expiresAt: this.now() + (this.options.flowTtlMs ?? 600000),
     };
+
+    // Removal from the external side answers to nobody local, so nothing local rides on it.
+    if (context && !['revoke', 'share-revoke'].includes(kind)) flow.context = { ...context };
 
     const provider = await this.transaction(async (tx) => {
       // Whose link this is. A flow against an existing connection may carry no local
@@ -224,7 +247,7 @@ export class VerityService {
       if (artifact)
         flow.expect = artifact.expect
           ? artifact.expect(subject!)
-          : `Verity proof for ${this.options.siteName}: ${secret()}`;
+          : `Verity proof for ${this.siteOf(subject!)}: ${secret()}`;
 
       await tx.put('flows', flow.id, flow);
 
@@ -339,7 +362,9 @@ export class VerityService {
       if (flow.phase !== 'pending' || isArtifactProvider(this.providerOf(flow)))
         throw new Unavailable();
 
-      flow.phase = code ? 'exchanging' : 'cancelled';
+      if (code) flow.phase = 'exchanging';
+      else await this.ended(tx, flow, 'cancelled');
+
       const verifier = flow.verifier!;
 
       delete flow.verifier;
@@ -424,8 +449,8 @@ export class VerityService {
       const flow = await tx.get('flows', id);
 
       if (flow?.phase === 'exchanging') {
-        flow.phase = 'failed';
         flow.reason = error instanceof Refused ? error.message : undefined;
+        await this.ended(tx, flow, 'failed');
         await tx.put('flows', id, flow);
       }
     });
@@ -454,7 +479,7 @@ export class VerityService {
       if (flow.phase !== 'approval') throw new Unavailable();
 
       if (cancel) {
-        flow.phase = 'cancelled';
+        await this.ended(tx, flow, 'cancelled');
         await tx.put('flows', id, flow);
 
         return undefined;
@@ -531,12 +556,35 @@ export class VerityService {
         connection.visibility,
       );
 
-      flow.phase = 'complete';
       flow.resultId = connection.id;
+      await this.ended(tx, flow, 'complete', connection);
       await tx.put('flows', id, flow);
 
       return connection.id;
     });
+  }
+
+  /**
+   * Ends a flow and records how, inside the transaction that ends it: the connection as it
+   * stands now, since whatever later reports this result must not read a record that has
+   * changed since. The caller puts the flow.
+   */
+  private async ended(
+    tx: Transaction,
+    flow: Flow,
+    phase: FlowResult['phase'],
+    connection?: Connection,
+  ) {
+    connection ??= flow.connectionId ? await tx.get('connections', flow.connectionId) : undefined;
+
+    flow.phase = phase;
+
+    flow.result = {
+      kind: flow.kind,
+      phase,
+      ...(connection ? { connectionId: connection.id, visibility: connection.visibility } : {}),
+      finishedAt: this.now(),
+    };
   }
 
   /** Every read of a connection goes through here, so a record in an older shape is upgraded. */
@@ -567,7 +615,7 @@ export class VerityService {
   }
 
   evidence(connection: Connection): Evidence {
-    const { id: _privateId, ...local } = connection.local;
+    const { id: _privateId, siteName: _siteName, ...local } = connection.local;
 
     return {
       id: connection.id,
@@ -576,7 +624,7 @@ export class VerityService {
       provider: connection.provider,
       providerName: this.providerName(connection.provider),
       attestations: this.shown(connection),
-      siteName: this.options.siteName,
+      siteName: this.siteOf(connection.local),
       verifierName: this.options.verifierName,
       visibility: connection.visibility,
       status: status(connection, this.now(), this.freshness),

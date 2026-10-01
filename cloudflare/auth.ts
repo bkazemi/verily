@@ -34,13 +34,20 @@ export class OwnerAuth {
   }
 
   async authenticated(request: Request): Promise<boolean> {
+    return (await this.session(request)) !== undefined;
+  }
+
+  /** Which owner session a request belongs to, by the hash its record is stored under. */
+  async session(request: Request): Promise<string | undefined> {
     const token = this.token(request);
 
-    if (!token) return false;
+    if (!token) return undefined;
 
     const session = await this.storage.get<Session>(`owner/session/${hash(token)}`);
 
-    return !!session && session.expiresAt > Date.now() && session.keyHash === hash(this.ownerKey);
+    return !!session && session.expiresAt > Date.now() && session.keyHash === hash(this.ownerKey)
+      ? hash(token)
+      : undefined;
   }
 
   async login(key: string): Promise<string | undefined> {
@@ -66,7 +73,7 @@ export class OwnerAuth {
     return `${cookieName}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
   }
 
-  async allow(bucket: 'login' | 'mutation', limit: number, windowMs: number): Promise<boolean> {
+  async allow(bucket: 'login', limit: number, windowMs: number): Promise<boolean> {
     return this.storage.transaction(async (tx) => {
       const key = `owner/rate/v2/${bucket}`;
       const previous = await tx.get<{ count: number; until: number }>(key);
@@ -86,6 +93,9 @@ export class OwnerAuth {
   }
 
   async prune(): Promise<void> {
+    // One counter for every POST, from before requests were limited per session and client.
+    await this.storage.delete('owner/rate/v2/mutation');
+
     await this.storage.transaction(async (tx) => {
       for (const [key, session] of await tx.list<Session>({ prefix: 'owner/session/' })) {
         if (session.expiresAt <= Date.now() || session.keyHash !== hash(this.ownerKey))

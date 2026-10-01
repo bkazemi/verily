@@ -19,6 +19,11 @@ export interface LocalAccount {
   reference: string;
   /** Canonical URL for the linked subject: a profile, a page, or the site root. */
   profileUrl?: string;
+  /**
+   * The site this subject belongs to, where one instance serves several. Absent means the
+   * instance's own `siteName`. Every page and record describing the subject names this.
+   */
+  siteName?: string;
 }
 
 export interface ExternalAccount {
@@ -130,6 +135,28 @@ export interface Flow {
    */
   provider?: string;
   method?: Method;
+  /**
+   * What the adopting application attached when the flow was created, such as which site
+   * sent the holder here. Never set on removal from the external side, which is started by
+   * nobody local whatever the browser is signed into.
+   */
+  context?: Record<string, string>;
+  /** How the flow ended, written in the transaction that ended it and never changed after. */
+  result?: FlowResult;
+}
+
+/**
+ * The end of a flow as it stood at that moment. The connection may change later, so anything
+ * reporting the result reads it from here and never from the connection.
+ */
+export interface FlowResult {
+  kind: Flow['kind'];
+  phase: 'complete' | 'cancelled' | 'failed';
+  /** The connection the flow made or acted on, where there is one. */
+  connectionId?: string;
+  /** That connection's visibility when the flow ended. */
+  visibility?: Visibility;
+  finishedAt: number;
 }
 
 export interface Share {
@@ -263,7 +290,8 @@ export function providerMethod(provider: Provider): Method {
 
 export interface Evidence {
   id: string;
-  local: Omit<LocalAccount, 'id'>;
+  /** The site's name is `siteName` below, so the subject does not carry a second copy. */
+  local: Omit<LocalAccount, 'id' | 'siteName'>;
   external: ExternalAccount;
   provider: string;
   /** Display name from the provider implementation. */
@@ -339,12 +367,15 @@ export function statusLabel(evidence: Pick<Evidence, 'status' | 'expiresAt'>, no
  * What to call a link's local side, and what to write as its value. When the site itself is
  * what was linked there is no subject on it to name, so the site is the value rather than a
  * label above some other thing. An absent kind means the site did not say, so nothing is
- * assumed about one.
+ * assumed about one. A subject that names its own site is described by that name, and
+ * `siteName` is only the fallback.
  */
 export function localSide(
-  local: Pick<LocalAccount, 'kind' | 'label'>,
-  siteName: string,
+  local: Pick<LocalAccount, 'kind' | 'label' | 'siteName'>,
+  fallback: string,
 ): { heading: string; value: string } {
+  const siteName = local.siteName ?? fallback;
+
   if (local.kind === 'site') return { heading: 'Website', value: siteName };
 
   const heading: Record<string, string> = {

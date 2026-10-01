@@ -12,6 +12,7 @@ import {
   type Attestations,
   type Evidence,
   type Flow,
+  type FlowResult,
   type Inline,
   type Instruction,
   type LocalAccount,
@@ -43,6 +44,32 @@ export interface ServerOptions extends ServiceOptions {
   /** Resolve identity exclusively from the adopting application's authenticated session. */
   authenticate(request: Request): Promise<LocalAccount | undefined>;
   reportUrl: string;
+  /**
+   * What to store on a flow when it is created, read from the request that creates it, and
+   * handed back to `finish`. Never called for removal from the external side, whatever the
+   * browser is signed into, since nothing local answers for that.
+   */
+  context?(request: Request): Promise<Record<string, string> | undefined>;
+  /**
+   * Where to send the holder once a flow has ended, each time its result page is served. It
+   * must depend on nothing but what it is given, so a page loaded again after a failure or
+   * a lost response sends the holder to the same place. Undefined shows the result page.
+   */
+  finish?(ended: Ended): Promise<string | undefined>;
+  /**
+   * Origins a form here may end up at, beyond this one and the sign-in providers': anywhere
+   * `finish` sends a holder, since an approval form's redirect is held to `form-action`.
+   */
+  formTargets?: string[];
+}
+
+/** A flow that has ended, as `finish` is given it: all of it read from the stored flow. */
+export interface Ended {
+  /** The flow's id, which names it and is no secret. */
+  id: string;
+  context?: Record<string, string>;
+  local?: LocalAccount;
+  result: FlowResult;
 }
 
 /**
@@ -249,6 +276,23 @@ function safeUrl(value: string) {
 }
 
 /**
+ * The holder's choice of who may read the record. A subject from another site is told what
+ * each choice means there: that site shows a public link on the holder's profile, and keeps
+ * an unlisted one in its own records, since it cannot read the evidence either.
+ */
+function visibilityChoice(local: LocalAccount) {
+  const unlisted = local.siteName
+    ? `Kept between you and ${local.siteName}'s records. No badge appears on your profile.`
+    : 'Anyone with a sharing link can view and forward it. No link is created until you choose to share.';
+
+  const shown = local.siteName
+    ? `Public: ${local.siteName} shows the badge on your profile, and anyone can view both sides of this link`
+    : 'Public: anyone can view both sides of this link';
+
+  return `<fieldset><legend>Evidence visibility</legend><label><input type="radio" name="visibility" value="unlisted" checked>Unlisted</label><p>${escape(unlisted)}</p><label><input type="radio" name="visibility" value="public">${escape(shown)}</label></fieldset>`;
+}
+
+/**
  * A link's local side is one of the site's accounts, a page, or the site itself.
  * An absent kind means the site did not say, so nothing is asserted about it.
  */
@@ -312,6 +356,13 @@ export function createVerity(options: ServerOptions) {
 
   if (!['https:', 'http:', 'mailto:'].includes(new URL(options.reportUrl).protocol))
     throw new Error('Invalid report URL');
+
+  for (const target of options.formTargets ?? []) {
+    const url = new URL(target);
+
+    if (!['https:', 'http:'].includes(url.protocol) || url.origin !== target)
+      throw new Error('A form target must be an origin');
+  }
 
   const cookieName = `verity_flow_${Buffer.from(prefix).toString('hex')}`;
 
@@ -394,6 +445,36 @@ export function createVerity(options: ServerOptions) {
   }
 
   /**
+   * The page for a flow that has ended, or wherever `finish` sends the holder instead. Only
+   * the stored flow is read, so every load of it gives the same answer.
+   */
+  async function ended(flow: Flow): Promise<Response> {
+    if (options.finish && flow.result) {
+      const next = await options.finish({
+        id: flow.id,
+        context: flow.context,
+        local: flow.local,
+        result: flow.result,
+      });
+
+      if (next !== undefined) {
+        const url = safeUrl(next);
+
+        if (!url) throw new Error('finish returned an invalid URL');
+
+        return redirect(url);
+      }
+    }
+
+    return result(flow.phase, flow.resultId, flow.reason);
+  }
+
+  /** What the adopting application attaches to a new flow. External removal gets nothing. */
+  async function context(request: Request, kind: Flow['kind']) {
+    return ['revoke', 'share-revoke'].includes(kind) ? undefined : options.context?.(request);
+  }
+
+  /**
    * A redirect provider sends the holder to its own site. An artifact provider keeps them
    * here, where the flow page tells them what to publish and takes the address back.
    */
@@ -406,7 +487,7 @@ export function createVerity(options: ServerOptions) {
 
   /** The subject as the holder's own card shows it. The private id never leaves here. */
   const subject = (user: LocalAccount) => ({
-    ...localSide(user, options.siteName),
+    ...localSide(user, service.siteOf(user)),
     profileUrl: user.profileUrl,
   });
 
@@ -548,11 +629,7 @@ export function createVerity(options: ServerOptions) {
               `
             ${
               user
-                ? card(
-                    localSide(user, options.siteName).heading,
-                    localSide(user, options.siteName).value,
-                    user.profileUrl,
-                  )
+                ? card(subject(user).heading, subject(user).value, user.profileUrl)
                 : '<p>Authenticate with the matching external account to review and remove this link.</p>'
             }
             <p>Confirm the connection between this ${escape(subjectNoun(user?.kind) ?? 'site')} and your ${escape(providerNames(offered))} account.</p>
@@ -577,10 +654,16 @@ export function createVerity(options: ServerOptions) {
         }
 
         if (path === '/sessions' && url.searchParams.get('kind') === 'connect') {
-          const flow = await service.start(await local(request), undefined, 'connect', {
-            provider: url.searchParams.get('provider') ?? undefined,
-            method: url.searchParams.get('method') ?? undefined,
-          });
+          const flow = await service.start(
+            await local(request),
+            undefined,
+            'connect',
+            {
+              provider: url.searchParams.get('provider') ?? undefined,
+              method: url.searchParams.get('method') ?? undefined,
+            },
+            await context(request, 'connect'),
+          );
 
           return redirect(entry(flow), flowCookie(flow.binding));
         }
@@ -591,7 +674,7 @@ export function createVerity(options: ServerOptions) {
           const several = service.providers.length > 1;
 
           return json({
-            siteName: options.siteName,
+            siteName: service.siteOf(user),
             verifierName: options.verifierName,
             local: subject(user),
             methods: service.providers.map((p) => ({
@@ -634,7 +717,7 @@ export function createVerity(options: ServerOptions) {
             );
           }
 
-          if (flow.phase !== 'approval') return result(flow.phase, flow.resultId, flow.reason);
+          if (flow.phase !== 'approval') return await ended(flow);
 
           if (
             !['revoke', 'share-revoke'].includes(flow.kind) &&
@@ -658,11 +741,7 @@ export function createVerity(options: ServerOptions) {
                     ? 'Add to connection'
                     : 'Confirm connection',
               `
-            ${card(
-              localSide(flow.local!, options.siteName).heading,
-              localSide(flow.local!, options.siteName).value,
-              flow.local!.profileUrl,
-            )}
+            ${card(subject(flow.local!).heading, subject(flow.local!).value, flow.local!.profileUrl)}
             ${card(
               provider.name,
               externalName(flow.external!),
@@ -670,9 +749,9 @@ export function createVerity(options: ServerOptions) {
               flow.external!.id,
             )}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
-            <p class="fine">${escape(options.siteName)} receives the result. Verified via ${escape(options.verifierName)}.</p>
+            <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/approve">
-            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : '<fieldset><legend>Evidence visibility</legend><label><input type="radio" name="visibility" value="unlisted" checked>Unlisted</label><p>Anyone with a sharing link can view and forward it. No link is created until you choose to share.</p><label><input type="radio" name="visibility" value="public">Public: anyone can view both sides of this link</label></fieldset>'}
+            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!)}
             <button name="action" value="approve">${['revoke', 'share-revoke'].includes(flow.kind) ? (flow.kind === 'share-revoke' ? 'Revoke sharing link' : 'Revoke connection') : flow.kind === 'renew' ? 'Renew connection' : joined ? 'Add to connection' : 'Confirm connection'}</button>
             <button name="action" value="cancel">Cancel</button></form><p><a href="${escape(prefix)}/verify">Use a different external account</a></p>`,
             ),
@@ -750,6 +829,7 @@ export function createVerity(options: ServerOptions) {
             data.connectionId || undefined,
             kind,
             { provider: data.provider || undefined, method: data.method || undefined },
+            await context(request, kind),
           );
 
           if (asJson && kind === 'connect')
@@ -787,6 +867,11 @@ export function createVerity(options: ServerOptions) {
 
           const flow = await service.flow(approval[1]!, binding(request));
 
+          // A form resubmitted after its response was lost, as reloading a POST does. The
+          // flow has ended, so this is its result page, which needs only the binding, as
+          // loading it does: whoever signed the holder in may have ended that session since.
+          if (!asJson && flow.result) return await ended(flow);
+
           const id = await service.approve(
             flow.id,
             binding(request),
@@ -798,7 +883,7 @@ export function createVerity(options: ServerOptions) {
           if (asJson)
             return json(id ? { outcome: 'complete', connectionId: id } : { outcome: 'cancelled' });
 
-          return result(id ? 'complete' : 'cancelled', id);
+          return await ended(await service.flow(flow.id, binding(request)));
         }
 
         const management = path.match(
@@ -840,11 +925,12 @@ export function createVerity(options: ServerOptions) {
   // A sign-in form submits here and is redirected to the provider. Chromium applies
   // form-action to every redirect of a form submission, so each provider's origin must be
   // allowed alongside our own or the redirect is blocked. The origin is read from the
-  // provider's own authorization URL, which is built without side effects.
+  // provider's own authorization URL, which is built without side effects. An approval
+  // form redirected on by `finish` is held to the same rule, hence `formTargets`.
   const formAction = [
     "'self'",
-    ...new Set(
-      service.providers
+    ...new Set([
+      ...service.providers
         .filter((p) => !isArtifactProvider(p))
         .map(
           (p) =>
@@ -856,7 +942,8 @@ export function createVerity(options: ServerOptions) {
               }),
             ).origin,
         ),
-    ),
+      ...(options.formTargets ?? []),
+    ]),
   ].join(' ');
 
   async function secured(request: Request): Promise<Response> {

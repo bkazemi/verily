@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build } from 'esbuild';
 import { Miniflare, convertV4MiniflareOptions, Response as WorkerResponse } from 'miniflare';
+import { buildWorker } from './fixtures/worker.js';
 
 test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public embeds and revocation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'verity-cloudflare-'));
@@ -13,19 +13,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
   const ownerKey = 'a'.repeat(43);
   let providerCalls = 0;
 
-  await build({
-    entryPoints: ['tests/fixtures/cloudflare.ts'],
-    bundle: true,
-    format: 'esm',
-    platform: 'neutral',
-    // What wrangler resolves a package by: its export conditions, or where it ships no
-    // `exports` of its own, these fields.
-    conditions: ['workerd', 'worker', 'browser'],
-    mainFields: ['module', 'main'],
-    external: ['node:*'],
-    alias: { undici: './cloudflare/undici.ts' },
-    outfile: scriptPath,
-  });
+  await buildWorker(scriptPath);
 
   const options = {
     name: 'verity-test',

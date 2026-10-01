@@ -11,7 +11,9 @@ import {
 } from '../src/server/index.js';
 import { CloudflareStorage } from './storage.js';
 import { OwnerAuth } from './auth.js';
-import type { LocalKind } from '../src/core/index.js';
+import { registry, Sites, type Site, peek } from './sites.js';
+import { allow, client, limits, prune } from './limits.js';
+import type { LocalAccount, LocalKind } from '../src/core/index.js';
 
 export interface Env {
   VERITY: DurableObjectNamespace;
@@ -32,6 +34,13 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   OWNER_KEY: string;
+  /**
+   * The sites that send their users here instead of hosting Verity, as a JSON list of
+   * `{ id, name, origin, authorizeUrl, returnUrl }`. Each needs its key in the secret
+   * `SITE_<ID>_KEY`, such as `SITE_PARTNER_KEY`.
+   */
+  SITES?: string | unknown[];
+  [key: `SITE_${string}_KEY`]: string | undefined;
 }
 
 const safeHeaders = {
@@ -72,11 +81,30 @@ const signIn = (message = '', status = 200) =>
     'single',
   );
 
-const redirect = (cookie: string) =>
-  new Response(null, {
-    status: 303,
-    headers: { ...safeHeaders, Location: '/', 'Set-Cookie': cookie },
-  });
+const redirect = (cookie: string) => see('/', [cookie]);
+
+function see(location: string, cookies: string[] = []) {
+  const headers = new Headers({ ...safeHeaders, Location: location });
+
+  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
+
+  return new Response(null, { status: 303, headers });
+}
+
+/** Every refused handoff looks the same, so nobody can learn which check it failed. */
+const refused = () =>
+  html(
+    'Link expired',
+    '<p>This link has expired or was already used. Start again from the site that sent you.</p>',
+    403,
+    'single',
+  );
+
+/** The library's own management routes, which a site session does not get. */
+const management = /^\/api\/verity\/connections\/[^/]+\/(disconnect|share|share-revoke)$/;
+
+/** GETs that create state, and so are limited like every POST. */
+const limitedGets = ['/begin', '/start', '/api/verity/sessions', '/api/verity/callback'];
 
 /** Matches the library's own bound: large enough for a pasted key, small enough to buffer. */
 const maxBodyBytes = 65536;
@@ -149,7 +177,9 @@ export default {
 export class VerityStore {
   private readonly app;
   private readonly auth: OwnerAuth;
-  private readonly local;
+  private readonly sites: Sites;
+  private readonly local: LocalAccount;
+  private readonly formAction: string;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -161,6 +191,15 @@ export class VerityStore {
       throw new Error('PUBLIC_ORIGIN must be an HTTPS origin without a trailing slash');
 
     this.auth = new OwnerAuth(ctx.storage, env.OWNER_KEY);
+
+    this.sites = new Sites(
+      ctx.storage,
+      registry(env.SITES, env as unknown as Record<string, unknown>),
+    );
+
+    const siteOrigins = [...this.sites.sites.values()].map((site) => site.origin);
+
+    this.formAction = ["form-action 'self'", ...siteOrigins].join(' ');
 
     this.local = {
       id: 'site-owner',
@@ -200,15 +239,35 @@ export class VerityStore {
           : []),
       ],
       baseUrl: `${env.PUBLIC_ORIGIN}/api/verity`,
+      // The owner's own site. A registered site's subjects carry their site's name instead.
       siteName: env.SITE_NAME,
       // The verifier is the origin that ran the flow and serves the evidence, which a
       // reader can check. It is not SITE_NAME: that host is claimed, not demonstrated.
       // The host alone: how the backend is operated is not something a reader verifies.
       verifierName: origin.host,
-      profileOrigins: [new URL(env.OWNER_PROFILE_URL).origin],
+      // Every site's origin, since the library checks one list. That a subject's profile
+      // is on its own site's origin is checked when its handoff arrives.
+      profileOrigins: [new URL(env.OWNER_PROFILE_URL).origin, ...siteOrigins],
+      // A flow's result redirects the approval form on to the site it came from.
+      formTargets: siteOrigins,
       reportUrl: env.REPORT_URL,
+      // A site session is the more specific: it was opened for this holder moments ago.
       authenticate: async (request) =>
-        (await this.auth.authenticated(request)) ? this.local : undefined,
+        (await this.sites.open(request))?.session.local ??
+        ((await this.auth.authenticated(request)) ? this.local : undefined),
+      context: async (request) => {
+        const open = await this.sites.open(request);
+
+        return open
+          ? {
+              site: open.session.site,
+              purpose: open.session.purpose,
+              txn: open.session.txn,
+              session: open.key,
+            }
+          : undefined;
+      },
+      finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
     });
 
     this.app.service.validateLocal(this.local);
@@ -226,14 +285,27 @@ export class VerityStore {
     // rate limit a provider gives an unauthenticated caller, shared across this colo.
     await this.app.service.recheck();
     await this.auth.prune();
+    await prune(this.ctx.storage);
   }
 
   async fetch(request: Request): Promise<Response> {
+    let response: Response;
+
     try {
-      return await this.handle(request);
+      response = await this.handle(request);
     } catch {
-      return html('Temporarily unavailable', '', 503);
+      response = html('Temporarily unavailable', '', 503);
     }
+
+    // A disconnect form redirects on to the holder's site, and Chromium holds a form's
+    // redirects to form-action, as the library does its own approval form's.
+    if (!new URL(request.url).pathname.startsWith('/api/verity/'))
+      response.headers.set(
+        'Content-Security-Policy',
+        safeHeaders['Content-Security-Policy'].replace("form-action 'self'", this.formAction),
+      );
+
+    return response;
   }
 
   private async handle(request: Request): Promise<Response> {
@@ -252,10 +324,10 @@ export class VerityStore {
       request = new Request(request, { headers });
     }
 
-    if (request.method === 'POST') {
-      if (!(await this.auth.allow('mutation', 60, 60000)))
-        return html('Too many requests', '<p>Try again later.</p>', 429);
+    if (!(await this.allowed(request, url)))
+      return html('Too many requests', '<p>Try again later.</p>', 429);
 
+    if (request.method === 'POST') {
       if (url.pathname === '/login') {
         if (!(await this.auth.allow('login', 10, 15 * 60000)))
           return html('Too many requests', '<p>Try again in fifteen minutes.</p>', 429);
@@ -270,9 +342,42 @@ export class VerityStore {
 
       if (request.headers.get('origin') !== this.env.PUBLIC_ORIGIN)
         return html('Unavailable', '', 403);
+
+      if (url.pathname === '/disconnect') return this.disconnect(request);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/begin') {
+      const begun = await this.sites.begin(
+        url.searchParams.get('site'),
+        url.searchParams.get('purpose'),
+      );
+
+      return begun ? see(begun.location, [begun.cookie]) : html('Unavailable', '', 404);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/start') {
+      const started = await this.sites.start(
+        request,
+        url.searchParams.get('token') ?? '',
+        (local) => this.app.service.validateLocal(local),
+      );
+
+      // Straight on, so the token leaves the address bar.
+      return started
+        ? see(started.purpose === 'connect' ? '/api/verity/verify' : '/', started.cookies)
+        : refused();
     }
 
     if (url.pathname.startsWith('/api/verity/')) {
+      // A site session removes a link through this worker, which reports it back to the
+      // site, and has no sharing links. The library's routes would do neither.
+      if (
+        request.method === 'POST' &&
+        management.test(url.pathname) &&
+        (await this.sites.open(request))
+      )
+        return html('Unavailable', '', 404);
+
       // Some browsers omit Origin on native same-origin form posts. The request
       // already passed the exact public-origin check above; flow cookies are
       // SameSite=Lax and the library still requires the authenticated owner.
@@ -288,37 +393,174 @@ export class VerityStore {
 
     if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
 
-    if (!(await this.auth.authenticated(request))) return signIn();
+    const found = await this.sites.session(request);
 
-    const connections = await this.app.service.mine(this.local);
+    if (found && !found.session.closed && !found.session.operation)
+      return this.settings(found.session.local, this.site(found.session));
 
-    const local = localSide(this.local, this.env.SITE_NAME);
+    // A disconnect that failed partway is the one thing left to do with this session.
+    if (found?.session.operation && found.session.operation.finishedAt === undefined)
+      return html(
+        'Disconnect not finished',
+        `<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(found.session.operation.connection)}"><button>Try again</button></form>`,
+        200,
+        'single',
+      );
+
+    if (await this.auth.authenticated(request)) return this.settings(this.local);
+
+    if (found) {
+      const site = this.site(found.session);
+
+      return html(
+        'Session ended',
+        `<p>You are finished here. <a href="${escape(site.origin)}">Return to ${escape(site.name)}</a> to start again.</p>`,
+        200,
+        'single',
+      );
+    }
+
+    return signIn();
+  }
+
+  private site(session: { site: string }): Site {
+    return this.sites.sites.get(session.site)!;
+  }
+
+  /**
+   * Counts a request that creates state: every POST, and the GETs that start a handoff, a
+   * session or a flow. A signed-in holder has a bucket of their own and anyone else is
+   * counted by address, so one visitor cannot lock everyone else out. A site's requests
+   * also share a ceiling, so one site cannot starve another.
+   */
+  private async allowed(request: Request, url: URL): Promise<boolean> {
+    if (request.method !== 'POST' && !limitedGets.includes(url.pathname)) return true;
+
+    const found = await this.sites.session(request);
+    const owner = found ? undefined : await this.auth.session(request);
+
+    const holder = found
+      ? { key: `session/${found.key.slice('site/session/'.length)}`, limit: limits.session }
+      : owner
+        ? { key: `session/${owner}`, limit: limits.session }
+        : { key: client(request), limit: limits.client };
+
+    // A handoff is charged to the site it goes to, whatever session this browser holds.
+    // Anything else counts against the site whose session is still in use.
+    const named =
+      url.pathname === '/begin'
+        ? url.searchParams.get('site')
+        : url.pathname === '/start'
+          ? String(peek(url.searchParams.get('token') ?? '')?.site ?? '')
+          : found && !found.session.closed
+            ? found.session.site
+            : undefined;
+
+    const site = named && this.sites.sites.has(named) ? named : undefined;
+
+    return allow(this.ctx.storage, [
+      holder,
+      ...(site ? [{ key: `site/${site}`, limit: limits.site }] : []),
+    ]);
+  }
+
+  /**
+   * Removes a link from a site session and reports it back to the site. There is no flow to
+   * hold the result, so the session holds it, and success is reported only once the
+   * revocation has committed: pending first, then revoked, then complete. A retry resumes
+   * wherever the last attempt stopped, and one already complete reads what it stored.
+   */
+  private async disconnect(request: Request): Promise<Response> {
+    const found = await this.sites.session(request);
+    const connection = new URLSearchParams(await request.text()).get('connection') ?? '';
+
+    if (!found || !connection) return html('Unavailable', '', 404);
+
+    const { key, session } = found;
+    let current = session.operation?.connection === connection ? session : undefined;
+
+    if (!current) {
+      const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
+
+      if (!owned) return html('Unavailable', '', 404);
+
+      current = await this.sites.pending(key, connection, owned.visibility);
+
+      if (!current) return html('Unavailable', '', 404);
+    }
+
+    if (current.operation!.finishedAt === undefined) {
+      await this.revoke(connection, session.local);
+      current = await this.sites.completed(key);
+    }
+
+    return see(
+      this.sites.returnUrl(this.site(session), session.local, session.txn, {
+        operation: 'disconnect',
+        outcome: 'complete',
+        connection,
+        visibility: current.operation!.visibility,
+        finishedAt: current.operation!.finishedAt!,
+      }),
+    );
+  }
+
+  /** Idempotent: a connection already revoked is left as it is. */
+  protected async revoke(id: string, local: LocalAccount): Promise<void> {
+    await this.app.service.revoke(id, local);
+  }
+
+  /**
+   * The settings page for whoever is signed in: the owner, or a holder a site sent here.
+   * The owner's page carries the embed for their own site; a site's holder has the site to
+   * show their badge, and removes a link through a route that tells the site so.
+   */
+  private async settings(subject: LocalAccount, site?: Site) {
+    const connections = await this.app.service.mine(subject);
+    const local = localSide(subject, this.env.SITE_NAME);
 
     return html(
-      'Owner settings',
+      site ? 'Your connections' : 'Owner settings',
       `<div class="side"><p class="who">${escape(local.heading)}</p>
       <p class="name">${escape(local.value)}</p>
-      <p class="reference">${escape(this.local.reference)}</p></div>
-      <p><a href="/api/verity/verify">Verify an account or renew a connection</a></p>
-      <p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p>
-      ${connections.map((e) => this.connection(e)).join('')}
-      <form action="/logout" method="post"><button>Sign out</button></form>`,
+      <p class="reference">${escape(subject.reference)}</p></div>
+      <p><a href="/api/verity/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
+      ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p>'}
+      ${connections.map((e) => this.connection(e, site)).join('')}
+      ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
     );
   }
 
   /** One connection, with the state, the visibility and the expiry each said once. */
-  private connection(e: Evidence) {
+  private connection(e: Evidence, site?: Site) {
     const embed = `<script src="/assets/verity.js" defer></script>\n<verity-badge backend-url="${this.env.PUBLIC_ORIGIN}/api/verity" connection-id="${e.id}"></verity-badge>`;
+
+    const shown = site
+      ? e.visibility === 'public'
+        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><p class="fine">${escape(site.name)} shows this badge on your profile.</p>`
+        : `<p class="fine">${escape(site.name)} keeps this connection in its records and shows no badge.</p>`
+      : e.visibility === 'public'
+        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>`
+        : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
+
+    const actions =
+      site && e.status === 'revoked'
+        ? ''
+        : `<p><a href="/api/verity/renew/${escape(e.id)}">Renew this connection</a></p>
+      <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
+      <p><a href="/api/verity/visibility/${escape(e.id)}">Change visibility</a></p>
+      ${
+        site
+          ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`
+          : `<form action="/api/verity/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form>`
+      }`;
 
     return `<section><p class="who">${escape(e.providerName ?? e.provider)}</p>
       <h3>${escape(externalName(e.external))}</h3>
       <dl><dt>Status</dt><dd>${escape(statusLabel(e, Date.now()))}</dd>
       <dt>Visibility</dt><dd>${escape(e.visibility)}</dd>
       <dt>Expires</dt><dd>${escape(new Date(e.expiresAt).toISOString().replace(/\.\d{3}Z$/, 'Z'))}</dd></dl>
-      ${e.visibility === 'public' ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>` : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>'}
-      <p><a href="/api/verity/renew/${escape(e.id)}">Renew this connection</a></p>
-      <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
-      <p><a href="/api/verity/visibility/${escape(e.id)}">Change visibility</a></p>
-      <form action="/api/verity/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form></section>`;
+      ${shown}
+      ${actions}</section>`;
   }
 }

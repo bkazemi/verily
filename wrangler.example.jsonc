@@ -7,6 +7,7 @@
 // and, to offer Discord or YouTube sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
 // or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Each app needs
 // <PUBLIC_ORIGIN>/api/verity/callback as a redirect.
+// Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
 //
 // Those two GitHub secrets are only needed by githubProvider(), the sign-in
 // method, which is what cloudflare/worker.ts is wired to. The holder-paced
@@ -53,5 +54,15 @@
     "OWNER_REFERENCE": "example.org author",
     "OWNER_PROFILE_URL": "https://example.org/about/",
     "REPORT_URL": "mailto:you@example.org",
+    // Sites that send their users here instead of hosting Verity; see docs/cloudflare.md.
+    // "SITES": [
+    //   {
+    //     "id": "partner",
+    //     "name": "partner.example",
+    //     "origin": "https://partner.example",
+    //     "authorizeUrl": "https://partner.example/verity/authorize",
+    //     "returnUrl": "https://partner.example/verity/return",
+    //   },
+    // ],
   },
 }

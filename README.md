@@ -226,6 +226,20 @@ A static site only needs the script and the badge markup; the backend runs somew
 
 Run the backend on a domain readers can connect to your site, because `PUBLIC_ORIGIN` is shown as the verifier. If your site sets a Content Security Policy, allow the backend in `connect-src`.
 
+## Serving other sites
+
+One backend can serve sites that don't run Verity themselves, so none of them registers anything with a sign-in provider. A subject from such a site names it in `LocalAccount.siteName`, and every page, proof line and record describing that subject uses the name in place of the `siteName` option. The backend stays the verifier.
+
+Three options tie a flow to the site that sent the holder:
+
+| Option                                   | Meaning                                                                                                                                                                      |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `context(request)`                       | What to store on a flow when it starts, such as which site sent the holder. Never called for removal from the external side.                                                 |
+| `finish({ id, context, local, result })` | Where to send the holder once a flow has ended, or `undefined` for the result page. It runs each time the result page loads, so it must depend only on what it is given.     |
+| `formTargets`                            | Origins `finish` may send a holder to. Browsers hold a form's redirects to `form-action`, and the approval form is what redirects, so these origins are added to the policy. |
+
+`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)), and [`example/tenant.ts`](example/tenant.ts) is everything such a site does: sign a handoff for its signed-in user and check the result that comes back.
+
 ## Operations
 
 Verification lasts 30 days, flows 10 minutes, and sharing links 7 days. Change them with `validityMs`, `flowTtlMs` and `shareTtlMs`. Evidence is never cached.

@@ -1,9 +1,56 @@
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { CloudflareStorage } from '../../cloudflare/storage.js';
-
-export { default, VerityStore } from '../../cloudflare/worker.js';
+import { VerityStore as Store, type Env } from '../../cloudflare/worker.js';
+import type { LocalAccount } from '../../src/core/index.js';
 
 /** Test-only entry point; never included in the deployment bundle. */
+export { default } from '../../cloudflare/worker.js';
+
+/**
+ * The worker's object with a door only tests reach, since nothing routes the host `probe`
+ * to it: raw storage, the alarm on demand, and a failure injected around one revocation.
+ */
+export class VerityStore extends Store {
+  constructor(
+    private readonly probe: DurableObjectState,
+    env: Env,
+  ) {
+    super(probe, env);
+  }
+
+  protected override async revoke(id: string, local: LocalAccount) {
+    const fault = await this.probe.storage.get<string>('test/fault');
+
+    await this.probe.storage.delete('test/fault');
+
+    if (fault === 'before') throw new Error('Injected before revoking');
+
+    await super.revoke(id, local);
+
+    if (fault === 'after') throw new Error('Injected after revoking');
+  }
+
+  override async fetch(request: Request) {
+    const url = new URL(request.url);
+    const storage = this.probe.storage;
+
+    if (url.host !== 'probe') return super.fetch(request);
+
+    if (url.pathname === '/put') {
+      const { key, value } = (await request.json()) as { key: string; value: unknown };
+
+      await storage.put(key, value);
+    }
+
+    if (url.pathname === '/alarm') await this.alarm();
+
+    return Response.json(
+      Object.fromEntries(await storage.list({ prefix: url.searchParams.get('prefix') ?? '' })),
+    );
+  }
+}
+
+/** Checks the storage adapter's own guarantees, apart from the worker. */
 export class StorageProbe {
   constructor(private readonly ctx: DurableObjectState) {}
 
