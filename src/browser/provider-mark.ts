@@ -92,6 +92,11 @@ function globe(): SVGSVGElement {
   ]);
 }
 
+/** An envelope, drawn here like the key, for a mailbox that read a code sent to it. */
+function envelope(): SVGSVGElement {
+  return lines(['M2 3.5h12v9H2z', 'M2.4 4l5.6 4.6L13.6 4']);
+}
+
 /** A mark drawn as rounded strokes in the text colour. */
 function lines(paths: string[]): SVGSVGElement {
   const svg = mark();
@@ -118,7 +123,13 @@ function lines(paths: string[]): SVGSVGElement {
  * otherwise print it twice, and only the caller knows where the name belongs.
  */
 export function providerMark(provider: string, method?: string): SVGSVGElement | undefined {
-  const marks: Record<string, () => SVGSVGElement> = { github, discord, youtube, openpgp: key };
+  const marks: Record<string, () => SVGSVGElement> = {
+    github,
+    discord,
+    youtube,
+    openpgp: key,
+    email: envelope,
+  };
 
   // A site names its own link-back providers, so those fall back on the method's mark.
   return marks[provider]?.() ?? (method === 'backlink' ? globe() : undefined);

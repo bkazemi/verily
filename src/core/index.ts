@@ -32,10 +32,13 @@ export interface ExternalAccount {
    * What the other side is. Absent means an account, which is what a provider issues and
    * can reassign. A key is not an account: nobody issued it and nobody can hand it over.
    * A page is an address that was read and nothing more: a method that only fetches a
-   * document learns what it says, never whose account the address is.
+   * document learns what it says, never whose account the address is. A mailbox is an
+   * account in all but how it is written: its domain issued it and can hand it to somebody
+   * else, but its address is already its whole name and it has no profile to link to.
    */
-  kind?: 'account' | 'key' | 'page';
+  kind?: 'account' | 'key' | 'page' | 'mailbox';
   handle: string;
+  /** Where a reader goes to see the subject. For a mailbox, its `mailto:` address. */
   profileUrl: string;
 }
 
@@ -46,9 +49,10 @@ export interface ExternalAccount {
  *
  * `declared` is the site asserting a subject from its own records. That is not a weaker
  * form of the others: a site is the only authority on its own namespace, so no external
- * source could improve on it. The rest publish an artifact a reader can fetch.
+ * source could improve on it. A sign-in and a mailed code happen once, between the holder
+ * and this backend. The rest publish an artifact a reader can fetch.
  */
-export type Method = 'declared' | 'oauth' | 'gist' | 'backlink' | 'signature';
+export type Method = 'declared' | 'oauth' | 'gist' | 'backlink' | 'signature' | 'code';
 
 /** Who vouches for one side: this backend from its own records, or the account's provider. */
 export type Attester = 'backend' | 'provider';
@@ -136,6 +140,13 @@ export interface Flow {
   /** What the holder handed back: an address to read, or the proof itself. */
   artifact?: string;
   /**
+   * A message on its way to the address the holder named, carrying a link to press and a
+   * code to type. The account is only a claim until one of them comes back, which is why
+   * it is kept here and not in `external`. Never public: either one is the whole proof, so
+   * only their hashes are stored and none of this is reported.
+   */
+  sent?: { account: ExternalAccount; codeHash: string; linkHash: string; attempts: number };
+  /**
    * Which configured method the flow runs: the provider's id and its method. Absent on
    * flows written by a backend that had only one, which is the first one configured.
    */
@@ -183,11 +194,22 @@ export interface Audit {
   visibility?: Visibility;
 }
 
+/**
+ * How many times something has been done in the window that ends at `expiresAt`. Past
+ * that the count is spent and the next one starts a window of its own.
+ */
+export interface Limit {
+  id: string;
+  count: number;
+  expiresAt: number;
+}
+
 export interface Records {
   connections: Connection;
   flows: Flow;
   shares: Share;
   audit: Audit;
+  limits: Limit;
 }
 
 export interface Transaction {
@@ -265,6 +287,51 @@ export interface ArtifactProvider {
 }
 
 /**
+ * Proves control by sending a message somewhere only the holder can read and having them
+ * answer it: by pressing the link it carries, or by reading its code back. It is
+ * holder-paced like an artifact, but nothing is published: the proof is that the message
+ * arrived, so like a sign-in it happened once and there is nothing for a reader to fetch
+ * or for a recheck to read again.
+ *
+ * The backend mints the link and the code, counts the guesses and never hands the
+ * provider anything else to say, so a provider cannot be made to carry a stranger's words
+ * to an address a stranger chose.
+ */
+export interface CodeProvider {
+  id: string;
+  name: string;
+  method: 'code';
+  /** What the holder is asked for, such as "Your email address". */
+  field: string;
+  /** The kind of address, which says what a browser offers to fill in for it. */
+  input: 'email' | 'tel';
+  /**
+   * Whose account an address names, in the one spelling this provider keeps for it.
+   * Called before anything is sent. Throw `Refused` for an address it will not send to.
+   */
+  account(address: string): ExternalAccount;
+  /** Sends the message. Rejecting fails the flow, and only a `Refused` reason is shown. */
+  deliver(input: {
+    account: ExternalAccount;
+    /**
+     * A page on this backend that confirms the address once its holder presses the button
+     * there. Following the link alone confirms nothing, so a scanner that opens every link
+     * in a message cannot answer for the holder. Works from any browser.
+     */
+    link: string;
+    /** The same proof as something to type, into the page that asked. */
+    code: string;
+    /**
+     * Who the message says is asking: the site the holder is linking this account to, or,
+     * for a flow anybody may start on somebody else's record, only this installation.
+     */
+    siteName: string;
+    /** When both stop working. */
+    expiresAt: number;
+  }): Promise<void>;
+}
+
+/**
  * A proof turned down for a reason the holder can act on. Its message is shown to them, so
  * it names what was wrong with what they handed over and nothing about the backend.
  */
@@ -282,11 +349,21 @@ export type Instruction = string | { code: string } | Inline[];
  */
 export type Inline = string | { text: string; href: string };
 
-export type Provider = RedirectProvider | ArtifactProvider;
+export type Provider = RedirectProvider | ArtifactProvider | CodeProvider;
 
 /** Only an artifact provider is holder-paced, and only it needs a url handed back. */
 export function isArtifactProvider(provider: Provider): provider is ArtifactProvider {
   return 'verify' in provider;
+}
+
+/** The one shape that sends the holder to the provider's own site and takes them back. */
+export function isRedirectProvider(provider: Provider): provider is RedirectProvider {
+  return 'authenticate' in provider;
+}
+
+/** Only a code provider sends the holder something to read back. */
+export function isCodeProvider(provider: Provider): provider is CodeProvider {
+  return 'deliver' in provider;
 }
 
 /** How a provider shows control. A redirect provider that names none is oauth. */
@@ -403,7 +480,7 @@ export function localSide(
  * is an account behind it, issued by somebody who could also take it away. A key has no
  * account and no handle: it is named by its own fingerprint, so it is written as it is. A
  * page is named by its address for the same reason, since fetching one says where it is
- * and never who holds it.
+ * and never who holds it. A mailbox's address already carries its own @.
  */
 export function externalName(external: ExternalAccount): string {
   return external.kind === undefined || external.kind === 'account'
@@ -429,7 +506,16 @@ export function attestationLabel(
     gist: `Published a proof on ${names.provider}`,
     backlink: `Linked back to ${names.site}`,
     signature: 'Proved with a signature',
+    code: 'Entered a code sent to this address',
   }[method];
+}
+
+/**
+ * Where a subject's name may link, or nothing where it has no page of its own. A mailbox's
+ * address is `mailto:`, which opens a message to it and shows a reader nothing.
+ */
+export function externalLink(external: ExternalAccount): string | undefined {
+  return external.kind === 'mailbox' ? undefined : external.profileUrl;
 }
 
 /**

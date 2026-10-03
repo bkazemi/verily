@@ -7,6 +7,7 @@
 // and, to offer Discord or YouTube sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
 // or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Each app needs
 // <PUBLIC_ORIGIN>/api/verity/callback as a redirect.
+// To offer email, RESEND_API_KEY, with EMAIL_FROM set in vars below.
 // Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
 //
 // Those two GitHub secrets are only needed by githubProvider(), the sign-in
@@ -54,6 +55,11 @@
     "OWNER_REFERENCE": "example.org author",
     "OWNER_PROFILE_URL": "https://example.org/about/",
     "REPORT_URL": "mailto:you@example.org",
+    // The sender of emailed codes, on a domain verified with Resend. Email is offered
+    // only when this and the RESEND_API_KEY secret are both set.
+    // "EMAIL_FROM": "Verity <verify@example.org>",
+    // Messages mailed in a day, across everyone. Omit for 100, Resend's free allowance.
+    // "EMAIL_DAILY_LIMIT": 100,
     // Sites that send their users here instead of hosting Verity; see docs/cloudflare.md.
     // "SITES": [
     //   {

@@ -1,5 +1,5 @@
 import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
-import { externalName } from '../core/index.js';
+import { externalLink, externalName } from '../core/index.js';
 import { accountCard, linkMark, node, outward, styles } from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
 import { verityLogo } from './logo.js';
@@ -30,6 +30,17 @@ export interface FlowView {
   artifact?: 'location' | 'document';
   field?: string;
   note?: string;
+  /**
+   * A mailed code: what to ask the holder for, and once a code has gone, where it went,
+   * whether the last one entered was wrong, and how many tries are left.
+   */
+  code?: {
+    field: string;
+    input: 'email' | 'tel';
+    sentTo?: string;
+    wrong?: boolean;
+    triesLeft?: number;
+  };
   local?: Subject;
   external?: ExternalAccount;
   joined?: { visibility: 'public' | 'unlisted' };
@@ -66,7 +77,7 @@ const connectStyles = `
   pre { margin: 0; padding: 10px 64px 10px 12px; border: 1px solid #e0e6df; border-radius: 8px; background: #f6f8f5; font: 12px/1.5 ui-monospace, monospace; white-space: pre; overflow-x: auto; }
   .code .action { position: absolute; top: 6px; right: 6px; padding: 3px 8px; font-size: 11px; }
   label { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
-  input[type=url], textarea { width: 100%; padding: 8px 10px; border: 1px solid #cfd8d2; border-radius: 8px; font: 13px/1.4 system-ui, sans-serif; color: inherit; background: #fff; }
+  input[type=url], input[type=email], input[type=tel], input[type=text], textarea { width: 100%; padding: 8px 10px; border: 1px solid #cfd8d2; border-radius: 8px; font: 13px/1.4 system-ui, sans-serif; color: inherit; background: #fff; }
   textarea { font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
   fieldset { margin: 16px 0 0; padding: 10px 14px; border: 1px solid #e0e6df; border-radius: 10px; }
   legend { padding: 0 4px; color: #6b786f; font-size: 11px; font-weight: 550; }
@@ -410,6 +421,8 @@ export function openConnectDialog(
 
     if (flow.phase === 'pending' && flow.instructions) return publish(flow);
 
+    if (flow.phase === 'pending' && flow.code) return mailed(flow);
+
     if (flow.phase === 'approval') return approve(flow);
 
     if (flow.phase === 'complete') {
@@ -503,6 +516,95 @@ export function openConnectDialog(
     );
   }
 
+  /**
+   * A mailed code, in two steps on the one flow: the holder names an address, then enters
+   * the code that arrived there. Both go back the way a proof does.
+   */
+  function mailed(flow: FlowView) {
+    const { field, sentTo, wrong, triesLeft } = flow.code!;
+    const sent = sentTo !== undefined;
+
+    const input = Object.assign(node('input'), {
+      type: sent ? 'text' : flow.code!.input,
+      name: 'artifact',
+      required: true,
+      autocomplete: sent ? 'one-time-code' : flow.code!.input,
+    });
+
+    if (sent) {
+      input.autocapitalize = 'characters';
+      input.spellcheck = false;
+    }
+
+    const label = node('label', sent ? 'Your code' : field);
+
+    label.append(input);
+    const check = button(sent ? 'Check my code' : 'Send me a code', true);
+    const back = button('Back');
+
+    back.onclick = () => void choose();
+
+    const send = () => {
+      if (!input.value.trim()) {
+        input.focus();
+
+        return;
+      }
+
+      void busy(check, () => api.submit(flow.id, input.value), show);
+    };
+
+    check.onclick = send;
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') send();
+    });
+
+    const parts: Node[] = [];
+
+    if (sent)
+      parts.push(
+        node(
+          'p',
+          `A message was sent to ${sentTo}. Press the button in it, or enter its code here.`,
+        ),
+      );
+
+    if (sent && wrong)
+      parts.push(
+        node(
+          'p',
+          `That code did not match. ${triesLeft === 1 ? 'One try is' : `${triesLeft} tries are`} left.`,
+          'error',
+        ),
+      );
+
+    content.replaceChildren(
+      ...parts,
+      label,
+      row(back, check),
+      ...(!sent && flow.note ? [node('p', flow.note, 'muted')] : []),
+    );
+
+    input.focus();
+
+    if (!sent) return;
+
+    // The button in the message is pressed somewhere else, so only the flow can say it
+    // was. A code half typed is left alone: nothing is redrawn until the step moves on.
+    const asked = step;
+
+    poll = setInterval(async () => {
+      try {
+        const now = await api.read(flow.id);
+
+        if (current(asked) && !['pending', 'exchanging'].includes(now.phase)) show(now);
+      } catch {
+        // A read that fails says nothing about the flow, which the next one may.
+      }
+    }, 2000);
+  }
+
   function approve(flow: FlowView) {
     const logo = providerMark(flow.provider.id, flow.provider.method);
 
@@ -511,8 +613,8 @@ export function openConnectDialog(
         ? [logo, document.createTextNode(flow.provider.name)]
         : [document.createTextNode(flow.provider.name)],
       externalName(flow.external!),
-      flow.external!.id,
-      flow.external!.profileUrl,
+      flow.external!.kind === 'mailbox' ? undefined : flow.external!.id,
+      externalLink(flow.external!),
     );
 
     const parts: Node[] = [subjectCard(flow.local!), linkMark(), external];

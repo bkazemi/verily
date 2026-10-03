@@ -1,8 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   attestationLabel,
+  externalLink,
   externalName,
   isArtifactProvider,
+  isCodeProvider,
+  isRedirectProvider,
   localSide,
   proofTitle,
   providerMethod,
@@ -10,6 +13,7 @@ import {
   type Attestation,
   type ArtifactProvider,
   type Attestations,
+  type CodeProvider,
   type Evidence,
   type Flow,
   type FlowResult,
@@ -17,11 +21,11 @@ import {
   type Instruction,
   type LocalAccount,
   type Provider,
-  type RedirectProvider,
   type Visibility,
 } from '../core/index.js';
-import { VerityService, Unavailable, type ServiceOptions } from './service.js';
+import { codeAttempts, VerityService, Unavailable, type ServiceOptions } from './service.js';
 import { copyScript } from './copy.js';
+import { escape } from './escape.js';
 import { logo } from '../logo.js';
 import { stylesheet, styleVersion } from './style.js';
 
@@ -38,6 +42,15 @@ export { githubGistProvider } from './github-gist.js';
 export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './link.js';
 
 export { pgpProvider } from './pgp.js';
+
+export {
+  emailProvider,
+  type EmailImage,
+  type EmailMessage,
+  type EmailProviderOptions,
+} from './email.js';
+
+export { resendSender } from './resend.js';
 
 export type { ServiceOptions } from './service.js';
 
@@ -92,12 +105,6 @@ export interface Ended {
  * one runs to tens of kilobytes. Still small enough that the size itself costs nothing.
  */
 const maxBodyBytes = 65536;
-
-const escape = (value: unknown) =>
-  String(value).replace(
-    /[&<>"']/g,
-    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!,
-  );
 
 const page = (prefix: string, title: string, body: string) =>
   `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verity</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main>${logo}<h1>${escape(title)}</h1>${body}</main></body></html>`;
@@ -212,6 +219,7 @@ function methodAction(provider: Provider): string {
     gist: `Publish a proof on ${provider.name}`,
     backlink: `Link back from ${provider.name}`,
     signature: `Sign with ${provider.name}`,
+    code: `Get a code by ${provider.name.toLowerCase()}`,
   };
 
   return actions[providerMethod(provider)] ?? `Continue with ${provider.name}`;
@@ -232,6 +240,28 @@ function artifactNote(provider: ArtifactProvider): string {
     ? 'This link is public, as is the page you point at. Anyone reading either one can follow it here.'
     : 'This line is public, as is whatever published it. Publish nothing else alongside it.';
 }
+
+/**
+ * Where a mailed code stands, for whichever renderer asks the holder for the next thing:
+ * the address to send to, or the code once it has gone. The code and its hash stay behind.
+ */
+function codeStep(provider: CodeProvider, flow: Flow) {
+  return {
+    field: provider.field,
+    input: provider.input,
+    ...(flow.sent
+      ? {
+          sentTo: flow.sent.account.handle,
+          wrong: flow.sent.attempts > 0,
+          triesLeft: codeAttempts - flow.sent.attempts,
+        }
+      : {}),
+  };
+}
+
+/** Said before a code is sent: the address becomes the name the link shows. */
+const codeNote =
+  'A code is sent to this address. The address is what the link shows, to whoever you let read it.';
 
 /** Names the providers on offer once each, however many ways each can be shown. */
 function providerNames(providers: Provider[]): string {
@@ -340,8 +370,9 @@ function evidencePage(e: Evidence & { linkExpiresAt?: number }, base: string, re
       card(
         names.provider,
         externalName(e.external),
-        e.external.profileUrl,
-        e.external.id,
+        externalLink(e.external),
+        // A mailbox's address is its name already, so there is no second identifier.
+        e.external.kind === 'mailbox' ? undefined : e.external.id,
         externalNotes(e.attestations, names),
       ) +
       times([
@@ -591,6 +622,9 @@ export function createVerity(options: ServerOptions) {
         note: artifactNote(provider),
       });
 
+    if (flow.phase === 'pending' && isCodeProvider(provider))
+      Object.assign(view, { code: codeStep(provider, flow), note: codeNote });
+
     if (flow.phase === 'approval') {
       const joined = await service.joining(flow);
 
@@ -801,6 +835,38 @@ export function createVerity(options: ServerOptions) {
             );
           }
 
+          // Holder-paced too, in two steps: where to send a code, then the code itself.
+          if (flow.phase === 'pending' && isCodeProvider(provider)) {
+            if (!['revoke', 'share-revoke'].includes(flow.kind))
+              if ((await local(request)).id !== flow.local?.id) throw new Unavailable();
+
+            const step = codeStep(provider, flow);
+
+            return html(
+              page(
+                prefix,
+                `Verify with ${provider.name}`,
+                `${
+                  step.sentTo === undefined
+                    ? ''
+                    : `<p>A message was sent to ${escape(step.sentTo)}. Press the button in it, then come back to this page.</p><p><a href="${escape(prefix)}/flows/${escape(flow.id)}">I pressed the button</a></p><p>Or enter the code from the message here.</p>${
+                        step.wrong
+                          ? `<p>That code did not match. ${step.triesLeft === 1 ? 'One try is' : `${step.triesLeft} tries are`} left.</p>`
+                          : ''
+                      }`
+                }
+            <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
+            <label>${escape(step.sentTo === undefined ? step.field : 'Your code')} ${
+              step.sentTo === undefined
+                ? `<input name="artifact" type="${step.input}" autocomplete="${step.input}" required>`
+                : '<input name="artifact" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>'
+            }</label>
+            <button>${step.sentTo === undefined ? 'Send me a code' : 'Check my code'}</button></form>
+            ${step.sentTo === undefined ? `<p class="fine">${escape(codeNote)}</p>` : ''}`,
+              ),
+            );
+          }
+
           if (flow.phase !== 'approval') return await ended(flow);
 
           if (
@@ -829,8 +895,8 @@ export function createVerity(options: ServerOptions) {
             ${card(
               provider.name,
               externalName(flow.external!),
-              flow.external!.profileUrl,
-              flow.external!.id,
+              externalLink(flow.external!),
+              flow.external!.kind === 'mailbox' ? undefined : flow.external!.id,
             )}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
@@ -838,6 +904,38 @@ export function createVerity(options: ServerOptions) {
             ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!))}
             <button name="action" value="approve">${['revoke', 'share-revoke'].includes(flow.kind) ? (flow.kind === 'share-revoke' ? 'Revoke sharing link' : 'Revoke connection') : flow.kind === 'renew' ? 'Renew connection' : joined ? 'Add to connection' : 'Confirm connection'}</button>
             <button name="action" value="cancel">Cancel</button></form><p><a href="${escape(prefix)}/verify">Use a different external account</a></p>`,
+            ),
+          );
+        }
+
+        const confirmation = path.match(/^\/confirm\/([^/]+)$/);
+
+        // Where the button in a message leads, in whatever browser the holder reads mail
+        // in. Arriving confirms nothing: a scanner that opens every link in a message gets
+        // this page and stops, and the holder is shown what they are confirming first.
+        if (confirmation) {
+          const token = url.searchParams.get('token') ?? '';
+          const asked = await service.confirming(confirmation[1]!, token);
+
+          const next: Record<string, string> = {
+            connect: `link it to this ${subjectNoun(asked.local?.kind) ?? 'site'}`,
+            renew: 'renew its link',
+            visibility: 'change who can read its link',
+            revoke: 'remove its link',
+            'share-revoke': 'revoke its sharing link',
+          };
+
+          return html(
+            page(
+              prefix,
+              'Confirm your address',
+              `${asked.local ? card(subject(asked.local).heading, subject(asked.local).value, asked.local.profileUrl) : ''}
+            ${card(asked.provider.name, externalName(asked.account), undefined)}
+            <p>Confirming shows that this address is yours, so the page that asked can go on to ${escape(next[asked.kind]!)}. Nothing changes until that page is approved too.</p>
+            <form method="post" action="${escape(prefix)}/confirm/${escape(confirmation[1]!)}">
+            <input type="hidden" name="token" value="${escape(token)}">
+            <button>Confirm this address</button></form>
+            <p class="fine">If you did not ask for this, close this page. Nothing happens unless you confirm.</p>`,
             ),
           );
         }
@@ -929,6 +1027,30 @@ export function createVerity(options: ServerOptions) {
             );
 
           return redirect(entry(flow), flowCookie(flow.binding));
+        }
+
+        const confirmation = path.match(/^\/confirm\/([^/]+)$/);
+
+        if (confirmation) {
+          const flow = await service.confirm(confirmation[1]!, data.token ?? '');
+
+          // The flow is still the browser's that started it. This one may be that browser,
+          // and then it can carry on from here; any other is sent back to where it began.
+          const here = await service.flow(flow.id, binding(request)).catch(() => undefined);
+
+          return html(
+            page(
+              prefix,
+              flow.phase === 'failed' ? 'Address not confirmed' : 'Address confirmed',
+              flow.phase === 'failed'
+                ? `<p>${escape(flow.reason ?? 'This address could not be confirmed')}.</p>`
+                : `<p>Go back to the page where you started. It carries on from here.</p>${
+                    here
+                      ? `<p><a href="${escape(prefix)}/flows/${escape(flow.id)}">Or carry on in this window</a></p>`
+                      : '<p>You can close this window.</p>'
+                  }`,
+            ),
+          );
         }
 
         const submission = path.match(/^\/flows\/([^/]+)\/submit$/);
@@ -1026,18 +1148,16 @@ export function createVerity(options: ServerOptions) {
   const formAction = [
     "'self'",
     ...new Set([
-      ...service.providers
-        .filter((p) => !isArtifactProvider(p))
-        .map(
-          (p) =>
-            new URL(
-              (p as RedirectProvider).authorizationUrl({
-                state: 'state',
-                challenge: 'challenge',
-                redirectUri: `${service.baseUrl}/callback`,
-              }),
-            ).origin,
-        ),
+      ...service.providers.filter(isRedirectProvider).map(
+        (p) =>
+          new URL(
+            p.authorizationUrl({
+              state: 'state',
+              challenge: 'challenge',
+              redirectUri: `${service.baseUrl}/callback`,
+            }),
+          ).origin,
+      ),
       ...(options.formTargets ?? []),
     ]),
   ].join(' ');

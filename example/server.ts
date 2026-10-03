@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import {
   createVerity,
   discordProvider,
+  emailProvider,
   youtubeProvider,
   githubProvider,
   nodeHandler,
@@ -47,10 +48,23 @@ const providers = [
         }),
       ]
     : []),
+  // Development only: the code is printed here instead of mailed, so anybody reading this
+  // terminal can claim any address. A real deployment hands `send` to whatever sends its mail.
+  ...(process.env.EMAIL_TO_TERMINAL === '1'
+    ? [
+        emailProvider({
+          async send({ to, subject, text }) {
+            console.log(`\nTo: ${to}\nSubject: ${subject}\n\n${text}\n`);
+          },
+        }),
+      ]
+    : []),
 ];
 
 if (!providers.length)
-  throw new Error('Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or the DISCORD_ or GOOGLE_ pair');
+  throw new Error(
+    'Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, the DISCORD_ or GOOGLE_ pair, or EMAIL_TO_TERMINAL=1',
+  );
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const storage = new PostgresStorage(pool, process.env.VERITY_NAMESPACE ?? 'verity');

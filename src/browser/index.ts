@@ -546,7 +546,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
         if (e.visibility !== 'public') throw new Error('Unavailable');
 
         // Validate both links before rendering any provider details.
-        safeUrl(e.external.profileUrl);
+        externalUrl(e.external);
         safeUrl(e.evidenceUrl);
         // What the dialog draws has one more link in it than the pill, so it opens on the
         // record only if that one is good too, and otherwise on what it reads.
@@ -629,7 +629,7 @@ function record(value: unknown): value is Record<string, unknown> {
 function readable(evidence: Evidence): Evidence | undefined {
   try {
     safeUrl(evidence.evidenceUrl);
-    safeUrl(evidence.external.profileUrl);
+    externalUrl(evidence.external);
 
     if (evidence.local.profileUrl) safeUrl(evidence.local.profileUrl);
 
@@ -654,12 +654,26 @@ function flowView(value: unknown): FlowView {
   if (value.phase === 'approval') {
     if (!record(value.local) || !record(value.external)) throw new Error('Invalid flow response');
 
-    safeUrl(String(value.external.profileUrl));
+    externalUrl(value.external);
 
     if (value.local.profileUrl !== undefined) safeUrl(String(value.local.profileUrl));
   }
 
   return value as unknown as FlowView;
+}
+
+/**
+ * An external subject's address, refused unless it may be drawn. A mailbox has no page and
+ * is never linked, so its address need only be the `mailto:` it says it is.
+ */
+function externalUrl(external: { kind?: unknown; profileUrl?: unknown }) {
+  const address = String(external.profileUrl);
+
+  if (external.kind !== 'mailbox') return safeUrl(address);
+
+  if (new URL(address).protocol !== 'mailto:') throw new Error('Invalid URL');
+
+  return address;
 }
 
 function safeUrl(value: string) {
@@ -726,7 +740,7 @@ function validEvidence(value: unknown): value is Evidence {
     validAttestations(value.attestations) &&
     (value.local.kind === undefined || typeof value.local.kind === 'string') &&
     (value.external.kind === undefined ||
-      ['account', 'key', 'page'].includes(String(value.external.kind))) &&
+      ['account', 'key', 'page', 'mailbox'].includes(String(value.external.kind))) &&
     (value.revokedAt === undefined ||
       (typeof value.revokedAt === 'number' && Number.isFinite(value.revokedAt))) &&
     ['verified', 'unconfirmed', 'expired', 'revoked'].includes(String(value.status)) &&
