@@ -3,10 +3,13 @@ import {
   fresh,
   freshnessMs,
   isArtifactProvider,
+  isCodeProvider,
+  isRedirectProvider,
   providerMethod,
   Refused,
   status,
   type ArtifactProvider,
+  type CodeProvider,
   type Attestation,
   type Attestations,
   type Connection,
@@ -14,6 +17,7 @@ import {
   type ExternalAccount,
   type Flow,
   type FlowResult,
+  type Limit,
   type LocalAccount,
   type Method,
   type Provider,
@@ -54,6 +58,14 @@ export interface ServiceOptions {
   /** How often recheck() reads a given proof again. Must be well under freshnessMs. */
   recheckMs?: number;
   recheckTimeoutMs?: number;
+  /**
+   * How many messages a code provider may send in any twenty-four hours: in all, and to
+   * any one address. A visitor chooses where a message goes, so the first bounds what one
+   * of them can spend of the deployment's mail allowance and the second what an address
+   * whose holder never asked can be sent. A hundred and five unless set; `Infinity` lifts
+   * one. Each provider is counted on its own.
+   */
+  sendLimits?: { day?: number; address?: number };
   now?: () => number;
 }
 
@@ -105,6 +117,17 @@ export class VerityService {
 
     if (this.freshness <= (options.recheckMs ?? 86400000))
       throw new Error('freshnessMs must exceed recheckMs');
+
+    for (const limit of Object.values(this.sendLimits))
+      if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit <= 0))
+        throw new Error('Invalid send limit');
+  }
+
+  private get sendLimits(): { day: number; address: number } {
+    return {
+      day: this.options.sendLimits?.day ?? 100,
+      address: this.options.sendLimits?.address ?? 5,
+    };
   }
 
   /** A proof is only as fresh as the schedule that reads it, so both live together. */
@@ -257,7 +280,8 @@ export class VerityService {
     const artifact = isArtifactProvider(provider) ? provider : undefined;
 
     // A redirect provider hands the holder to its own site; an artifact provider tells
-    // them what to publish and waits for them to say where they put it.
+    // them what to publish and waits for them to say where they put it; a code provider
+    // has nothing to say until the holder names the address to send to.
     return artifact
       ? {
           flowId: flow.id,
@@ -265,15 +289,17 @@ export class VerityService {
           expect: flow.expect!,
           instructions: artifact.instructions(flow.expect!),
         }
-      : {
-          flowId: flow.id,
-          binding,
-          authorizationUrl: (provider as RedirectProvider).authorizationUrl({
-            state,
-            challenge: hash(verifier),
-            redirectUri: `${this.baseUrl}/callback`,
-          }),
-        };
+      : isRedirectProvider(provider)
+        ? {
+            flowId: flow.id,
+            binding,
+            authorizationUrl: provider.authorizationUrl({
+              state,
+              challenge: hash(verifier),
+              redirectUri: `${this.baseUrl}/callback`,
+            }),
+          }
+        : { flowId: flow.id, binding };
   }
 
   /**
@@ -314,8 +340,18 @@ export class VerityService {
   /**
    * Accepts what the holder hands back: the address they published the flow's string at,
    * or the proof itself. Both are holder-supplied, so the provider decides what counts.
+   * A code provider is handed two things in turn, the address to send to and then the
+   * code that arrived there.
    */
   async submit(id: string, binding: string, artifact: string): Promise<string> {
+    const asked = this.providerOf(await this.flow(id, binding));
+
+    if (isCodeProvider(asked)) {
+      await this.answer(id, binding, asked, artifact);
+
+      return id;
+    }
+
     const { provider, expect } = await this.transaction(async (tx) => {
       const flow = await this.bound(tx, id, binding);
       const provider = this.providerOf(flow);
@@ -340,6 +376,202 @@ export class VerityService {
     return id;
   }
 
+  /**
+   * One step of a mailed code. The first answer is an address: a code is minted, sent
+   * there, and only its hash kept. The second is the code, which the holder could only
+   * have read at that address. The code is the whole proof and short enough to type, so
+   * the guesses are counted and a flow that runs out of them is dead.
+   */
+  private async answer(id: string, binding: string, provider: CodeProvider, answer: string) {
+    const step = await this.transaction(async (tx) => {
+      const flow = await this.bound(tx, id, binding);
+
+      if (flow.phase !== 'pending') throw new Unavailable();
+
+      if (!flow.sent) {
+        // The record is the authority on whose link this is, as it is when a flow starts.
+        const subject = flow.connectionId
+          ? (await tx.get('connections', flow.connectionId))?.local
+          : flow.local;
+
+        if (!subject) throw new Unavailable();
+
+        // Held here while the message is on its way, so the address is named only once.
+        flow.phase = 'exchanging';
+        await tx.put('flows', id, flow);
+
+        // Removal from the external side is started by anybody who knows the record's id,
+        // and the message goes wherever they say. Which site the record belongs to is not
+        // theirs to read until the matching account is shown, so that message names this
+        // installation, which says nothing about any one record.
+        const siteName = ['revoke', 'share-revoke'].includes(flow.kind)
+          ? this.options.verifierName
+          : this.siteOf(subject);
+
+        return { send: { siteName, expiresAt: flow.expiresAt } };
+      }
+
+      if (flow.sent.codeHash === codeHash(id, answer)) {
+        const { account } = flow.sent;
+
+        delete flow.sent;
+        flow.phase = 'exchanging';
+        await tx.put('flows', id, flow);
+
+        return { account };
+      }
+
+      flow.sent.attempts += 1;
+
+      if (flow.sent.attempts >= codeAttempts) {
+        flow.reason = 'Too many wrong codes';
+        await this.ended(tx, flow, 'failed');
+      }
+
+      await tx.put('flows', id, flow);
+
+      return {};
+    });
+
+    try {
+      if (step.account) await this.established(id, binding, step.account);
+
+      if (!step.send) return;
+
+      const account = provider.account(answer);
+
+      if (!(await this.spend(provider, account)))
+        throw new Refused('Too many messages have been sent today, so try again tomorrow');
+
+      const code = mintCode();
+      const token = secret();
+
+      await provider.deliver({
+        account,
+        link: `${this.baseUrl}/confirm/${id}?token=${token}`,
+        code,
+        ...step.send,
+      });
+
+      await this.transaction(async (tx) => {
+        const flow = await this.bound(tx, id, binding);
+
+        if (flow.phase !== 'exchanging') throw new Unavailable();
+
+        flow.sent = {
+          account,
+          codeHash: codeHash(id, code),
+          linkHash: hash(token),
+          attempts: 0,
+        };
+
+        flow.phase = 'pending';
+        await tx.put('flows', id, flow);
+      });
+    } catch (error) {
+      await this.failed(id, error);
+    }
+  }
+
+  /**
+   * Counts one message against the day's ceiling and the address's, and says whether both
+   * had room. All or nothing, so a message refused by one spends nothing from the other.
+   * Counted before the message goes, so one that fails to send is still spent: a sender
+   * that is failing is not a reason to try it more often. The address is kept as a hash.
+   */
+  private async spend(provider: CodeProvider, account: ExternalAccount): Promise<boolean> {
+    const { day, address } = this.sendLimits;
+
+    const buckets = [
+      { id: `send/${provider.id}/day`, limit: day },
+      { id: `send/${provider.id}/to/${hash(account.id)}`, limit: address },
+    ].filter(({ limit }) => limit !== Infinity);
+
+    return this.transaction(async (tx) => {
+      const now = this.now();
+      const next: Limit[] = [];
+
+      for (const { id, limit } of buckets) {
+        const held = await tx.get('limits', id);
+
+        const window =
+          held && held.expiresAt > now ? held : { id, count: 0, expiresAt: now + dayMs };
+
+        if (window.count >= limit) return false;
+
+        next.push({ ...window, count: window.count + 1 });
+      }
+
+      for (const window of next) await tx.put('limits', window.id, window);
+
+      return true;
+    });
+  }
+
+  /**
+   * The flow a confirmation link belongs to, while the link is still good. The link is
+   * the whole credential and is used from wherever the holder reads their mail, so no
+   * binding is asked for: it proves the mailbox and nothing else, and what happens to the
+   * flow next is still up to the browser that started it.
+   */
+  private async linked(tx: Transaction, id: string, token: string): Promise<Flow> {
+    const flow = await tx.get('flows', id);
+
+    if (
+      !flow ||
+      flow.expiresAt <= this.now() ||
+      flow.phase !== 'pending' ||
+      flow.sent?.linkHash !== hash(token)
+    )
+      throw new Unavailable();
+
+    return flow;
+  }
+
+  /**
+   * What a confirmation link would confirm, to show its holder before they press anything.
+   * The subject is named only for a new link, where the one who started the flow is the
+   * one who named it. A flow on an existing record is started by anybody, and its subject
+   * is nobody's to read until the matching account has been shown.
+   */
+  async confirming(id: string, token: string) {
+    return this.transaction(async (tx) => {
+      const flow = await this.linked(tx, id, token);
+
+      return {
+        kind: flow.kind,
+        provider: this.providerOf(flow),
+        account: flow.sent!.account,
+        local: flow.kind === 'connect' ? flow.local : undefined,
+      };
+    });
+  }
+
+  /**
+   * Takes a pressed confirmation link as the proof a typed code would have been, and
+   * returns the flow as that left it. The link is spent either way.
+   */
+  async confirm(id: string, token: string): Promise<Flow> {
+    const account = await this.transaction(async (tx) => {
+      const flow = await this.linked(tx, id, token);
+      const { account } = flow.sent!;
+
+      delete flow.sent;
+      flow.phase = 'exchanging';
+      await tx.put('flows', id, flow);
+
+      return account;
+    });
+
+    try {
+      await this.established(id, undefined, account);
+    } catch (error) {
+      await this.failed(id, error);
+    }
+
+    return this.transaction(async (tx) => (await tx.get('flows', id))!);
+  }
+
   private async bound(tx: Transaction, id: string, binding: string): Promise<Flow> {
     const flow = await tx.get('flows', id);
 
@@ -359,7 +591,7 @@ export class VerityService {
     const claimed = await this.transaction(async (tx) => {
       const flow = await this.bound(tx, id, binding);
 
-      if (flow.phase !== 'pending' || isArtifactProvider(this.providerOf(flow)))
+      if (flow.phase !== 'pending' || !isRedirectProvider(this.providerOf(flow)))
         throw new Unavailable();
 
       if (code) flow.phase = 'exchanging';
@@ -393,11 +625,12 @@ export class VerityService {
   /**
    * The identity is established the same way whichever method produced it, so both paths
    * land here: a provider result is never trusted for its shape, and a flow against an
-   * existing connection must still be the same account on the same provider.
+   * existing connection must still be the same account on the same provider. No binding
+   * means a confirmation link got here, which is held to the link and not to a browser.
    */
   private async established(
     id: string,
-    binding: string,
+    binding: string | undefined,
     external: ExternalAccount,
     artifact?: string,
   ) {
@@ -407,14 +640,16 @@ export class VerityService {
       typeof external.handle !== 'string' ||
       !external.handle ||
       typeof external.profileUrl !== 'string' ||
-      new URL(external.profileUrl).protocol !== 'https:'
+      // A mailbox has no page to point at, so its own address stands in for one.
+      new URL(external.profileUrl).protocol !== (external.kind === 'mailbox' ? 'mailto:' : 'https:')
     )
       throw new Unavailable();
 
     await this.transaction(async (tx) => {
-      const flow = await this.bound(tx, id, binding);
+      const flow =
+        binding === undefined ? await tx.get('flows', id) : await this.bound(tx, id, binding);
 
-      if (flow.phase !== 'exchanging') throw new Unavailable();
+      if (flow?.phase !== 'exchanging') throw new Unavailable();
 
       if (flow.kind !== 'connect') {
         const connection = await tx.get('connections', flow.connectionId!);
@@ -1073,6 +1308,9 @@ export class VerityService {
       for (const flow of await tx.list('flows'))
         if (flow.expiresAt <= now) await tx.delete('flows', flow.id);
 
+      for (const limit of await tx.list('limits'))
+        if (limit.expiresAt <= now) await tx.delete('limits', limit.id);
+
       const audit = await tx.list('audit');
 
       for (const connection of await tx.list('connections')) {
@@ -1246,6 +1484,40 @@ function matches(kind: Flow['kind'], held: ExternalAccount, shown: ExternalAccou
 /** A profile address as it compares. Handles are compared without case, as providers issue them. */
 function profile(url: string): string {
   return url.replace(/\/+$/, '').toLowerCase();
+}
+
+/** The window a send limit counts over. */
+const dayMs = 86400000;
+
+/** How many wrong codes a flow takes before it is dead. */
+export const codeAttempts = 5;
+
+/** Crockford's base 32: no I, L, O or U, so no letter is mistaken for a digit when typed. */
+const codeAlphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * A code short enough to type and long enough not to guess: forty bits, against the few
+ * tries a flow allows. Written in two groups, since eight characters in a row are miscounted.
+ */
+function mintCode(): string {
+  const text = [...randomBytes(8)].map((byte) => codeAlphabet[byte & 31]).join('');
+
+  return `${text.slice(0, 4)}-${text.slice(4)}`;
+}
+
+/**
+ * A code as it is compared: bound to its flow, and read the way it was meant however it
+ * was typed, in either case, with or without the hyphen, and with the letters the alphabet
+ * leaves out taken for the digits they look like.
+ */
+function codeHash(flowId: string, code: string): string {
+  const typed = code
+    .toUpperCase()
+    .replace(/[^0-9A-Z]/g, '')
+    .replace(/O/g, '0')
+    .replace(/[IL]/g, '1');
+
+  return hash(`${flowId} ${typed}`);
 }
 
 /** Whether a method hands over a proof for this backend to publish. */

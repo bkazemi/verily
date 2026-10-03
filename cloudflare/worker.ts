@@ -1,10 +1,13 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
 import { externalName, localSide, statusLabel, type Evidence } from '../src/core/index.js';
 import { logo } from '../src/logo.js';
+import { escape } from '../src/server/escape.js';
 import { styleVersion } from '../src/server/style.js';
 import {
   createVerity,
   discordProvider,
+  emailProvider,
+  resendSender,
   youtubeProvider,
   githubLinkProvider,
   githubProvider,
@@ -33,6 +36,14 @@ export interface Env {
   /** YouTube sign-in is offered only when both are set. */
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  /**
+   * Email is offered only when both are set: a Resend API key, and the sender its codes
+   * come from, as `Name <address>` or an address on a domain verified with Resend.
+   */
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
+  /** How many codes may be mailed in a day, where the mail allowance is not the default. */
+  EMAIL_DAILY_LIMIT?: string | number;
   OWNER_KEY: string;
   /**
    * The sites that send their users here instead of hosting Verity, as a JSON list of
@@ -51,12 +62,6 @@ const safeHeaders = {
   'Content-Security-Policy':
     "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 };
-
-const escape = (value: string) =>
-  value.replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
-  );
 
 /**
  * Every page here says in its heading what it is, the way the library's pages do. The
@@ -99,6 +104,16 @@ const refused = () =>
     403,
     'single',
   );
+
+/**
+ * The day's ceiling on mailed messages: the one configured, if it is a count at all, and
+ * otherwise the library's own.
+ */
+function dailyMail(configured: string | number | undefined): number | undefined {
+  const count = Number(configured);
+
+  return Number.isSafeInteger(count) && count > 0 ? count : undefined;
+}
 
 /** The library's own management routes, which a site session does not get. */
 const management = /^\/api\/verity\/connections\/[^/]+\/(disconnect|share|share-revoke)$/;
@@ -309,8 +324,8 @@ export class VerityStore {
     this.app = createVerity({
       storage: new CloudflareStorage(ctx.storage),
       // Two ways of showing one GitHub account. Whichever is used first is the record's
-      // main method, and the other is listed beneath it once used. Discord and YouTube
-      // are offered only when their secrets are set.
+      // main method, and the other is listed beneath it once used. Discord, YouTube and
+      // email are offered only when their secrets are set.
       providers: [
         githubProvider({
           clientId: env.GITHUB_CLIENT_ID,
@@ -333,7 +348,15 @@ export class VerityStore {
               }),
             ]
           : []),
+        ...(env.RESEND_API_KEY && env.EMAIL_FROM
+          ? [
+              emailProvider({
+                send: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
+              }),
+            ]
+          : []),
       ],
+      sendLimits: { day: dailyMail(env.EMAIL_DAILY_LIMIT) },
       baseUrl: `${env.PUBLIC_ORIGIN}/api/verity`,
       // The owner's own site. A registered site's subjects carry their site's name instead.
       siteName: env.SITE_NAME,

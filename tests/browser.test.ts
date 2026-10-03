@@ -847,6 +847,174 @@ test('a page read by a link back is a record the badge will show', async () => {
   assert.ok(globeIn(cards[1]!));
 });
 
+test('a mailbox is named by its address alone, unlinked, under an envelope', async () => {
+  const { cards } = await renderDialog(
+    {
+      local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+      external: [{ by: 'provider', method: 'code', confirmedAt: 2 }],
+    },
+    {
+      provider: 'email',
+      providerName: 'Email',
+      external: {
+        id: 'alice@example.test',
+        kind: 'mailbox',
+        handle: 'alice@example.test',
+        profileUrl: 'mailto:alice@example.test',
+      },
+    },
+  );
+
+  const external = cards[1]!;
+
+  // The address is the whole name: no @ in front of it, and not repeated as an identifier.
+  assert.ok(!external.textContent.includes('@alice'));
+  assert.equal(external.textContent.split('alice@example.test').length - 1, 1);
+
+  // A mailto: address shows a reader nothing, so the name links nowhere.
+  assert.ok(!external.links().some((link) => link.href.startsWith('mailto:')));
+  assert.equal(external.find('strong')[0]!.textContent, 'alice@example.test');
+  assert.ok(external.all().some((e) => e.attributes.d === 'M2 3.5h12v9H2z'));
+  assert.match(external.textContent, /Entered a code sent to this address/);
+});
+
+test('a record whose mailbox is anything but a mailto: address is not drawn', async () => {
+  const { cards } = await renderDialog(
+    {
+      local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+      external: [{ by: 'provider', method: 'code', confirmedAt: 2 }],
+    },
+    {
+      provider: 'email',
+      providerName: 'Email',
+      external: {
+        id: 'alice@example.test',
+        kind: 'mailbox',
+        handle: 'alice@example.test',
+        profileUrl: 'javascript:alert(1)',
+      },
+    },
+  ).catch(() => ({ cards: [] }));
+
+  assert.equal(cards.length, 0);
+});
+
+test('a mailed code is asked for in two steps, and a wrong one says so', async () => {
+  const sent: string[] = [];
+
+  const step = (code: Record<string, unknown>) => ({
+    id: 'f1',
+    phase: 'pending',
+    provider: { id: 'email', name: 'Email', method: 'code' },
+    note: 'A code is sent to this address.',
+    code: { field: 'Your email address', input: 'email', ...code },
+  });
+
+  const { dialog, press } = await connectHarness(async (path, body) => {
+    if (path === '/methods')
+      return {
+        ...connectMethods,
+        methods: [{ provider: 'email', method: 'code', name: 'Email', action: 'Continue' }],
+      };
+
+    if (path === '/sessions') return step({});
+
+    sent.push(JSON.parse(body!).artifact);
+
+    if (sent.length === 1) return step({ sentTo: 'alice@example.test', triesLeft: 5 });
+
+    if (sent.length === 2) return step({ sentTo: 'alice@example.test', wrong: true, triesLeft: 4 });
+
+    return {
+      ...approvalView,
+      provider: { id: 'email', name: 'Email', method: 'code' },
+      external: {
+        id: 'alice@example.test',
+        kind: 'mailbox',
+        handle: 'alice@example.test',
+        profileUrl: 'mailto:alice@example.test',
+      },
+    };
+  });
+
+  const input = () => dialog.find('input')[0] as Element & { value: string };
+
+  await press('Continue');
+  assert.equal(input().type, 'email');
+  assert.match(dialog.textContent, /Your email address/);
+  assert.match(dialog.textContent, /A code is sent to this address/);
+
+  // Nothing typed, nothing asked.
+  input().value = '';
+  await press('Send me a code');
+  assert.deepEqual(sent, []);
+
+  input().value = 'alice@example.test';
+  await press('Send me a code');
+  assert.match(dialog.textContent, /A message was sent to alice@example\.test/);
+  assert.ok(!dialog.textContent.includes('did not match'));
+
+  input().value = 'AAAA-AAAA';
+  await press('Check my code');
+  assert.match(dialog.textContent, /did not match\. 4 tries are left/);
+
+  input().value = 'K7QM-2XPD';
+  await press('Check my code');
+  assert.deepEqual(sent, ['alice@example.test', 'AAAA-AAAA', 'K7QM-2XPD']);
+  assert.match(dialog.textContent, /Confirm connection/);
+  assert.ok(!dialog.textContent.includes('@alice'));
+  assert.deepEqual(dialog.links(), []);
+});
+
+test('the dialog moves on when the button in the message is pressed, and not before', async () => {
+  let pressed = false;
+
+  const waiting = {
+    id: 'f1',
+    phase: 'pending',
+    provider: { id: 'email', name: 'Email', method: 'code' },
+    code: { field: 'Your email address', input: 'email', sentTo: 'alice@example.test' },
+  };
+
+  const { dialog, polls, press, settle } = await connectHarness(async (path) => {
+    if (path === '/methods')
+      return {
+        ...connectMethods,
+        methods: [{ provider: 'email', method: 'code', name: 'Email', action: 'Continue' }],
+      };
+
+    if (path === '/sessions' || !pressed) return waiting;
+
+    return {
+      ...approvalView,
+      provider: { id: 'email', name: 'Email', method: 'code' },
+      external: {
+        id: 'alice@example.test',
+        kind: 'mailbox',
+        handle: 'alice@example.test',
+        profileUrl: 'mailto:alice@example.test',
+      },
+    };
+  });
+
+  await press('Continue');
+  assert.match(dialog.textContent, /Press the button in it, or enter its code here/);
+
+  // Still waiting: what the holder has typed so far is left where it is.
+  const input = dialog.find('input')[0] as Element & { value: string };
+
+  input.value = 'K7Q';
+  await polls.at(-1)!();
+  await settle();
+  assert.equal(dialog.find('input')[0], input);
+  assert.equal(input.value, 'K7Q');
+
+  pressed = true;
+  await polls.at(-1)!();
+  await settle();
+  assert.match(dialog.textContent, /Confirm connection/);
+});
+
 /** Whether an element draws the globe: its equator is the one line only the globe has. */
 function globeIn(element: Element): boolean {
   return element.all().some((e) => e.tagName === 'path' && e.attributes.d === 'M1.5 8h13');

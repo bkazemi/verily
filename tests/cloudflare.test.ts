@@ -246,3 +246,217 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('the Worker offers email once it can send it, and links a mailbox through Resend', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'verity-cloudflare-email-'));
+  const scriptPath = join(directory, 'worker.mjs');
+  const origin = 'https://verifier.test';
+  const ownerKey = 'a'.repeat(43);
+  const mailed: { authorization: string | null; body: Record<string, unknown> }[] = [];
+
+  await buildWorker(scriptPath);
+
+  const instance = (bindings: Record<string, string>) =>
+    new Miniflare(
+      convertV4MiniflareOptions({
+        name: 'verity-email-test',
+        rootPath: directory,
+        modules: true,
+        scriptPath,
+        compatibilityDate: '2026-07-01',
+        compatibilityFlags: ['nodejs_compat'],
+        durableObjects: {
+          VERITY: { className: 'VerityStore', useSQLite: true },
+          PROBE: { className: 'StorageProbe', useSQLite: true },
+        },
+        bindings: {
+          PUBLIC_ORIGIN: origin,
+          SITE_NAME: 'Site',
+          OWNER_LABEL: 'Site author',
+          OWNER_REFERENCE: 'site.test author',
+          OWNER_PROFILE_URL: 'https://site.test/about/',
+          REPORT_URL: 'mailto:owner@site.test',
+          OWNER_KEY: ownerKey,
+          GITHUB_CLIENT_ID: 'test-client',
+          GITHUB_CLIENT_SECRET: 'test-secret',
+          ...bindings,
+        },
+        outboundService: async (request: {
+          url: string;
+          headers: { get(name: string): string | null };
+          json(): Promise<unknown>;
+        }) => {
+          if (request.url !== 'https://api.resend.com/emails')
+            throw new Error(`Unexpected outbound URL: ${new URL(request.url).origin}`);
+
+          mailed.push({
+            authorization: request.headers.get('authorization'),
+            body: (await request.json()) as Record<string, unknown>,
+          });
+
+          return WorkerResponse.json({ id: 'message-1' });
+        },
+      }),
+    );
+
+  /** Signs the owner in and asks which methods they are offered. */
+  const offered = async (mf: Miniflare) => {
+    const login = await mf.dispatchFetch(`${origin}/login`, {
+      method: 'POST',
+      headers: { origin },
+      body: `key=${ownerKey}`,
+      redirect: 'manual',
+    });
+
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+
+    const methods = (await (
+      await mf.dispatchFetch(`${origin}/api/verity/methods`, { headers: { cookie } })
+    ).json()) as { methods: { provider: string }[] };
+
+    return { cookie, providers: methods.methods.map((m) => m.provider) };
+  };
+
+  // A key with no sender to send from is not enough to offer it.
+  const without = instance({ RESEND_API_KEY: 're_test' });
+
+  try {
+    assert.ok(!(await offered(without)).providers.includes('email'));
+  } finally {
+    await without.dispose();
+  }
+
+  const mf = instance({ RESEND_API_KEY: 're_test', EMAIL_FROM: 'Verity <verify@site.test>' });
+
+  try {
+    const owner = await offered(mf);
+
+    assert.ok(owner.providers.includes('email'));
+
+    const start = await mf.dispatchFetch(`${origin}/api/verity/sessions`, {
+      method: 'POST',
+      headers: { origin, cookie: owner.cookie },
+      body: 'kind=connect&provider=email',
+      redirect: 'manual',
+    });
+
+    assert.equal(start.status, 303);
+
+    const cookie = `${owner.cookie}; ${start.headers.get('set-cookie')!.split(';')[0]!}`;
+    const flow = start.headers.get('location')!;
+
+    const post = (path: string, body: string) =>
+      mf.dispatchFetch(`${origin}${path}`, {
+        method: 'POST',
+        headers: { origin, cookie },
+        body,
+        redirect: 'manual',
+      });
+
+    await post(`${flow}/submit`, 'artifact=Alice%40Example.test');
+
+    assert.equal(mailed.length, 1);
+    assert.equal(mailed[0]!.authorization, 'Bearer re_test');
+    assert.equal(mailed[0]!.body.from, 'Verity <verify@site.test>');
+    assert.deepEqual(mailed[0]!.body.to, ['alice@example.test']);
+
+    assert.match(String(mailed[0]!.body.html), />Confirm this address<\/a>/);
+
+    // The button's link, opened and pressed in a browser that holds none of the cookies.
+    const link = new URL(/^https:\/\/\S+$/m.exec(String(mailed[0]!.body.text))![0]);
+
+    assert.equal(link.origin, origin);
+    assert.equal((await mf.dispatchFetch(link.href)).status, 200);
+
+    const pressed = await mf.dispatchFetch(`${link.origin}${link.pathname}`, {
+      method: 'POST',
+      headers: { origin, 'cf-connecting-ip': '203.0.113.9' },
+      body: `token=${link.searchParams.get('token')!}`,
+      redirect: 'manual',
+    });
+
+    assert.match(await pressed.text(), /Address confirmed/);
+    await post(`${flow}/approve`, 'visibility=public&action=approve');
+
+    const mine = (await (
+      await mf.dispatchFetch(`${origin}/api/verity/mine`, { headers: { cookie } })
+    ).json()) as { provider: string; status: string; external: { handle: string } }[];
+
+    assert.equal(mine.length, 1);
+    assert.equal(mine[0]!.provider, 'email');
+    assert.equal(mine[0]!.status, 'verified');
+    assert.equal(mine[0]!.external.handle, 'alice@example.test');
+
+    // The owner page names the mailbox by its address, with no @ put in front of it.
+    const home = await (await mf.dispatchFetch(`${origin}/`, { headers: { cookie } })).text();
+
+    assert.match(home, /<h3>alice@example\.test<\/h3>/);
+  } finally {
+    await mf.dispose();
+  }
+
+  /** Asks for a code to be mailed to an address, and reports how the flow stands after. */
+  const asked = async (worker: Miniflare, session: string, address: string) => {
+    const start = await worker.dispatchFetch(`${origin}/api/verity/sessions`, {
+      method: 'POST',
+      headers: { origin, cookie: session },
+      body: 'kind=connect&provider=email',
+      redirect: 'manual',
+    });
+
+    const cookie = `${session}; ${start.headers.get('set-cookie')!.split(';')[0]!}`;
+    const flow = start.headers.get('location')!;
+
+    await worker.dispatchFetch(`${origin}${flow}/submit`, {
+      method: 'POST',
+      headers: { origin, cookie },
+      body: `artifact=${encodeURIComponent(address)}`,
+      redirect: 'manual',
+    });
+
+    return (await worker.dispatchFetch(`${origin}${flow}`, { headers: { cookie } })).text();
+  };
+
+  const capped = instance({
+    RESEND_API_KEY: 're_test',
+    EMAIL_FROM: 'Verity <verify@site.test>',
+    EMAIL_DAILY_LIMIT: '7',
+  });
+
+  try {
+    const owner = await offered(capped);
+
+    mailed.length = 0;
+
+    // One address is mailed five codes a day, however it is spelled, and no sixth.
+    for (let sent = 1; sent <= 5; sent++)
+      assert.match(await asked(capped, owner.cookie, 'Victim@example.test'), /A message was sent/);
+
+    const sixth = await asked(capped, owner.cookie, 'victim@EXAMPLE.test');
+
+    assert.match(sixth, /Too many messages have been sent today, so try again tomorrow\./);
+    assert.equal(mailed.length, 5);
+
+    // A refusal spends nothing, so the day still has the two codes it had left.
+    assert.match(await asked(capped, owner.cookie, 'one@example.test'), /A message was sent/);
+    assert.match(await asked(capped, owner.cookie, 'two@example.test'), /A message was sent/);
+    assert.match(await asked(capped, owner.cookie, 'three@example.test'), /Too many messages/);
+    assert.equal(mailed.length, 7);
+
+    // The counts are the library's own records: they name no address, and last the day.
+    const namespace = await capped.getDurableObjectNamespace('VERITY');
+    const stub = namespace.get(namespace.idFromName('site-owner'));
+
+    const buckets = (await (
+      await stub.fetch('https://probe/list?prefix=verity/limits/')
+    ).json()) as Record<string, { count: number; expiresAt: number }>;
+
+    assert.equal(buckets['verity/limits/send/email/day']!.count, 7);
+    assert.ok(buckets['verity/limits/send/email/day']!.expiresAt > Date.now() + 23 * 3600000);
+    assert.equal(Object.keys(buckets).length, 4);
+    assert.ok(!JSON.stringify(buckets).toLowerCase().includes('victim'));
+  } finally {
+    await capped.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

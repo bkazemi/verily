@@ -202,8 +202,9 @@ import {
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                     | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile.               | The local account needs a `profileUrl`. |
 | `pgpProvider()`        | signing a line Verity gives them with their OpenPGP key, then pasting it and the key. | None.                                   |
+| `emailProvider()`      | entering a code Verity mails to their address.                                        | A function that sends one message.      |
 
-All methods except the sign-ins let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verity re-reads them on a schedule. A PGP signature is kept by Verity and published at `<baseUrl>/connections/<id>/proof`.
+All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verity re-reads them on a schedule. A PGP signature is kept by Verity and published at `<baseUrl>/connections/<id>/proof`.
 
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
@@ -216,6 +217,42 @@ Proving the same account a second way adds that proof to the existing record ins
 **Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verity checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
 
 **OpenPGP.** The key's fingerprint is the identity. An email address is shown only when the key signed it **and** either keys.openpgp.org has confirmed it or the address's domain publishes the key in its [web key directory](https://datatracker.ietf.org/doc/draft-koch-openpgp-webkey-service/). The key must be valid when the proof is checked (not expired or revoked), SHA-1 signatures are refused, and a signing subkey must be properly bound to its key.
+
+**Email.** Verity sends no mail itself. Give `emailProvider()` a `send` function and it hands that one message per flow, written as both HTML and plain text, through whatever already sends your mail:
+
+```ts
+emailProvider({
+  send: ({ to, subject, text, html, images }) =>
+    mailer.send({
+      from: 'verify@community.example',
+      to,
+      subject,
+      text,
+      html,
+      // The logo travels in the message. Attach each image inline under its content id.
+      attachments: images.map((image) => ({
+        filename: image.filename,
+        content: Buffer.from(image.content, 'base64'),
+        contentType: image.contentType,
+        cid: image.contentId,
+      })),
+    }),
+}),
+```
+
+The HTML loads nothing from anywhere, so nothing in it is blocked and it tells nobody it was opened. Its one image, the Verity logo, is attached to the message; a sender that drops `images` still sends a whole message, with the word in the logo's place.
+
+The user types an address and Verity mails it a button to press, with an eight-character code beneath it as the other way in. The button opens a page on your backend, in whatever browser the mail is read in, and pressing **Confirm** there proves the mailbox; the page the user started on then carries on to the approval. Opening the link alone confirms nothing, so a mail scanner that follows links cannot answer for anyone. Both the link and the code last the flow's ten minutes, and the code gets five tries. The address is the account's name on the record, so a public link shows it to everyone; the user is told before the code is sent. It proves somebody could read that mailbox on the day, like a sign-in, and nothing is published or re-read later.
+
+A visitor chooses where the message goes, so Verity counts what it sends: at most 100 messages in any twenty-four hours, and at most 5 to any one address. Past either, the flow fails and tells the user to try again tomorrow. Set `sendLimits: { day, address }` beside `providers` to change them, or `Infinity` to lift one. The day's count is shared, so one visitor can still spend it; rate limit `POST <baseUrl>/sessions` and `POST <baseUrl>/flows/*/submit` as well.
+
+`resendSender({ apiKey, from })` is a ready-made `send` for [Resend](https://resend.com), using only `fetch`:
+
+```ts
+emailProvider({
+  send: resendSender({ apiKey: process.env.RESEND_API_KEY!, from: 'Verity <verify@community.example>' }),
+}),
+```
 
 **Matching accounts.** Two methods agree on an account when the provider's account ids match. A link-back only knows an address, so it's matched by profile URL instead, and only in flows the user starts themselves. Removing a connection from the external side always needs a matching provider account id.
 
