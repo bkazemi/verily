@@ -219,7 +219,7 @@ function methodAction(provider: Provider): string {
     gist: `Publish a proof on ${provider.name}`,
     backlink: `Link back from ${provider.name}`,
     signature: `Sign with ${provider.name}`,
-    code: `Get a code by ${provider.name.toLowerCase()}`,
+    code: `Confirm by ${provider.name.toLowerCase()}`,
   };
 
   return actions[providerMethod(provider)] ?? `Continue with ${provider.name}`;
@@ -259,9 +259,9 @@ function codeStep(provider: CodeProvider, flow: Flow) {
   };
 }
 
-/** Said before a code is sent: the address becomes the name the link shows. */
+/** Said before the message is sent: the address becomes the name the connection shows. */
 const codeNote =
-  'A code is sent to this address. The address is what the link shows, to whoever you let read it.';
+  "We'll email this address to confirm it's yours. The address is shown on the connection, to whoever you let see it.";
 
 /** Names the providers on offer once each, however many ways each can be shown. */
 function providerNames(providers: Provider[]): string {
@@ -861,7 +861,7 @@ export function createVerity(options: ServerOptions) {
                 ? `<input name="artifact" type="${step.input}" autocomplete="${step.input}" required>`
                 : '<input name="artifact" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>'
             }</label>
-            <button>${step.sentTo === undefined ? 'Send me a code' : 'Check my code'}</button></form>
+            <button>${step.sentTo === undefined ? `Send the ${escape(provider.name.toLowerCase())}` : 'Check my code'}</button></form>
             ${step.sentTo === undefined ? `<p class="fine">${escape(codeNote)}</p>` : ''}`,
               ),
             );

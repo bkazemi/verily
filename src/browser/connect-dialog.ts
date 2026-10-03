@@ -539,13 +539,21 @@ export function openConnectDialog(
     const label = node('label', sent ? 'Your code' : field);
 
     label.append(input);
-    const check = button(sent ? 'Check my code' : 'Send me a code', true);
+
+    const check = button(
+      sent ? 'Check my code' : `Send the ${flow.provider.name.toLowerCase()}`,
+      true,
+    );
+
     const back = button('Back');
 
     back.onclick = () => void choose();
 
     const send = () => {
-      if (!input.value.trim()) {
+      // No form is submitted here, so the browser's own check of the field is asked for:
+      // an address it would refuse in a form is refused the same way, in its own words.
+      if (!input.value.trim() || !input.checkValidity()) {
+        input.reportValidity();
         input.focus();
 
         return;
