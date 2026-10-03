@@ -309,7 +309,7 @@ test('the flow pages ask for the address, then the code, and say when a code was
 
   assert.match(asking, /Verify with Email/);
   assert.match(asking, /type="email"/);
-  assert.match(asking, /Send me a code/);
+  assert.match(asking, /Send the email/);
 
   // Another holder in the same browser is not shown somebody else's flow.
   const flowCookie = cookie.split(';')[0]!;

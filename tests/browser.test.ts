@@ -69,6 +69,20 @@ class Element {
 
   focus() {}
 
+  /** What a browser's own check of a field would say, which a test may set. */
+  valid = true;
+  reported = 0;
+
+  checkValidity() {
+    return this.valid;
+  }
+
+  reportValidity() {
+    this.reported += 1;
+
+    return this.valid;
+  }
+
   remove() {
     const siblings = this.parentNode?.children;
 
@@ -906,7 +920,7 @@ test('a mailed code is asked for in two steps, and a wrong one says so', async (
     id: 'f1',
     phase: 'pending',
     provider: { id: 'email', name: 'Email', method: 'code' },
-    note: 'A code is sent to this address.',
+    note: "We'll email this address to confirm it's yours.",
     code: { field: 'Your email address', input: 'email', ...code },
   });
 
@@ -942,15 +956,24 @@ test('a mailed code is asked for in two steps, and a wrong one says so', async (
   await press('Continue');
   assert.equal(input().type, 'email');
   assert.match(dialog.textContent, /Your email address/);
-  assert.match(dialog.textContent, /A code is sent to this address/);
+  assert.match(dialog.textContent, /We'll email this address to confirm it's yours/);
 
   // Nothing typed, nothing asked.
   input().value = '';
-  await press('Send me a code');
+  await press('Send the email');
   assert.deepEqual(sent, []);
 
+  // Nor is an address the browser itself would turn down, which it says in its own words.
+  input().value = 'alice';
+  input().valid = false;
+  await press('Send the email');
+  assert.deepEqual(sent, []);
+  // Told both times: once for the empty field, once for this.
+  assert.equal(input().reported, 2);
+
   input().value = 'alice@example.test';
-  await press('Send me a code');
+  input().valid = true;
+  await press('Send the email');
   assert.match(dialog.textContent, /A message was sent to alice@example\.test/);
   assert.ok(!dialog.textContent.includes('did not match'));
 
