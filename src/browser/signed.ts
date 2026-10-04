@@ -7,11 +7,14 @@ import { verifySigned, type Evidence, type SignedEvidence } from '../core/index.
  * `valid` is a signed record of this very record, signed by one of its verifier's
  * published keys. The record is then drawn from the signed one, so what stands beside the
  * mark is what was signed. `invalid` is a signed record that was read and no published key
- * signed, or one signed over some other record. `unchecked` is no verdict: the signed
- * record or the keys could not be read, or this browser cannot check an Ed25519 signature.
+ * signed, or one signed over some other record. `unchecked` is no verdict, and says why:
+ * the check ran out of time, the signed record or the keys could not be read, or this
+ * browser cannot check an Ed25519 signature. The first two are worth trying again.
  */
 export type Signature =
-  { state: 'valid'; keyId: string } | { state: 'invalid' } | { state: 'unchecked' };
+  | { state: 'valid'; keyId: string }
+  | { state: 'invalid' }
+  | { state: 'unchecked'; why: 'timeout' | 'unreadable' | 'unsupported' };
 
 /** One check per record as shown while it holds, since a card is drawn again at every read. */
 const checks = new Map<string, Promise<Signature>>();
@@ -85,15 +88,46 @@ function claims(record: object): string {
  */
 const shown = (evidence: Evidence) => `${evidence.signedUrl}\n${claims(evidence)}`;
 
+/**
+ * How long a signed record or a key list is waited for. A card is veiled and out of reach
+ * while its check is out, so a verifier that never answers must not hold it there: past
+ * this the check is no verdict, and the record is shown as it was read.
+ */
+const checkLimitMs = 5000;
+
+/** What a read gives when it ran out of time, as against one that failed. */
+const late = Symbol('late');
+
+/** Reads something, giving nothing if it fails and `late` if it takes longer than the limit. */
+function limited<T>(
+  read: (signal?: AbortSignal) => Promise<T>,
+): Promise<T | undefined | typeof late> {
+  const stop = typeof AbortController === 'undefined' ? undefined : new AbortController();
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      stop?.abort();
+      resolve(late);
+    }, checkLimitMs);
+
+    void read(stop?.signal)
+      .catch(() => undefined)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      });
+  });
+}
+
 function keysAt(url: string, afresh = false): Promise<unknown> {
   let reading = afresh ? undefined : published.get(url);
 
   if (!reading) {
-    const read = fetch(url)
-      .then(async (listed) =>
-        listed.ok ? ((await listed.json()) as { keys?: unknown }).keys : undefined,
-      )
-      .catch(() => undefined);
+    const read = limited<unknown>(async (signal) => {
+      const listed = await fetch(url, { signal });
+
+      return listed.ok ? ((await listed.json()) as { keys?: unknown }).keys : undefined;
+    });
 
     reading = read;
     published.set(url, read);
@@ -111,7 +145,7 @@ type Checked = Signature & { record?: Evidence };
 
 async function check(evidence: Evidence): Promise<Checked> {
   try {
-    if (!(await able())) return { state: 'unchecked' };
+    if (!(await able())) return { state: 'unchecked', why: 'unsupported' };
 
     // Both are read from where the record itself lives, never from an address the record
     // names for the purpose: whoever handed the record over could name a signed record and
@@ -122,11 +156,21 @@ async function check(evidence: Evidence): Promise<Checked> {
     if (evidence.signedUrl !== expected) return { state: 'invalid' };
 
     const keysUrl = new URL('../keys', evidence.evidenceUrl).href;
-    const [served, held] = await Promise.all([fetch(expected), keysAt(keysUrl)]);
 
-    if (!served.ok || !Array.isArray(held)) return { state: 'unchecked' };
+    const [signed, held] = await Promise.all([
+      limited<SignedEvidence | undefined>(async (signal) => {
+        const served = await fetch(expected, { signal });
 
-    const signed = (await served.json()) as SignedEvidence;
+        return served.ok ? ((await served.json()) as SignedEvidence) : undefined;
+      }),
+      keysAt(keysUrl),
+    ]);
+
+    if (signed === late || held === late) return { state: 'unchecked', why: 'timeout' };
+
+    if (signed === undefined || !Array.isArray(held))
+      return { state: 'unchecked', why: 'unreadable' };
+
     let keys: unknown = held;
 
     // A verifier may have changed keys since its list was read. A key this list does not
@@ -134,7 +178,8 @@ async function check(evidence: Evidence): Promise<Checked> {
     if (!held.some((key: { id?: unknown } | null) => key?.id === signed?.keyId)) {
       keys = await keysAt(keysUrl, true);
 
-      if (!Array.isArray(keys)) return { state: 'unchecked' };
+      if (!Array.isArray(keys))
+        return { state: 'unchecked', why: keys === late ? 'timeout' : 'unreadable' };
     }
 
     const document = await verifySigned(signed, keys as never[]);
@@ -166,9 +211,9 @@ async function check(evidence: Evidence): Promise<Checked> {
     // Signed, but not something a page may draw: it is shown as read, with no mark.
     return drawable(record)
       ? { state: 'valid', keyId: signed.keyId, record }
-      : { state: 'unchecked' };
+      : { state: 'unchecked', why: 'unreadable' };
   } catch {
-    return { state: 'unchecked' };
+    return { state: 'unchecked', why: 'unreadable' };
   }
 }
 

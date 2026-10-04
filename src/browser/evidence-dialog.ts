@@ -31,6 +31,14 @@ export const styles = `
   .provider { width: 14px; height: 14px; }
   .state { font-size: 14px; font-weight: 650; line-height: 1.4; }
   .muted { color: #6b786f; font-size: 12px; }
+  .account { position: relative; }
+  .veiled > :not(.checking) { filter: blur(4px); opacity: .55; user-select: none; }
+  .checking { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #23312b; font-size: 13px; font-weight: 600; }
+  .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+  .caution { display: inline-block; margin-left: 4px; color: #a15c00; cursor: help; vertical-align: middle; }
+  .caution svg { display: block; width: 12px; height: 12px; }
   .bad { color: #b3261e; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
   .account { padding: 14px 16px; border: 1px solid #e0e6df; border-radius: 10px; margin-top: 12px; }
   .account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; color: #6b786f; font-size: 11px; font-weight: 550; }
@@ -270,27 +278,32 @@ function manageRow(evidence: Account, manage: Manage) {
 }
 
 /**
+ * Checks every record a card speaks for. A card may be drawn from several records of one
+ * account, and what it says of a signature answers for all of them.
+ */
+function signatures(evidence: Account): Promise<Signature[]> {
+  return Promise.all(
+    (evidence.sources ?? [evidence]).map((source): Promise<Signature> =>
+      source.signedUrl === undefined
+        ? Promise.resolve({ state: 'unchecked', why: 'unreadable' })
+        : signature(source),
+    ),
+  );
+}
+
+/**
  * Says a record is signed, in a word beside its verifier. The word opens the verifier's
  * own page for the record at what it says of the signature, where the signed record is to be
  * had: nothing is downloaded from the card. The signed record is checked here against the
  * verifier's keys: a tick once it has checked, and a warning in the word's place if it
  * fails, the one thing on a card that is a warning.
  */
-function signedMark(evidence: Account) {
+function signedMark(evidence: Account, later: Later) {
   const mark = node('span');
   const link = outward(node('a', 'signed'), `${evidence.evidenceUrl}#signed`);
+  const see = 'See the signature (opens in a new tab)';
 
-  link.title = `Signed by ${evidence.verifierName}. See the signature (opens in a new tab)`;
-  mark.append(document.createTextNode(' · '), link);
-
-  // A card may speak for several records, and the mark answers for every one of them.
-  const sources = evidence.sources ?? [evidence];
-
-  void Promise.all(
-    sources.map((source): Promise<Signature> =>
-      source.signedUrl === undefined ? Promise.resolve({ state: 'unchecked' }) : signature(source),
-    ),
-  ).then((results) => {
+  const settle = (results: Signature[]) => {
     const first = results[0];
 
     if (results.some((result) => result.state === 'invalid')) {
@@ -300,22 +313,87 @@ function signedMark(evidence: Account) {
       // What it means, for a reader who has never met a signature, kept off the card.
       warning.title = `This record does not match the signature ${evidence.verifierName} put on it, so it may have been altered. Do not rely on it.`;
       mark.replaceChildren(document.createTextNode(' · '), warning);
-    } else if (first?.state === 'valid' && results.every((result) => result.state === 'valid')) {
+
+      return;
+    }
+
+    if (first?.state === 'valid' && results.every((result) => result.state === 'valid')) {
       link.textContent = 'signed ✓';
       // Names where the keys came from, which is what the tick answers for.
-      link.title = `Signature checked in this browser against the keys ${new URL(evidence.evidenceUrl).host} publishes (key ${first.keyId}). See the signature (opens in a new tab)`;
+      link.title = `Signature checked in this browser against the keys ${new URL(evidence.evidenceUrl).host} publishes (key ${first.keyId}). ${see}`;
+      mark.replaceChildren(document.createTextNode(' · '), link);
+
+      return;
     }
-  });
+
+    // No verdict was reached. The record is signed and says so, with a warning beside the
+    // word in place of a tick, and why is said on hover. A check that only ran out of time
+    // or could not read what it needed is made again when the dialog next reads.
+    const why = results.find((result) => result.state === 'unchecked');
+    const again = why?.state === 'unchecked' && why.why !== 'unsupported';
+
+    const reason =
+      why?.state !== 'unchecked' || why.why === 'unreadable'
+        ? `The signature could not be read${again ? ', retrying' : ''}.`
+        : why.why === 'timeout'
+          ? 'Signature check timed out, retrying.'
+          : 'This browser cannot check signatures.';
+
+    const caution = node('span', '', 'caution');
+
+    caution.title = reason;
+    caution.setAttribute('role', 'img');
+    caution.setAttribute('aria-label', reason);
+    caution.append(cautionMark());
+    link.textContent = 'signed';
+    link.title = `${reason} ${see}`;
+    mark.replaceChildren(document.createTextNode(' · '), link, caution);
+
+    if (again) later(() => void signatures(evidence).then(settle));
+  };
+
+  // Nothing is said until the check comes back: the card is veiled until then.
+  void signatures(evidence).then(settle);
 
   return mark;
 }
+
+/** A small warning triangle, drawn so it looks the same wherever the dialog is shown. */
+function cautionMark(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  for (const d of ['M8 2.2 14.3 13.3H1.7Z', 'M8 6.6v3.2', 'M8 11.6v.1']) {
+    const path = document.createElementNS(namespace, 'path');
+
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+  }
+
+  return svg;
+}
+
+/**
+ * Asks for something to be done when the dialog next reads its records. A card is drawn
+ * once and kept, so this is how one that could not check a signature tries again.
+ */
+type Later = (retry: () => void) => void;
 
 /**
  * One linked account: its state, how it was shown and when, on a card of its own. A
  * subject with several accounts gets one of these each, since a provider authenticates and
  * expires on its own terms and none of that may be read across to another's card.
  */
-function externalCard(evidence: Account, manage?: Manage) {
+function externalCard(evidence: Account, manage?: Manage, later: Later = () => {}) {
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
   const status = statusLabel(evidence, Date.now());
   const provider = evidence.providerName;
@@ -336,7 +414,7 @@ function externalCard(evidence: Account, manage?: Manage) {
     attribution.append(verifier);
   } else attribution.append(document.createTextNode(evidence.verifierName));
 
-  if (evidence.signedUrl) attribution.append(signedMark(evidence));
+  if (evidence.signedUrl) attribution.append(signedMark(evidence, later));
 
   copy.append(node('div', status, 'state'), attribution);
 
@@ -367,7 +445,7 @@ function externalCard(evidence: Account, manage?: Manage) {
   const names = { site: evidence.siteName, provider };
   const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
-  return accountCard(
+  const card = accountCard(
     // The mark and the name, or just the name. A mark that falls back to writing the name
     // would print it twice here, since this heading writes it either way.
     logo ? [logo, document.createTextNode(provider)] : [document.createTextNode(provider)],
@@ -383,6 +461,32 @@ function externalCard(evidence: Account, manage?: Manage) {
     dates,
     ...(manage && removable(evidence).length ? [manageRow(evidence, manage)] : []),
   );
+
+  // A signed record is not read, or acted on, before its signature has been checked: until
+  // the check comes back the whole card is veiled and out of reach, with a word over it
+  // saying why. A record handed over altered is then never read as it was handed over.
+  if (evidence.signedUrl) {
+    const veiled = [...card.children] as HTMLElement[];
+    const checking = node('div', '', 'checking');
+
+    checking.setAttribute('role', 'status');
+    checking.append(node('span', '', 'spinner'), document.createTextNode('Checking signature…'));
+    card.className = 'account veiled';
+
+    for (const part of veiled) part.inert = true;
+
+    card.append(checking);
+
+    void signatures(evidence).then(() => {
+      card.className = 'account';
+
+      for (const part of veiled) part.inert = false;
+
+      checking.remove();
+    });
+  }
+
+  return card;
 }
 
 /** Under the holder's accounts: the way to connect another, ahead of the closing note. */
@@ -401,7 +505,7 @@ function addRow(manage: Manage) {
  * The subject once, then each account linked to it on its own card, in the order they
  * were connected. Every record given is of the one subject, which the caller has checked.
  */
-function render(content: HTMLElement, records: Account[], manage?: Manage) {
+function render(content: HTMLElement, records: Account[], manage?: Manage, later?: Later) {
   const [first] = records as [Account, ...Account[]];
 
   // Each card says what it is. Without that the pair is two unlabelled boxes.
@@ -424,7 +528,7 @@ function render(content: HTMLElement, records: Account[], manage?: Manage) {
   content.replaceChildren(
     localCard,
     linkMark(),
-    ...records.map((record) => externalCard(record, manage)),
+    ...records.map((record) => externalCard(record, manage, later)),
     ...(manage ? [addRow(manage)] : []),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
     // the card they came from, and a second provider on this subject gets its own card.
@@ -518,6 +622,9 @@ export function openEvidenceDialog(
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let drawn: string | undefined;
 
+  /** What the cards on screen have asked to try again at the next read. */
+  const retries = new Set<() => void>();
+
   /** Redraws only for a record that reads differently from the one already on screen. */
   const draw = (given: Evidence | Evidence[]) => {
     held = given;
@@ -537,7 +644,9 @@ export function openEvidenceDialog(
     if (key === drawn) return;
 
     drawn = key;
-    render(content, records, actions);
+    // The cards are new, and what the old ones were waiting to try again went with them.
+    retries.clear();
+    render(content, records, actions, (retry) => retries.add(retry));
   };
 
   /**
@@ -591,6 +700,12 @@ export function openEvidenceDialog(
   };
 
   const interval = setInterval(() => {
+    // A signature that could not be checked last time is checked again with each read.
+    for (const retry of [...retries]) {
+      retries.delete(retry);
+      retry();
+    }
+
     void refresh();
   }, 30000);
 
