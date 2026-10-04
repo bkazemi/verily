@@ -60,6 +60,9 @@
     // "EMAIL_FROM": "Verity <verify@example.org>",
     // Messages mailed in a day, across everyone. Omit for 100, Resend's free allowance.
     // "EMAIL_DAILY_LIMIT": 100,
+    // Public records are signed with a key this installation makes and keeps. Set "off"
+    // to sign nothing, or set the SIGNING_KEY secret to supply the key yourself.
+    // "SIGNING": "off",
     // Sites that send their users here instead of hosting Verity; see docs/cloudflare.md.
     // "SITES": [
     //   {

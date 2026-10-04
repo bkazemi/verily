@@ -156,6 +156,11 @@ code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .fine { color: var(--muted); font-size: .8125rem; line-height: 1.55; margin-bottom: .625rem; }
 
+/* That the record is signed is a fact about it, so it is set as one and not as fine print. */
+.signed { font-size: .875rem; line-height: 1.55; margin-bottom: .875rem; }
+/* Arrived at from a badge's "signed" link, so the reader is shown where they landed. */
+.signed:target { margin-inline: -.75rem; padding: .625rem .75rem; border-radius: 8px; background: var(--raised); }
+
 /* Every time on the record in one column, so they can be compared rather than hunted for. */
 dl {
   display: grid;

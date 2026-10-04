@@ -128,6 +128,8 @@ const server = createServer((request, response) => {
       visibilityApprovedAt: Date.now() - 86400000,
       expiresAt: ['expired', 'revoked'].includes(id) ? Date.now() - 1000 : Date.now() + 86400000,
       evidenceUrl: `${origin}/demo`,
+      // One record from a verifier that signs, so its card shows that it is signed.
+      ...(id === 'current' ? { signedUrl: `${origin}/demo?format=signed` } : {}),
       attestations: {
         // The site is the only authority on its own namespace, so it states this side.
         local: { by: 'backend', method: 'declared', confirmedAt: Date.now() - 86400000 },

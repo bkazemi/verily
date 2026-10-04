@@ -1,5 +1,11 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
-import { externalName, localSide, statusLabel, type Evidence } from '../src/core/index.js';
+import {
+  externalName,
+  generateSigningKey,
+  localSide,
+  statusLabel,
+  type Evidence,
+} from '../src/core/index.js';
 import { logo } from '../src/logo.js';
 import { escape } from '../src/server/escape.js';
 import { styleVersion } from '../src/server/style.js';
@@ -45,6 +51,13 @@ export interface Env {
   /** How many codes may be mailed in a day, where the mail allowance is not the default. */
   EMAIL_DAILY_LIMIT?: string | number;
   OWNER_KEY: string;
+  /**
+   * Public records are signed unless this is `off`. The key is made on first use and kept
+   * in the object's storage, or is the secret `SIGNING_KEY` where one is set: a key from
+   * `generateSigningKey()`, which then outlives the deployment.
+   */
+  SIGNING?: string;
+  SIGNING_KEY?: string;
   /**
    * The sites that send their users here instead of hosting Verity, as a JSON list of
    * `{ id, name, origin, authorizeUrl, returnUrl }`. Each needs its key in the secret
@@ -357,6 +370,9 @@ export class VerityStore {
           : []),
       ],
       sendLimits: { day: dailyMail(env.EMAIL_DAILY_LIMIT) },
+      ...(env.SIGNING === 'off'
+        ? {}
+        : { signingKey: env.SIGNING_KEY ?? (() => this.signingKey()) }),
       baseUrl: `${env.PUBLIC_ORIGIN}/api/verity`,
       // The owner's own site. A registered site's subjects carry their site's name instead.
       siteName: env.SITE_NAME,
@@ -568,6 +584,16 @@ export class VerityStore {
       return this.app.handle(request);
     }
 
+    // Where a reader who has only this domain's name finds the keys its records are signed by.
+    if (request.method === 'GET' && url.pathname === '/.well-known/verity-keys.json')
+      return new Response(JSON.stringify({ keys: await this.app.service.keys() }), {
+        headers: {
+          ...safeHeaders,
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+
     if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
 
     const found = await this.sites.session(request);
@@ -736,6 +762,19 @@ export class VerityStore {
     return new Response(JSON.stringify({ connections }), {
       headers: { ...safeHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  /** This installation's own signing key, made the first time a record is signed. */
+  private async signingKey(): Promise<string> {
+    const kept = await this.ctx.storage.get<string>('signing/key');
+
+    if (kept) return kept;
+
+    const made = generateSigningKey();
+
+    await this.ctx.storage.put('signing/key', made);
+
+    return made;
   }
 
   private site(session: { site: string }): Site {

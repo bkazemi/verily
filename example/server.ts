@@ -103,6 +103,8 @@ const verity = createVerity({
   profileOrigins: [origin],
   authenticate,
   reportUrl: `${origin}/report`,
+  // Public records are signed once a key is set, so a saved signed record checks without this server.
+  ...(process.env.SIGNING_KEY ? { signingKey: process.env.SIGNING_KEY } : {}),
 });
 
 await verity.service.prune();
