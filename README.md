@@ -168,6 +168,20 @@ A user with several accounts gets one badge for all of them. Give it every conne
 
 It shows the account that was connected first, then how many more there are, such as `+2`. Clicking it opens the same details, with each account on its own card in the order they were connected. Only accounts that are verified now are counted, and one of those leads if the first has lapsed. An account that appears on more than one record, because it was shown a second way or removed and connected again, is shown once. The ids must all belong to the same user.
 
+On a desktop, resting the pointer on that badge, or reaching it with the keyboard, opens a small panel beside it naming the accounts the number stands for: up to eight, then the rest as a count. The panel floats over the page, so nothing moves, and clicking still opens the details. It needs a browser with the Popover API; without one the badge simply has no panel. Add `peek="off"` to the badge to leave it out.
+
+Add `stacked` to name the accounts in the badge itself, one to a row:
+
+```html
+<verity-badge
+  backend-url="/api/verity"
+  connection-ids="ID_ONE ID_TWO ID_THREE"
+  stacked
+></verity-badge>
+```
+
+It lists up to four verified accounts in the order they were connected, then counts the rest as `+2 more`. It is still one badge that opens the one set of details. It is as tall as its rows, so give it a line of its own. With one verified account it is the ordinary badge. `mountBadges` and `presentConnections` take the same choices as `{ stacked: true }` and `{ peek: false }`.
+
 The badge refreshes every 30 seconds, and only ever reads public evidence. The client can also start and end connections, and draw a badge into an element of your own:
 
 ```js

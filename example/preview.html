@@ -296,10 +296,26 @@
         </div>
         <div class="state-grid">
           <div class="state">
-            <span class="eyebrow">Several accounts</span
+            <span class="eyebrow">Several accounts (hover)</span
             ><verity-badge
               backend-url="/api/verity"
-              connection-ids="signed current signed-in"
+              connection-ids="signed current signed-in mailed discord youtube work"
+            ></verity-badge>
+          </div>
+          <div class="state">
+            <span class="eyebrow">Several accounts, stacked</span
+            ><verity-badge
+              backend-url="/api/verity"
+              connection-ids="signed current signed-in mailed"
+              stacked
+            ></verity-badge>
+          </div>
+          <div class="state">
+            <span class="eyebrow">Stacked, more than four</span
+            ><verity-badge
+              backend-url="/api/verity"
+              connection-ids="signed current signed-in mailed discord youtube work"
+              stacked
             ></verity-badge>
           </div>
           <div class="state">

@@ -69,6 +69,29 @@ class Element {
 
   focus() {}
 
+  /** Enough of a popover to say whether it is open, and of layout to be placed. */
+  style: Record<string, string> = {};
+  popoverOpen = false;
+
+  showPopover() {
+    this.popoverOpen = true;
+  }
+
+  hidePopover() {
+    this.popoverOpen = false;
+  }
+
+  getBoundingClientRect() {
+    return { top: 100, bottom: 120, left: 40, right: 140, width: 100, height: 20 };
+  }
+
+  /** The two selectors asked here: an open popover, and focus the keyboard put there. */
+  keyboard = true;
+
+  matches(selector: string) {
+    return selector === ':popover-open' ? this.popoverOpen : this.keyboard;
+  }
+
   /** What a browser's own check of a field would say, which a test may set. */
   valid = true;
   reported = 0;
@@ -1353,6 +1376,13 @@ test('a link in the instructions opens in a new tab, and only if it is http(s)',
   assert.match(dialog.textContent, /Publish at gist\.github\.com or here\./);
 });
 
+/**
+ * What a host's pill itself says. A short pill of several accounts also holds a panel,
+ * shut until a pointer rests on the pill, and the panel's words are not the pill's.
+ */
+const pillText = (host: Element) =>
+  host.all().find((e) => e.className.split(' ').includes('badge'))!.textContent;
+
 /** A page with the badge script loaded, answering each connection id from `served`. */
 async function groupHarness(served: Record<string, unknown>, hold?: () => Promise<void>) {
   const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
@@ -1360,6 +1390,8 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
   const asked: string[] = [];
   const defined: Record<string, new () => Element> = {};
   const polls: (() => void)[] = [];
+  /** What the window is being listened to for, as type and handler. */
+  const heard: [string, unknown][] = [];
   let early: Record<string, unknown> = {};
 
   /** Enough of an element for the badge's own class to extend and be constructed. */
@@ -1397,6 +1429,18 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     Promise,
     setTimeout,
     clearTimeout,
+    // The window a pill's panel is kept inside, and what it listens to while open.
+    innerWidth: 1000,
+    innerHeight: 800,
+    // As a window does, the same handler for the same event is kept once however often added.
+    addEventListener: (type: string, handler: unknown) => {
+      if (!heard.some(([t, h]) => t === type && h === handler)) heard.push([type, handler]);
+    },
+    removeEventListener: (type: string, handler: unknown) => {
+      const at = heard.findIndex(([t, h]) => t === type && h === handler);
+
+      if (at >= 0) heard.splice(at, 1);
+    },
     // Kept, so a test can run a dialog's periodic check when it chooses to.
     setInterval: (handler: () => void) => polls.push(handler),
     clearInterval: () => {},
@@ -1455,7 +1499,10 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
 
   const verity = context.Verity as {
     init(options: { backendUrl: string }): {
-      mountBadges(host: Element, options: { connectionIds: string[] }): Promise<void>;
+      mountBadges(
+        host: Element,
+        options: { connectionIds: string[]; stacked?: boolean; peek?: boolean },
+      ): Promise<void>;
     };
     presentConnections(host: Element, records: unknown): void;
   };
@@ -1483,7 +1530,12 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     }
   };
 
-  return { verity, asked, cards, defined, polls, upgrade, body };
+  /** Makes the window this tall, as a reader resizing it would. */
+  const resize = (height: number) => {
+    (context as { innerHeight: number }).innerHeight = height;
+  };
+
+  return { verity, asked, cards, defined, polls, upgrade, body, heard, resize };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -1524,10 +1576,15 @@ test('several accounts of one subject are one pill: the first connected, then ho
 
   // One mark, the first connected account, and the rest as a number. The id that could
   // not be read is left out and takes nothing else down with it.
-  assert.equal(host.textContent, '@alice+2');
+  assert.equal(pillText(host), '@alice+2');
   assert.equal(host.links().length, 1);
   assert.equal(host.links()[0]!.href, 'https://verifier.test/api/verity/connections/first');
-  assert.match(host.links()[0]!.attributes['aria-label']!, /GitHub @alice and 2 more: Verified/);
+
+  // Read aloud, the pill names the accounts its number stands for.
+  assert.match(
+    host.links()[0]!.attributes['aria-label']!,
+    /GitHub @alice, GitHub @bob, GitHub @carol: Verified/,
+  );
 
   // The one dialog: the subject once, then each account in the order it was connected.
   const opened = await cards(host);
@@ -1541,6 +1598,320 @@ test('several accounts of one subject are one pill: the first connected, then ho
   );
 
   assert.equal(opened.dialog.textContent.match(/Verification does not guarantee/g)!.length, 1);
+});
+
+test('a stacked pill names each verified account on a row of its own, and counts past four', async () => {
+  const records = Object.fromEntries(
+    ['alice', 'bob', 'carol', 'dave', 'erin', 'frank'].map((name, at) => [
+      name,
+      linked(name, name, 100 * (at + 1), at === 2 ? { status: 'expired', expiresAt: 1 } : {}),
+    ]),
+  );
+
+  const { verity, cards } = await groupHarness(records);
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+  const connectionIds = Object.keys(records).reverse();
+
+  await client.mountBadges(host, { connectionIds, stacked: true });
+
+  const rows = () => host.all().filter((e) => e.className.split(' ').includes('row'));
+
+  // Four rows in the order they were connected, the lapsed one passed over, then the rest.
+  assert.deepEqual(
+    rows().map((row) => row.textContent),
+    ['@alice', '@bob', '@dave', '@erin', '+1 more'],
+  );
+
+  // Still one pill and one thing to press, which says all of it to a screen reader.
+  assert.equal(host.links().length, 1);
+  assert.match(host.links()[0]!.className, /stacked/);
+
+  assert.match(
+    host.links()[0]!.attributes['aria-label']!,
+    /GitHub @alice, GitHub @bob, GitHub @dave, GitHub @erin and 1 more: Verified/,
+  );
+
+  // And one dialog, with every account in it, the lapsed one included.
+  assert.equal((await cards(host)).cards.length, 7);
+
+  // Asked for again without it, the same host goes back to the short pill.
+  await client.mountBadges(host, { connectionIds });
+  assert.equal(pillText(host), '@alice+4');
+  assert.ok(!host.links()[0]!.className.includes('stacked'));
+});
+
+/** The panel a short pill of several accounts opens beside itself, if it has one. */
+const panelOf = (host: Element) => host.all().find((e) => e.className === 'peek');
+
+test('a short pill of several accounts opens a panel naming them while a mouse rests on it', async () => {
+  const records = Object.fromEntries(
+    ['alice', 'bob', 'carol', 'dave', 'erin', 'frank', 'grace', 'heidi', 'ivan', 'judy'].map(
+      (name, at) => [name, linked(name, name, 100 * (at + 1))],
+    ),
+  );
+
+  const { verity } = await groupHarness(records);
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: Object.keys(records) });
+
+  const pill = host.links()[0]!;
+  const panel = panelOf(host)!;
+  const handlers = pill as unknown as Record<string, (event: object) => void>;
+  const fire = (type: string, event: object = {}) => handlers[`on${type}`]!(event);
+  const rested = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+  // The pill is the short one, and takes no more room than it did.
+  assert.equal(pillText(host), '@alice+9');
+  assert.equal(panel.attributes['popover'], 'manual');
+  assert.equal(panel.attributes['aria-hidden'], 'true');
+  assert.equal(panel.popoverOpen, false);
+
+  // No tooltip of the browser's own, which would sit on top of the panel.
+  assert.equal(pill.title, '');
+
+  // Eight named, twice what a stacked pill has room for, the rest counted, and who vouches.
+  assert.deepEqual(
+    panel
+      .all()
+      .filter((e) => e.className.split(' ').includes('row'))
+      .map((row) => row.textContent),
+    ['@alice', '@bob', '@carol', '@dave', '@erin', '@frank', '@grace', '@heidi', '+2 more'],
+  );
+
+  assert.match(panel.textContent, /Verified \| via: verifier\.test/);
+
+  // A pointer passing over opens nothing.
+  fire('pointerenter', { pointerType: 'mouse' });
+  fire('pointerleave');
+  await rested();
+  assert.equal(panel.popoverOpen, false);
+
+  // Nor does a finger, which has nowhere to rest: touching the pill presses it.
+  fire('pointerenter', { pointerType: 'touch' });
+  await rested();
+  assert.equal(panel.popoverOpen, false);
+
+  // One that rests does, under the pill, and leaving shuts it.
+  fire('pointerenter', { pointerType: 'mouse' });
+  await rested();
+  assert.equal(panel.popoverOpen, true);
+  assert.equal(panel.style.top, '126px');
+  assert.equal(panel.style.left, '40px');
+  fire('pointerleave');
+  assert.equal(panel.popoverOpen, false);
+
+  // So does pressing the pill, which opens the details in its place.
+  fire('pointerenter', { pointerType: 'mouse' });
+  await rested();
+  fire('pointerdown');
+  assert.equal(panel.popoverOpen, false);
+
+  // The keyboard opens it at once, and Escape or moving on shuts it.
+  fire('focus');
+  assert.equal(panel.popoverOpen, true);
+  fire('keydown', { key: 'Escape' });
+  assert.equal(panel.popoverOpen, false);
+  fire('focus');
+  fire('blur');
+  assert.equal(panel.popoverOpen, false);
+
+  // Focus that a click put there opens nothing.
+  pill.keyboard = false;
+  fire('focus');
+  assert.equal(panel.popoverOpen, false);
+});
+
+test('a panel the browser shut with its host leaves nothing behind and opens again', async () => {
+  const records = {
+    first: linked('first', 'alice', 100),
+    second: linked('second', 'bob', 200),
+  };
+
+  const { verity, defined, heard } = await groupHarness(records);
+  const badge = new defined['verity-badge']!() as Element & { disconnectedCallback(): void };
+
+  await verity
+    .init({ backendUrl: 'https://verifier.test/api/verity' })
+    .mountBadges(badge, { connectionIds: Object.keys(records) });
+
+  const pill = badge.links()[0]!;
+  const panel = panelOf(badge)!;
+  const handlers = pill as unknown as Record<string, (event: object) => void>;
+
+  const rest = async () => {
+    handlers['onpointerenter']!({ pointerType: 'mouse' });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  };
+
+  await rest();
+  assert.equal(panel.popoverOpen, true);
+
+  assert.deepEqual(
+    heard.map(([type]) => type),
+    ['scroll'],
+  );
+
+  // The page takes the badge out while its panel is open. The browser shuts the popover
+  // itself and says nothing, and the badge lets go of the scroll it was waiting for.
+  panel.popoverOpen = false;
+  badge.disconnectedCallback();
+  assert.equal(heard.length, 0);
+
+  // Put back unchanged, it opens as it did, and is listening once and not twice.
+  await rest();
+  assert.equal(panel.popoverOpen, true);
+  assert.equal(heard.length, 1);
+
+  // A host that is not the badge element has no such moment to hear of. Its panel still
+  // opens again afterwards, because whether it is open is asked of the browser each time.
+  panel.popoverOpen = false;
+  await rest();
+  assert.equal(panel.popoverOpen, true);
+  assert.equal(heard.length, 1);
+
+  // And the scroll it was left waiting for ends the wait when it comes.
+  (heard[0]![1] as () => void)();
+  assert.equal(panel.popoverOpen, false);
+  assert.equal(heard.length, 0);
+});
+
+test('a panel taller than the window drops its last accounts into the count until it fits', async () => {
+  const records = Object.fromEntries(
+    ['alice', 'bob', 'carol', 'dave', 'erin', 'frank'].map((name, at) => [
+      name,
+      linked(name, name, 100 * (at + 1)),
+    ]),
+  );
+
+  const { verity, resize } = await groupHarness(records);
+  const host = new Element();
+
+  await verity
+    .init({ backendUrl: 'https://verifier.test/api/verity' })
+    .mountBadges(host, { connectionIds: Object.keys(records) });
+
+  const pill = host.links()[0]!;
+  const panel = panelOf(host)!;
+  const handlers = pill as unknown as Record<string, (event: object) => void>;
+
+  const rows = () =>
+    panel.all().filter((e) => e.className.split(' ').includes('row')) as (Element & {
+      hidden?: boolean;
+    })[];
+
+  const seen = () =>
+    rows()
+      .filter((row) => !row.hidden)
+      .map((row) => row.textContent);
+
+  // Thirty pixels a row that is showing, and twenty-four for the line beneath them: as
+  // tall as that, or as its own height limit lets it be, which is what a browser measures.
+  const natural = () => 24 + 30 * rows().filter((row) => !row.hidden).length;
+
+  panel.getBoundingClientRect = () => ({
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    width: 180,
+    height: Math.min(natural(), parseFloat(panel.style.maxHeight ?? '') || Infinity),
+  });
+
+  const open = (pillAt: { top: number; bottom: number }) => {
+    pill.getBoundingClientRect = () => ({
+      ...pillAt,
+      left: 40,
+      right: 140,
+      width: 100,
+      height: 20,
+    });
+
+    handlers['onpointerleave']!({});
+    handlers['onfocus']!({});
+  };
+
+  // In an 800 pixel window there is room for all six beneath the pill, and no count.
+  open({ top: 100, bottom: 120 });
+  assert.deepEqual(seen(), ['@alice', '@bob', '@carol', '@dave', '@erin', '@frank']);
+  assert.equal(panel.style.top, '126px');
+
+  // Near the bottom there is more room above, enough for all of it, so it goes there.
+  open({ top: 700, bottom: 720 });
+  assert.equal(seen().length, 6);
+  assert.equal(panel.style.top, `${700 - 6 - (24 + 30 * 6)}px`);
+
+  // With the pill in the middle of a window 240 pixels high, neither side takes six rows.
+  // The larger is the 106 beneath it, which takes two: one account and the count.
+  resize(240);
+  open({ top: 100, bottom: 120 });
+  assert.deepEqual(seen(), ['@alice', '+5 more']);
+  assert.equal(panel.style.top, '126px');
+  assert.equal(panel.style.maxHeight, '106px');
+  assert.ok(natural() <= 106);
+
+  // Opened again in the same window, it is measured afresh and says the same. The limit
+  // left from the last opening must not make every row look as if it fits.
+  open({ top: 100, bottom: 120 });
+  assert.deepEqual(seen(), ['@alice', '+5 more']);
+  assert.ok(natural() <= 106);
+
+  // A little more room, and it takes a second account while still counting the rest.
+  resize(270);
+  open({ top: 100, bottom: 120 });
+  assert.deepEqual(seen(), ['@alice', '@bob', '+4 more']);
+  assert.ok(natural() <= 136);
+
+  // Given the room back, every account returns and the count goes.
+  resize(800);
+  open({ top: 100, bottom: 120 });
+  assert.deepEqual(seen(), ['@alice', '@bob', '@carol', '@dave', '@erin', '@frank']);
+});
+
+test('a pill opens no panel where the page said not to, where it is stacked, or for one account', async () => {
+  const records = {
+    first: linked('first', 'alice', 100),
+    second: linked('second', 'bob', 200),
+  };
+
+  const { verity } = await groupHarness(records);
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+  const connectionIds = Object.keys(records);
+
+  await client.mountBadges(host, { connectionIds, peek: false });
+  assert.equal(panelOf(host), undefined);
+  assert.equal(pillText(host), '@alice+1');
+  assert.match(host.links()[0]!.title, /Verified \| via: verifier\.test/);
+  assert.equal((host.links()[0] as unknown as { onpointerenter: unknown }).onpointerenter, null);
+
+  await client.mountBadges(host, { connectionIds, stacked: true });
+  assert.equal(panelOf(host), undefined);
+
+  // Drawn again as the short pill, it has its panel, and only the one.
+  await client.mountBadges(host, { connectionIds });
+  assert.equal(host.all().filter((e) => e.className === 'peek').length, 1);
+
+  await client.mountBadges(host, { connectionIds: ['first'] });
+  assert.equal(panelOf(host), undefined);
+  assert.equal(host.textContent, '@alice');
+});
+
+test('a stacked pill of one account is the ordinary pill', async () => {
+  const { verity } = await groupHarness({
+    first: linked('first', 'alice', 100),
+    second: linked('second', 'bob', 200, { status: 'expired', expiresAt: 1 }),
+  });
+
+  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ['first', 'second'], stacked: true });
+
+  assert.equal(host.textContent, '@alice');
+  assert.ok(!host.links()[0]!.className.includes('stacked'));
 });
 
 test('a lapsed account never leads the pill or counts, but keeps its place in the dialog', async () => {
@@ -1557,7 +1928,7 @@ test('a lapsed account never leads the pill or counts, but keeps its place in th
   await client.mountBadges(host, { connectionIds: ['first', 'second', 'third', 'fourth'] });
 
   // Two are verified now: the earlier of them leads, and the other is the one more.
-  assert.equal(host.textContent, '@bob+1');
+  assert.equal(pillText(host), '@bob+1');
 
   const opened = await cards(host);
 
@@ -1626,7 +1997,7 @@ test('records the page hands over are drawn without a fetch, unlisted ones with 
   const host = new Element();
 
   verity.presentConnections(host, records);
-  assert.equal(host.textContent, '@alice+1');
+  assert.equal(pillText(host), '@alice+1');
 
   // Nobody can open an unlisted record's page, so the pill is a button and links nowhere.
   assert.equal(host.links().length, 0);
@@ -1704,7 +2075,7 @@ test('one account on several records is one card, and counts once', async () => 
   ]);
 
   // Two accounts, not four records: the first connected leads, and there is one more.
-  assert.equal(host.textContent, '@alice+1');
+  assert.equal(pillText(host), '@alice+1');
 
   const opened = await cards(host);
 
@@ -1739,7 +2110,7 @@ test('one account on several records is one card, and counts once', async () => 
   const pair = new Element();
 
   two.verity.presentConnections(pair, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
-  assert.equal(pair.textContent, '@alice+1');
+  assert.equal(pillText(pair), '@alice+1');
   assert.equal((await two.cards(pair)).cards.length, 3);
 });
 
@@ -1748,11 +2119,11 @@ test('new records that leave the pill unchanged still open in the dialog', async
   const host = new Element();
 
   verity.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
-  assert.equal(host.textContent, '@alice+1');
+  assert.equal(pillText(host), '@alice+1');
 
   // Bob is gone and Carol is there in his place: the same account leads, with one more.
   verity.presentConnections(host, [linked('a', 'alice', 100), linked('c', 'carol', 300)]);
-  assert.equal(host.textContent, '@alice+1');
+  assert.equal(pillText(host), '@alice+1');
 
   // The dialog opens on the new records and is still on them after its first check.
   const opened = await cards(host);
@@ -1794,7 +2165,7 @@ test('connections set on a badge before its script has run are still presented',
   ];
 
   await settle();
-  assert.equal(badge.textContent, '@alice+1');
+  assert.equal(pillText(badge), '@alice+1');
 });
 
 test('evidence set on a badge before its script has run seeds its first paint', async () => {
@@ -1980,7 +2351,7 @@ test('a badge whose connection ids are cleared stops its open dialog showing the
   badge.setAttribute('connection-ids', 'a b');
   badge.connectedCallback();
   await settle();
-  assert.equal(badge.textContent, '@alice+1');
+  assert.equal(pillText(badge), '@alice+1');
 
   const opened = await cards(badge);
 
