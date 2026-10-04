@@ -21,6 +21,8 @@ import {
   type Instruction,
   type LocalAccount,
   type Provider,
+  type SignedDocument,
+  type SignedEvidence,
   type Visibility,
 } from '../core/index.js';
 import { codeAttempts, VerityService, Unavailable, type ServiceOptions } from './service.js';
@@ -325,14 +327,22 @@ function safeUrl(value: string) {
  * site can read an unlisted link and decides who on it sees the link, and nobody else can
  * read it at all, while a public one is readable by anyone anywhere.
  */
-function visibilityChoice(local: LocalAccount, allowed: Visibility[]) {
+/**
+ * Said wherever a holder makes a record public on an instance that signs: removing the
+ * link stops new signed records, and does nothing to one already saved.
+ */
+const signedNote =
+  'Anyone can save a signed record, which still shows this link was made after you remove it';
+
+function visibilityChoice(local: LocalAccount, allowed: Visibility[], signed: boolean) {
   const unlisted = local.siteName
     ? `Only ${local.siteName} can read this link, and it chooses who there sees it. Nobody else can.`
     : 'Anyone with a sharing link can view and forward it. No link is created until you choose to share.';
 
-  const shown = local.siteName
-    ? `Public: anyone can view both sides of this link, on ${local.siteName} or anywhere else`
-    : 'Public: anyone can view both sides of this link';
+  const shown =
+    (local.siteName
+      ? `Public: anyone can view both sides of this link, on ${local.siteName} or anywhere else`
+      : 'Public: anyone can view both sides of this link') + (signed ? `. ${signedNote}` : '');
 
   if (allowed.length === 1)
     return `<input type="hidden" name="visibility" value="${allowed[0]}"><p class="fine">${escape(allowed[0] === 'unlisted' ? `Unlisted. ${unlisted}` : `${shown}.`)}</p>`;
@@ -348,7 +358,12 @@ function subjectNoun(kind: string | undefined): string | undefined {
   return { account: 'account', page: 'page', site: 'website' }[kind ?? ''];
 }
 
-function evidencePage(e: Evidence & { linkExpiresAt?: number }, base: string, report: string) {
+function evidencePage(
+  e: Evidence & { linkExpiresAt?: number },
+  base: string,
+  report: string,
+  keyId?: string,
+) {
   const names = { site: e.siteName, provider: e.providerName };
 
   const local = localSide(e.local, e.siteName);
@@ -390,6 +405,7 @@ function evidencePage(e: Evidence & { linkExpiresAt?: number }, base: string, re
         ['Sharing link expires', e.linkExpiresAt],
       ]) +
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
+    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with key ${escape(keyId)}` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
@@ -397,8 +413,49 @@ function evidencePage(e: Evidence & { linkExpiresAt?: number }, base: string, re
   );
 }
 
+const checkForm =
+  '<form method="post"><label>Signed record <textarea name="record" rows="8" cols="72" required></textarea></label><button>Check</button></form>';
+
+/**
+ * What a signed record says, once its signature has been checked against this verifier's
+ * keys. It is a record of the past: the page says when, and sends the reader to the live
+ * record for whether it still stands.
+ */
+function checkedPage(d: SignedDocument, keyId: string, base: string) {
+  const names = { site: d.siteName, provider: d.providerName };
+  const local = localSide(d.local, d.siteName);
+
+  return page(
+    base,
+    'Signed record',
+    `<p>${escape(d.verifierName)} signed this record. It shows what stood when it was signed, not what stands now.</p>` +
+      card(
+        local.heading,
+        local.value,
+        d.local.profileUrl,
+        undefined,
+        attestationNote(d.attestations.local, names),
+      ) +
+      card(
+        names.provider,
+        externalName(d.external),
+        externalLink(d.external),
+        d.external.kind === 'mailbox' ? undefined : d.external.id,
+        externalNotes(d.attestations, names),
+      ) +
+      times([
+        ['Signed', d.issuedAt],
+        ['Approved', d.approvedAt],
+        ['Valid until', d.expiresAt],
+      ]) +
+      `<p class="fine">Signing key ${escape(keyId)}.</p>
+    <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
+  );
+}
+
 export function createVerity(options: ServerOptions) {
   const service = new VerityService(options);
+  const signs = options.signingKey !== undefined;
 
   const base = new URL(service.baseUrl),
     prefix = base.pathname.replace(/\/$/, '');
@@ -633,6 +690,7 @@ export function createVerity(options: ServerOptions) {
         external: flow.external,
         ...(joined ? { joined: { visibility: joined.visibility } } : {}),
         visibilities: visibilities(flow.local!),
+        ...(signs ? { signedNote } : {}),
       });
     }
 
@@ -901,7 +959,7 @@ export function createVerity(options: ServerOptions) {
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/approve">
-            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!))}
+            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!), signs)}
             <button name="action" value="approve">${['revoke', 'share-revoke'].includes(flow.kind) ? (flow.kind === 'share-revoke' ? 'Revoke sharing link' : 'Revoke connection') : flow.kind === 'renew' ? 'Renew connection' : joined ? 'Add to connection' : 'Confirm connection'}</button>
             <button name="action" value="cancel">Cancel</button></form><p><a href="${escape(prefix)}/verify">Use a different external account</a></p>`,
             ),
@@ -949,6 +1007,24 @@ export function createVerity(options: ServerOptions) {
           return response;
         }
 
+        // The keys a signed record is checked against. Public, like the records they sign.
+        if (path === '/keys') {
+          const response = json({ keys: await service.keys() });
+
+          response.headers.set('Access-Control-Allow-Origin', '*');
+
+          return response;
+        }
+
+        if (path === '/check' && signs)
+          return html(
+            page(
+              prefix,
+              'Check a signed record',
+              `<p>Paste the contents of a signed record saved from ${escape(options.verifierName)}.</p>${checkForm}`,
+            ),
+          );
+
         if (path === '/mine') return json(await service.mine(await local(request)));
 
         if (path.startsWith('/s/')) {
@@ -966,6 +1042,17 @@ export function createVerity(options: ServerOptions) {
 
         if (path.startsWith('/connections/')) {
           const id = path.slice(13);
+
+          if (url.searchParams.get('format') === 'signed') {
+            const response = json(await service.signed(id));
+
+            response.headers.set('Access-Control-Allow-Origin', '*');
+            // Kept as a file: the signature is over these bytes, so they are saved as served.
+            response.headers.set('Content-Disposition', `attachment; filename="verity-${id}.json"`);
+
+            return response;
+          }
+
           // Canonical routes and widgets never use local-session privileges.
           const evidence = await service.read(id);
 
@@ -978,7 +1065,9 @@ export function createVerity(options: ServerOptions) {
             return response;
           }
 
-          return html(evidencePage(evidence, prefix, options.reportUrl));
+          return html(
+            evidencePage(evidence, prefix, options.reportUrl, (await service.keys())[0]?.id),
+          );
         }
 
         if (path.startsWith('/manage/'))
@@ -987,6 +1076,26 @@ export function createVerity(options: ServerOptions) {
         const data = await body(request);
         // The in-page dialog asks in JSON and is answered in JSON; a form gets its page.
         const asJson = request.headers.get('content-type')?.startsWith('application/json');
+
+        if (path === '/check' && signs) {
+          try {
+            const signed: unknown = JSON.parse(data.record ?? '');
+            const document = await service.checked(signed);
+
+            if (document)
+              return html(checkedPage(document, (signed as SignedEvidence).keyId, prefix));
+          } catch {
+            // Not JSON, or a record this build cannot draw: neither is one it can vouch for.
+          }
+
+          return html(
+            page(
+              prefix,
+              'Check a signed record',
+              `<p>This is not a record signed by ${escape(options.verifierName)}.</p>${checkForm}`,
+            ),
+          );
+        }
 
         if (path === '/connect') {
           const user = await local(request);

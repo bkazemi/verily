@@ -23,9 +23,15 @@ import {
   type Provider,
   type Records,
   type RedirectProvider,
+  type SignedDocument,
+  type SignedEvidence,
+  type Signer,
   type Storage,
   type Transaction,
+  type VerifierKey,
   type Visibility,
+  signer,
+  verifySigned,
 } from '../core/index.js';
 
 export const secret = () => randomBytes(32).toString('base64url');
@@ -66,6 +72,16 @@ export interface ServiceOptions {
    * one. Each provider is counted on its own.
    */
   sendLimits?: { day?: number; address?: number };
+  /**
+   * Signs public records, so a saved signed record can be checked away from this
+   * instance. A key
+   * from `generateSigningKey()`, or a function giving one where it is read from storage.
+   * Unset signs nothing. Losing the key puts every record it signed out of reach of a
+   * check, so keep it wherever the instance's other secrets are kept.
+   */
+  signingKey?: string | (() => Promise<string>);
+  /** Public keys this instance signed with before, so what they signed still checks. */
+  retiredKeys?: VerifierKey[];
   now?: () => number;
 }
 
@@ -121,6 +137,50 @@ export class VerityService {
     for (const limit of Object.values(this.sendLimits))
       if (limit !== Infinity && (!Number.isSafeInteger(limit) || limit <= 0))
         throw new Error('Invalid send limit');
+  }
+
+  private signing?: Promise<Signer>;
+
+  /** The key this instance signs with, read once. */
+  private signer(): Promise<Signer> | undefined {
+    const { signingKey } = this.options;
+
+    if (signingKey === undefined) return undefined;
+
+    this.signing ??= Promise.resolve(
+      typeof signingKey === 'string' ? signingKey : signingKey(),
+    ).then(signer);
+
+    return this.signing;
+  }
+
+  /** Every key a record of this instance may be signed by: the current one first. */
+  async keys(): Promise<VerifierKey[]> {
+    const current = await this.signer();
+
+    return [...(current ? [current.key] : []), ...(this.options.retiredKeys ?? [])];
+  }
+
+  /**
+   * A public record that stands, signed as of now. Signed when asked for, not when
+   * approved, so a signed record says the record stood on the day it was taken and none can be
+   * made once it is removed.
+   */
+  async signed(id: string): Promise<SignedEvidence> {
+    const current = await this.signer();
+
+    if (!current) throw new Unavailable();
+
+    const { status, revokedAt: _revokedAt, signedUrl: _signedUrl, ...record } = await this.read(id);
+
+    if (status !== 'verified') throw new Unavailable();
+
+    return current.sign({ type: 'verity-evidence', version: 1, issuedAt: this.now(), ...record });
+  }
+
+  /** What a signed record says, if this instance signed it. */
+  async checked(signed: unknown): Promise<SignedDocument | undefined> {
+    return verifySigned(signed, await this.keys());
   }
 
   private get sendLimits(): { day: number; address: number } {
@@ -862,6 +922,8 @@ export class VerityService {
 
   evidence(connection: Connection): Evidence {
     const { id: _privateId, siteName: _siteName, ...local } = connection.local;
+    const standing = status(connection, this.now(), this.freshness);
+    const evidenceUrl = `${this.baseUrl}/connections/${connection.id}`;
 
     return {
       id: connection.id,
@@ -873,14 +935,19 @@ export class VerityService {
       siteName: this.siteOf(connection.local),
       verifierName: this.options.verifierName,
       visibility: connection.visibility,
-      status: status(connection, this.now(), this.freshness),
+      status: standing,
       connectedAt: connected(connection),
       authenticatedAt: connection.authenticatedAt,
       approvedAt: connection.approvedAt,
       visibilityApprovedAt: connection.visibilityApprovedAt,
       expiresAt: connection.expiresAt,
       revokedAt: connection.revokedAt,
-      evidenceUrl: `${this.baseUrl}/connections/${connection.id}`,
+      evidenceUrl,
+      ...(this.options.signingKey !== undefined &&
+      connection.visibility === 'public' &&
+      standing === 'verified'
+        ? { signedUrl: `${evidenceUrl}?format=signed` }
+        : {}),
     };
   }
 

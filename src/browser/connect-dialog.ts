@@ -46,6 +46,8 @@ export interface FlowView {
   joined?: { visibility: 'public' | 'unlisted' };
   /** What the holder may choose. Absent, from an older backend, means either. */
   visibilities?: ('public' | 'unlisted')[];
+  /** Said beside the public choice, where the backend signs its public records. */
+  signedNote?: string;
   reason?: string;
   connectionId?: string;
 }
@@ -630,7 +632,9 @@ export function openConnectDialog(
 
     const visibilityText = {
       unlisted: 'Unlisted: only people you share a link with can view it',
-      public: 'Public: anyone can view both sides of this link',
+      public:
+        'Public: anyone can view both sides of this link' +
+        (flow.signedNote ? `. ${flow.signedNote}` : ''),
     };
 
     // The backend refuses any other, so the dialog neither offers one nor sends one.

@@ -10,6 +10,7 @@ import {
 } from '../core/index.js';
 import { markStyles, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
+import { onSignatureResult, signature, standing, type Signature } from './signed.js';
 import { verityLogo } from './logo.js';
 import { version } from '../version.js';
 
@@ -30,6 +31,7 @@ export const styles = `
   .provider { width: 14px; height: 14px; }
   .state { font-size: 14px; font-weight: 650; line-height: 1.4; }
   .muted { color: #6b786f; font-size: 12px; }
+  .bad { color: #b3261e; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
   .account { padding: 14px 16px; border: 1px solid #e0e6df; border-radius: 10px; margin-top: 12px; }
   .account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; color: #6b786f; font-size: 11px; font-weight: 550; }
   .account a, .account strong { font-weight: 650; font-size: 14px; }
@@ -178,7 +180,14 @@ export function accountCard(
  * `links` names every one not yet revoked, whether or not it is shown, so removing the
  * account removes them all and none is left to take the card up again.
  */
-export type Account = Evidence & { links?: string[] };
+export type Account = Evidence & {
+  links?: string[];
+  /**
+   * The records as they were read, where a card is drawn from more than one: what it says
+   * is put together from all of them, and each has a signed record of its own.
+   */
+  sources?: Evidence[];
+};
 
 /**
  * What the holder of the accounts shown may do from the dialog, where the page that drew
@@ -239,13 +248,66 @@ function manageRow(evidence: Account, manage: Manage) {
       }
     };
 
-    row.replaceChildren(node('span', 'Remove this link?', 'muted'), cancel, sure);
+    row.replaceChildren(
+      node(
+        'span',
+        // Removing stops new signed records. One already saved goes on checking.
+        evidence.signedUrl
+          ? 'Remove this link? Signed records already saved still check.'
+          : 'Remove this link?',
+        'muted',
+      ),
+      cancel,
+      sure,
+    );
+
     cancel.focus();
   };
 
   offer();
 
   return row;
+}
+
+/**
+ * Says a record is signed, in a word beside its verifier. The word opens the verifier's
+ * own page for the record at what it says of the signature, where the signed record is to be
+ * had: nothing is downloaded from the card. The signed record is checked here against the
+ * verifier's keys: a tick once it has checked, and a warning in the word's place if it
+ * fails, the one thing on a card that is a warning.
+ */
+function signedMark(evidence: Account) {
+  const mark = node('span');
+  const link = outward(node('a', 'signed'), `${evidence.evidenceUrl}#signed`);
+
+  link.title = `Signed by ${evidence.verifierName}. See the signature (opens in a new tab)`;
+  mark.append(document.createTextNode(' · '), link);
+
+  // A card may speak for several records, and the mark answers for every one of them.
+  const sources = evidence.sources ?? [evidence];
+
+  void Promise.all(
+    sources.map((source): Promise<Signature> =>
+      source.signedUrl === undefined ? Promise.resolve({ state: 'unchecked' }) : signature(source),
+    ),
+  ).then((results) => {
+    const first = results[0];
+
+    if (results.some((result) => result.state === 'invalid')) {
+      const warning = node('span', 'invalid signature', 'bad');
+
+      warning.setAttribute('role', 'alert');
+      // What it means, for a reader who has never met a signature, kept off the card.
+      warning.title = `This record does not match the signature ${evidence.verifierName} put on it, so it may have been altered. Do not rely on it.`;
+      mark.replaceChildren(document.createTextNode(' · '), warning);
+    } else if (first?.state === 'valid' && results.every((result) => result.state === 'valid')) {
+      link.textContent = 'signed ✓';
+      // Names where the keys came from, which is what the tick answers for.
+      link.title = `Signature checked in this browser against the keys ${new URL(evidence.evidenceUrl).host} publishes (key ${first.keyId}). See the signature (opens in a new tab)`;
+    }
+  });
+
+  return mark;
 }
 
 /**
@@ -273,6 +335,8 @@ function externalCard(evidence: Account, manage?: Manage) {
     verifier.title = `View this record at ${evidence.verifierName} (opens in a new tab)`;
     attribution.append(verifier);
   } else attribution.append(document.createTextNode(evidence.verifierName));
+
+  if (evidence.signedUrl) attribution.append(signedMark(evidence));
 
   copy.append(node('div', status, 'state'), attribution);
 
@@ -464,7 +528,7 @@ export function openEvidenceDialog(
         .map((e) =>
           removed.has(e.id) && e.status !== 'revoked'
             ? { ...e, status: 'revoked' as const, revokedAt: removed.get(e.id) }
-            : e,
+            : standing(e),
         ),
     );
 
@@ -530,6 +594,11 @@ export function openEvidenceDialog(
     void refresh();
   }, 30000);
 
+  // A check that comes back while the dialog is open may change what a card is drawn from.
+  const unwatch = onSignatureResult(() => {
+    if (held && dialog.open) draw(held);
+  });
+
   close.addEventListener('click', () => dialog.close());
 
   dialog.addEventListener('click', (event) => {
@@ -550,6 +619,7 @@ export function openEvidenceDialog(
     () => {
       clearInterval(interval);
       clearTimeout(expiryTimer);
+      unwatch();
       openDialogs.delete(opener);
       host.remove();
 

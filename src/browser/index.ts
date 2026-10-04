@@ -14,6 +14,7 @@ import {
   type Methods,
 } from './connect-dialog.js';
 import { openEvidenceDialog, type Account, type Manage } from './evidence-dialog.js';
+import { drawSignedWith, standing, watchSigned } from './signed.js';
 
 export type { Evidence } from '../core/index.js';
 
@@ -212,6 +213,8 @@ function accounts(records: Evidence[]): Account[] {
         connectedAt: when(sorted[0]!),
         attestations: { ...base.attestations, external },
         links: sorted.filter((e) => e.status !== 'revoked').map((e) => e.id),
+        // Every record the card speaks for, so its signature mark answers for all of them.
+        sources: verified.length ? verified : [base],
       };
     })
     .sort((a, b) => a.connectedAt - b.connectedAt);
@@ -227,7 +230,7 @@ function accounts(records: Evidence[]): Account[] {
  * `load` gives the records afresh when the dialog opens and as it stays open.
  */
 function presentGroup(element: HTMLElement, records: Evidence[], load: () => Promise<Evidence[]>) {
-  const ordered = accounts(records);
+  const ordered = accounts(records.map(standing));
   const verified = ordered.filter(live);
   const lead = verified[0] ?? ordered[0]!;
 
@@ -252,6 +255,12 @@ function presentGroup(element: HTMLElement, records: Evidence[], load: () => Pro
 
   // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
   if (badge) opens(element, badge);
+
+  // A check that comes back may change what the pill is drawn from: the signed record's own
+  // words once it checks, and a record no longer verified if it fails.
+  watchSigned(records, () => {
+    if (latestGroup.get(element) === records) presentGroup(element, records, load);
+  });
 }
 
 /**
@@ -613,10 +622,19 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
           return [fresh];
         });
 
-        const badge = renderBadge(element, e);
+        const draw = () => {
+          const badge = renderBadge(element, standing(e));
 
-        // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
-        if (badge) opens(element, badge);
+          // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
+          if (badge) opens(element, badge);
+        };
+
+        draw();
+
+        // Drawn again from the signed record once it checks, and as unverified if it fails.
+        watchSigned([e], () => {
+          if (current()) draw();
+        });
       } catch {
         if (current()) withdraw(element);
       }
@@ -676,6 +694,9 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
   return client;
 }
 
+// What a signed record says is drawn in a record's place, so it is held to the same rules.
+drawSignedWith((value): value is Evidence => validEvidence(value) && readable(value) !== undefined);
+
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object';
 }
@@ -690,6 +711,8 @@ function readable(evidence: Evidence): Evidence | undefined {
     externalUrl(evidence.external);
 
     if (evidence.local.profileUrl) safeUrl(evidence.local.profileUrl);
+
+    if (evidence.signedUrl) safeUrl(evidence.signedUrl);
 
     return evidence;
   } catch {
@@ -715,6 +738,9 @@ function flowView(value: unknown): FlowView {
     externalUrl(value.external);
 
     if (value.local.profileUrl !== undefined) safeUrl(String(value.local.profileUrl));
+
+    if (value.signedNote !== undefined && typeof value.signedNote !== 'string')
+      throw new Error('Invalid flow response');
   }
 
   return value as unknown as FlowView;
@@ -795,6 +821,9 @@ function validEvidence(value: unknown): value is Evidence {
       (k) => typeof (value.external as Record<string, unknown>)[k] === 'string',
     ) &&
     (value.local.profileUrl === undefined || typeof value.local.profileUrl === 'string') &&
+    // A signed record lives beside the record it was made from and nowhere else, since the
+    // keys it is checked against are read from where the record lives.
+    (value.signedUrl === undefined || value.signedUrl === `${value.evidenceUrl}?format=signed`) &&
     validAttestations(value.attestations) &&
     (value.local.kind === undefined || typeof value.local.kind === 'string') &&
     (value.external.kind === undefined ||

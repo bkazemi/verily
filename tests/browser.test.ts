@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import { generateSigningKey, signer } from '../src/core/index.js';
 
 class Element {
   children: Element[] = [];
@@ -1483,6 +1484,12 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
         return created;
       },
     },
+    // What checking a signed record needs of a browser.
+    crypto,
+    TextEncoder,
+    TextDecoder,
+    atob,
+    btoa,
     fetch: async (url: string) => {
       const id = new URL(url).pathname.split('/').at(-1)!;
 
@@ -1984,6 +1991,271 @@ test('accounts of different subjects, or none readable, are not presented as one
 
   await client.mountBadges(host, { connectionIds: ['mine', 'hidden'] });
   assert.equal(host.textContent, '@alice');
+});
+
+test('a signed record says so on its card, and says how checking it went', async () => {
+  const mine = await signer(generateSigningKey());
+  const other = await signer(generateSigningKey());
+  const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
+
+  const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
+    const { status: _status, ...rest } = record;
+
+    return by.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never);
+  };
+
+  const good = linked('good', 'alice', 100, { signedUrl: `${at('good')}?format=signed` });
+  const swapped = linked('swapped', 'bob', 200, { signedUrl: `${at('swapped')}?format=signed` });
+  const forged = linked('forged', 'carol', 300, { signedUrl: `${at('forged')}?format=signed` });
+  const unread = linked('unread', 'dave', 400, { signedUrl: `${at('unread')}?format=signed` });
+  const plain = linked('plain', 'erin', 500);
+
+  const { verity, cards } = await groupHarness({
+    keys: { keys: [mine.key] },
+    good: await signedBy(good),
+    // A true signature, over another record.
+    swapped: await signedBy(good),
+    // This record, signed by a key the verifier does not list.
+    forged: await signedBy(forged, other),
+  });
+
+  const host = new Element();
+
+  verity.presentConnections(host, [good, swapped, forged, unread, plain]);
+
+  const opened = await cards(host);
+
+  /** The cards as they stand: a failed check draws them again. */
+  const shown = () => opened.dialog.all().filter((found) => found.className.includes('account'));
+
+  /** What a card says beside its verifier, and the link it has there. */
+  const said = (handle: string) => {
+    const card = shown().find((found) => found.textContent.includes(`@${handle}`))!;
+
+    return {
+      text: card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!,
+      link: card.links().find((link) => link.textContent.startsWith('signed')),
+      alert: card.all().find((found) => found.attributes['role'] === 'alert'),
+    };
+  };
+
+  // Each signed card says so in a word that opens the verifier's page at its signature.
+  assert.equal(said('dave').text, ' · signed');
+  assert.equal(said('dave').link!.href, `${unread.evidenceUrl}#signed`);
+
+  // A record from a verifier that signs nothing says nothing.
+  assert.equal(said('erin').text, '');
+
+  const settled = () =>
+    said('alice').text === ' · signed ✓' && ['bob', 'carol'].every((handle) => said(handle).alert);
+
+  for (let i = 0; i < 100 && !settled(); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(said('alice').text, ' · signed ✓');
+  assert.match(said('alice').link!.title, new RegExp(`key ${mine.key.id}`));
+
+  // A signed record that fails is a warning, and links nowhere.
+  for (const handle of ['bob', 'carol']) {
+    assert.equal(said(handle).alert!.textContent, 'invalid signature');
+
+    // What that means is in its tooltip, for a reader who has never met a signature.
+    assert.match(
+      said(handle).alert!.title,
+      /does not match the signature verifier\.test put on it, so it may have been altered/,
+    );
+
+    assert.equal(said(handle).link, undefined);
+  }
+
+  // A signed record that could not be read is no verdict either way.
+  assert.equal(said('dave').text, ' · signed');
+
+  // A record whose signature failed is not called verified, on its card or in the pill.
+  const state = (handle: string) =>
+    shown()
+      .find((found) => found.textContent.includes(`@${handle}`))!
+      .all()
+      .find((found) => found.className === 'state')!.textContent;
+
+  assert.deepEqual(['alice', 'bob', 'carol', 'dave', 'erin'].map(state), [
+    'Verified',
+    'Unconfirmed',
+    'Unconfirmed',
+    'Verified',
+    'Verified',
+  ]);
+
+  // Five accounts were verified and two failed, so the pill counts the three that stand.
+  assert.equal(pillText(host), '@alice+2');
+
+  const alone = new Element();
+
+  verity.presentConnections(alone, [swapped]);
+  assert.equal(alone.textContent, '@bobUnconfirmed');
+
+  // A record whose signed record is at no address a page may follow is not drawn at all.
+  const refused = new Element();
+
+  verity.presentConnections(refused, [
+    linked('first', 'alice', 100, { signedUrl: 'javascript:alert(1)' }),
+  ]);
+
+  assert.equal(refused.textContent, 'Unavailable');
+
+  // Nor is one whose signed record is anywhere but beside the record it was made from: the
+  // keys are read from where the record lives, and one from elsewhere has no claim on them.
+  for (const signedUrl of [
+    'https://elsewhere.test/api/verity/connections/first?format=signed',
+    'https://verifier.test/api/verity/connections/second?format=signed',
+    'https://verifier.test/api/verity/connections/first',
+  ]) {
+    const elsewhere = new Element();
+
+    verity.presentConnections(elsewhere, [linked('first', 'alice', 100, { signedUrl })]);
+    assert.equal(elsewhere.textContent, 'Unavailable');
+  }
+});
+
+test('a signature mark stands only beside what the signed record says', async () => {
+  const mine = await signer(generateSigningKey());
+  const next = await signer(generateSigningKey());
+  const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
+
+  const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
+    const {
+      status: _status,
+      signedUrl: _signedUrl,
+      ...rest
+    } = record as ReturnType<typeof linked> & { signedUrl?: string };
+
+    return by.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never);
+  };
+
+  const good = linked('good', 'alice', 100, { signedUrl: `${at('good')}?format=signed` });
+
+  const served: Record<string, unknown> = {
+    keys: { keys: [mine.key] },
+    good: await signedBy(good),
+  };
+
+  const { verity, cards, body, asked } = await groupHarness(served);
+
+  /**
+   * Draws records, opens their dialog and, once settled, says for each account its state,
+   * what stands beside the verifier, and everything its card and the pill say.
+   */
+  const marks = async (records: unknown[]) => {
+    for (const open of body.all().filter((found) => found.tagName === 'dialog')) open.remove();
+
+    const host = new Element();
+
+    verity.presentConnections(host, records);
+
+    const opened = await cards(host);
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const [subject, ...accounts] = opened.dialog
+      .all()
+      .filter((found) => found.className.includes('account'));
+
+    return {
+      pill: pillText(host),
+      subject: subject!.textContent,
+      accounts: accounts.map((card) => [
+        card.all().find((found) => found.className === 'state')!.textContent,
+        card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!,
+      ]),
+      text: accounts.map((card) => card.textContent).join(' '),
+    };
+  };
+
+  const plain = await marks([good]);
+
+  assert.deepEqual(plain.accounts, [['Verified', ' · signed ✓']]);
+  assert.equal(plain.pill, '@alice');
+
+  // A record that says something its signed record does not is drawn as that has it: the
+  // mark stands beside the verifier's own words, and what was altered is not shown at all.
+  const renamed = await marks([{ ...good, external: { ...good.external, handle: 'mallory' } }]);
+
+  assert.deepEqual(renamed.accounts, [['Verified', ' · signed ✓']]);
+  assert.match(renamed.text, /@alice/);
+  assert.doesNotMatch(renamed.text, /mallory/);
+  assert.equal(renamed.pill, '@alice');
+
+  const relabelled = await marks([{ ...good, local: { ...good.local, label: 'Mallory' } }]);
+
+  assert.deepEqual(relabelled.accounts, [['Verified', ' · signed ✓']]);
+  assert.match(relabelled.subject, /Alice/);
+  assert.doesNotMatch(relabelled.subject, /Mallory/);
+
+  const reproved = await marks([
+    {
+      ...good,
+      attestations: {
+        ...good.attestations,
+        external: [
+          {
+            by: 'provider',
+            method: 'gist',
+            confirmedAt: 1,
+            artifactUrl: 'https://gist.github.com/mallory/1',
+          },
+        ],
+      },
+    },
+  ]);
+
+  assert.deepEqual(reproved.accounts, [['Verified', ' · signed ✓']]);
+  assert.equal(reproved.text, plain.text);
+
+  // What stands now is no part of a signed record, so that is kept as the record was read.
+  const lapsed = await marks([{ ...good, status: 'expired', expiresAt: good.expiresAt }]);
+
+  assert.equal(lapsed.accounts[0]![0], 'Expired');
+
+  // One naming another record under the same address is shown what its own check finds,
+  // not the first's.
+  assert.deepEqual((await marks([{ ...good, id: 'other' }])).accounts, [
+    ['Unconfirmed', ' · invalid signature'],
+  ]);
+
+  // And the record that was signed is still vouched for after all of those.
+  assert.deepEqual((await marks([good])).accounts, [['Verified', ' · signed ✓']]);
+
+  // A signed record holding an address no page may follow is not drawn from: the record is
+  // shown as it was read, with no tick beside it.
+  const unsafe = linked('unsafe', 'dave', 150, { signedUrl: `${at('unsafe')}?format=signed` });
+
+  served['unsafe'] = await signedBy({
+    ...unsafe,
+    external: { ...unsafe.external, profileUrl: 'javascript:alert(1)' },
+  });
+
+  const refused = await marks([unsafe]);
+
+  assert.deepEqual(refused.accounts, [['Verified', ' · signed']]);
+  assert.ok(refused.accounts.length === 1 && !JSON.stringify(refused).includes('javascript'));
+
+  // The verifier changes keys while the page is open: a record signed by the new one is
+  // looked up in the list as it is now before it is called unsigned.
+  const later = linked('later', 'bob', 200, { signedUrl: `${at('later')}?format=signed` });
+
+  served['later'] = await signedBy(later, next);
+  served.keys = { keys: [next.key, mine.key] };
+
+  const before = asked.filter((id) => id === 'keys').length;
+
+  assert.deepEqual((await marks([later])).accounts, [['Verified', ' · signed ✓']]);
+  assert.equal(asked.filter((id) => id === 'keys').length, before + 1);
+
+  // A key no list has is asked after once more, and then the signed record fails.
+  const forged = linked('forged', 'carol', 300, { signedUrl: `${at('forged')}?format=signed` });
+
+  served['forged'] = await signedBy(forged, await signer(generateSigningKey()));
+  assert.deepEqual((await marks([forged])).accounts, [['Unconfirmed', ' · invalid signature']]);
 });
 
 test('records the page hands over are drawn without a fetch, unlisted ones with no link', async () => {

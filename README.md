@@ -293,6 +293,8 @@ Run the backend on a domain readers can connect to your site, because `PUBLIC_OR
 
 A site can use an instance someone else runs. The instance's operator registers your site and gives you its id and a key. You register nothing with any sign-in provider, store no Verity records and run no Verity backend. Your backend sends a signed-in user to the instance and reads their connections back.
 
+You are trusting that operator. They can read every record made through their instance, unlisted ones included, and for sign-in and email methods a reader has only the operator's word that the account was verified. Link-back, gist and PGP proofs can be rechecked by anyone. A site that does not want to rely on an operator runs its own instance.
+
 ```ts
 import { createSiteClient } from '@bkazemi/verity/site';
 
@@ -397,6 +399,43 @@ Three options tie a flow to the site that sent the holder:
 Two more narrow what a subject is offered, for a backend whose sites don't all want the same. `providersFor(local)` returns the provider ids a subject may use: it is offered those alone, in that order, and a flow for any other is refused. `visibilityFor(local)` returns the visibilities it may choose: with one, the approval page states it and offers no choice.
 
 `result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
+
+## Signed records
+
+Evidence is normally believed because the verifier's own origin serves it. Set a signing key and each public record can also be downloaded as a signed file, which anyone can check later without the instance being up.
+
+```ts
+import { createVerity, generateSigningKey } from '@bkazemi/verity';
+
+// Make the key once and keep it with your other secrets.
+console.log(generateSigningKey());
+
+createVerity({
+  // ...
+  signingKey: process.env.VERITY_SIGNING_KEY,
+});
+```
+
+With a key set:
+
+- **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form.
+- **`GET <baseUrl>/keys`** lists the public keys. The Cloudflare Worker also serves them at `/.well-known/verity-keys.json`.
+- **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
+- The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
+- The approval step tells the holder that a saved signed record outlives removal.
+
+To check a file yourself:
+
+```ts
+import { verifySigned } from '@bkazemi/verity';
+
+const { keys } = await (await fetch('https://verifier.example/api/verity/keys')).json();
+const record = await verifySigned(JSON.parse(file), keys); // undefined if no key signed it
+```
+
+A signed record proves what the verifier claimed and when (`issuedAt`). It does not prove the claim was true, and it does not say whether the record still stands: ask `evidenceUrl` for that. Save the keys with the file if it has to outlive the verifier's domain. When you change keys, list the old public key in `retiredKeys` so what it signed still checks.
+
+The Cloudflare Worker signs by default, with a key it makes and stores itself. Set the `SIGNING_KEY` secret to supply your own, or `SIGNING` to `off` to sign nothing.
 
 ## Operations
 

@@ -400,7 +400,14 @@ export interface Evidence {
   expiresAt: number;
   revokedAt?: number;
   evidenceUrl: string;
+  /**
+   * Where this record can be had signed, on a verifier that signs. Only a public record
+   * that stands has a signed form: once saved, a signed record cannot be taken back.
+   */
+  signedUrl?: string;
 }
+
+export * from './signed.js';
 
 /**
  * How long a published proof stays good without being read again. An artifact method is

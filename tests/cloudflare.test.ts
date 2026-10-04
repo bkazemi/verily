@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Miniflare, convertV4MiniflareOptions, Response as WorkerResponse } from 'miniflare';
 import { buildWorker } from './fixtures/worker.js';
+import { verifySigned, type VerifierKey } from '../src/core/index.js';
 
 test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public embeds and revocation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'verity-cloudflare-'));
@@ -178,6 +179,22 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.ok(!publicBody.includes('site-owner'));
     assert.match(await (await request('/', { headers: { cookie } })).text(), /&lt;verity-badge/);
 
+    // Signed with a key the installation made itself, published under the domain's name.
+    const published = await request('/.well-known/verity-keys.json');
+
+    assert.equal(published.headers.get('access-control-allow-origin'), '*');
+    const { keys } = (await published.json()) as { keys: VerifierKey[] };
+
+    assert.equal(keys.length, 1);
+    assert.deepEqual(await (await request('/api/verity/keys')).json(), { keys });
+
+    const signed = await (await request(`/api/verity/connections/${id}?format=signed`)).json();
+    const checked = (await verifySigned(signed, keys))!;
+
+    assert.equal(checked.id, id);
+    assert.equal(checked.verifierName, 'verifier.test');
+    assert.equal(checked.external.handle, 'octocat');
+
     assert.equal(
       (
         await request(`/api/verity/connections/${id}/disconnect`, {
@@ -197,7 +214,12 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     });
 
     assert.match(await (await request(evidencePath)).text(), /"status":"verified"/);
+
+    // The key is kept with the records, so a signed record saved before a restart still checks.
+    assert.deepEqual(await (await request('/.well-known/verity-keys.json')).json(), { keys });
+
     assert.equal((await post(`/api/verity/connections/${id}/disconnect`, '', cookie)).status, 200);
+    assert.equal((await request(`/api/verity/connections/${id}?format=signed`)).status, 404);
     assert.match(await (await request(evidencePath)).text(), /"status":"revoked"/);
     const logout = await request('/logout', { method: 'POST', headers: { cookie }, body: '' });
 
