@@ -1,13 +1,15 @@
+import type { CleartextMessage, Signature } from 'openpgp';
 import type { Evidence } from './index.js';
 
 /**
- * A verifier's public key, as it publishes it. The id is derived from the key, so a
- * record names the key that signed it without carrying the key itself.
+ * A verifier's public key, as it publishes it: an OpenPGP key, named by its fingerprint.
+ * `alg` says how a record under it is read, so another scheme can sit beside this one.
  */
 export interface VerifierKey {
+  /** The key's fingerprint, in the upper case it is read aloud in. */
   id: string;
-  alg: 'Ed25519';
-  /** The raw 32-byte public key, base64url. */
+  alg: 'OpenPGP';
+  /** The armored public key, as `gpg --import` reads it. */
   publicKey: string;
 }
 
@@ -23,108 +25,89 @@ export type SignedDocument = Omit<Evidence, 'status' | 'revokedAt' | 'signedUrl'
 };
 
 /**
- * A record that can be checked away from the verifier that served it. `payload` is the
- * document's exact bytes, base64url, and the signature is over those bytes: nothing has
- * to be put back into a canonical form before it is checked.
+ * A record that can be checked away from the verifier that served it: the document as
+ * text under an OpenPGP cleartext signature, which `gpg --verify` reads as it is.
  */
-export interface SignedEvidence {
-  alg: 'Ed25519';
-  keyId: string;
-  payload: string;
-  signature: string;
-}
+export type SignedEvidence = string;
 
 export interface Signer {
   key: VerifierKey;
   sign(document: SignedDocument): Promise<SignedEvidence>;
 }
 
-/** Signed ahead of the payload, so a signature made here is never one over anything else. */
-const context = 'verity-evidence-v1\n';
+/** A signed record is a few kilobytes. Anything far past that is not one. */
+const maxSignedLength = 262144;
 
-/** The fixed PKCS #8 wrapping of a 32-byte Ed25519 seed, which is how WebCrypto reads one. */
-const pkcs8 = [
-  0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
-];
+let loaded: ReturnType<typeof load> | undefined;
 
-function encode(bytes: Uint8Array): string {
-  let text = '';
+async function load() {
+  const pgp = await import('openpgp');
+  const weak = [pgp.enums.hash.sha1, pgp.enums.hash.md5, pgp.enums.hash.ripemd];
 
-  for (const byte of bytes) text += String.fromCharCode(byte);
-
-  return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return {
+    pgp,
+    // SHA-1 and older are refused under a key's own signatures as well as under a record.
+    config: {
+      ...pgp.config,
+      rejectHashAlgorithms: new Set([...pgp.config.rejectHashAlgorithms, ...weak]),
+      rejectMessageHashAlgorithms: new Set([...pgp.config.rejectMessageHashAlgorithms, ...weak]),
+    },
+  };
 }
 
-function decode(text: string): Uint8Array<ArrayBuffer> | undefined {
-  if (!/^[A-Za-z0-9_-]*$/.test(text)) return undefined;
+/**
+ * OpenPGP.js and how it is set, brought in when a record is first checked and not before.
+ * On a page it will not start without WebCrypto, which an insecure page lacks, and a page
+ * with no signed record on it has no use for it: neither should cost the badge anything.
+ */
+const library = () => (loaded ??= load());
+
+/** The signatures under a message, which the library keeps and its types leave out. */
+const marks = (message: CleartextMessage) =>
+  (message as unknown as { signature: Signature }).signature.packets;
+
+/** A signed record as OpenPGP.js reads it, where it is one message under one signature. */
+async function read(signed: unknown): Promise<CleartextMessage | undefined> {
+  if (typeof signed !== 'string' || signed.length > maxSignedLength) return undefined;
+
+  const text = signed.trim();
+  const lines = text.split(/\r?\n/);
+  const only = (line: string) => lines.indexOf(line) === lines.lastIndexOf(line);
+
+  // The message and nothing around it: what stands outside one is signed by nobody. Each
+  // marker is a whole line, met once, with the last of them the last line there is. A line
+  // of the text that begins with a dash is written with "- " before it, so none of the
+  // text can be one of these.
+  if (
+    lines[0] !== '-----BEGIN PGP SIGNED MESSAGE-----' ||
+    lines.at(-1) !== '-----END PGP SIGNATURE-----' ||
+    !lines.includes('-----BEGIN PGP SIGNATURE-----') ||
+    ![lines[0], lines.at(-1)!, '-----BEGIN PGP SIGNATURE-----'].every(only)
+  )
+    return undefined;
 
   try {
-    return Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
-      c.charCodeAt(0),
-    );
+    const { pgp, config } = await library();
+    const message = await pgp.readCleartextMessage({ cleartextMessage: text, config });
+
+    return marks(message).length === 1 ? message : undefined;
   } catch {
     return undefined;
   }
 }
 
-function covered(payload: Uint8Array): Uint8Array<ArrayBuffer> {
-  const lead = new TextEncoder().encode(context);
-  const bytes = new Uint8Array(lead.length + payload.length);
+const fingerprint = (bytes: Uint8Array) =>
+  [...bytes].map((byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join('');
 
-  bytes.set(lead);
-  bytes.set(payload, lead.length);
+/**
+ * The fingerprint of the key a signed record says signed it, checked or not: which key to
+ * look for, and no reason by itself to believe anything.
+ */
+export async function signedBy(signed: unknown): Promise<string | undefined> {
+  const message = await read(signed);
+  const by = message && marks(message)[0]!.issuerFingerprint;
 
-  return bytes;
-}
-
-async function keyId(publicKey: Uint8Array<ArrayBuffer>): Promise<string> {
-  return encode(new Uint8Array(await crypto.subtle.digest('SHA-256', publicKey))).slice(0, 16);
-}
-
-/** A new signing key: 32 random bytes, base64url. Keep it secret and keep it backed up. */
-export function generateSigningKey(): string {
-  return encode(crypto.getRandomValues(new Uint8Array(32)));
-}
-
-/** Reads a signing key made by `generateSigningKey`, giving its public half and a way to sign. */
-export async function signer(signingKey: string): Promise<Signer> {
-  const seed = decode(signingKey);
-
-  if (seed?.length !== 32) throw new Error('Invalid signing key');
-
-  const secret = await crypto.subtle.importKey(
-    'pkcs8',
-    Uint8Array.from([...pkcs8, ...seed]),
-    'Ed25519',
-    true,
-    ['sign'],
-  );
-
-  const publicKey = decode((await crypto.subtle.exportKey('jwk', secret)).x ?? '');
-
-  if (publicKey?.length !== 32) throw new Error('Invalid signing key');
-
-  const key: VerifierKey = {
-    id: await keyId(publicKey),
-    alg: 'Ed25519',
-    publicKey: encode(publicKey),
-  };
-
-  return {
-    key,
-    async sign(document) {
-      const payload = new TextEncoder().encode(JSON.stringify(document));
-
-      return {
-        alg: 'Ed25519',
-        keyId: key.id,
-        payload: encode(payload),
-        signature: encode(
-          new Uint8Array(await crypto.subtle.sign('Ed25519', secret, covered(payload))),
-        ),
-      };
-    },
-  };
+  return by ? fingerprint(by) : undefined;
 }
 
 /**
@@ -132,42 +115,54 @@ export async function signer(signingKey: string): Promise<Signer> {
  * otherwise. The keys are the caller's to choose: a record is only as good as the reason
  * to believe each key is the verifier's. It says what stood when it was signed, never
  * that it stands now.
+ *
+ * Whether a signature counts is OpenPGP.js's to say, by the format's own rules: a key is
+ * judged as it stood when the record was signed, so one that has since run out, or been
+ * retired, still answers for what it signed before, and one revoked as compromised signs
+ * nothing at all. Only a record signed by the listed key itself is taken, not by a subkey
+ * of it, so the fingerprint a record names is the one a list holds.
  */
 export async function verifySigned(
   signed: unknown,
   keys: VerifierKey[],
 ): Promise<SignedDocument | undefined> {
-  if (signed === null || typeof signed !== 'object') return undefined;
+  const message = await read(signed);
+  const by = await signedBy(signed);
 
-  const { alg, keyId: id, payload, signature } = signed as Record<string, unknown>;
-
-  if (
-    alg !== 'Ed25519' ||
-    typeof id !== 'string' ||
-    typeof payload !== 'string' ||
-    typeof signature !== 'string'
-  )
-    return undefined;
-
-  const bytes = decode(payload);
-  const mark = decode(signature);
-
-  if (!bytes || mark?.length !== 64) return undefined;
+  if (!message || !by || !Array.isArray(keys)) return undefined;
 
   for (const key of keys) {
-    const publicKey = key.alg === 'Ed25519' ? decode(key.publicKey) : undefined;
-
-    // The id is recomputed, so a key listed under another's id signs nothing in its name.
-    if (publicKey?.length !== 32 || key.id !== id || (await keyId(publicKey)) !== id) continue;
+    if (
+      key === null ||
+      typeof key !== 'object' ||
+      key.alg !== 'OpenPGP' ||
+      key.id !== by ||
+      typeof key.publicKey !== 'string' ||
+      key.publicKey.length > maxSignedLength
+    )
+      continue;
 
     try {
-      const imported = await crypto.subtle.importKey('raw', publicKey, 'Ed25519', false, [
-        'verify',
-      ]);
+      const { pgp, config } = await library();
+      const published = await pgp.readKey({ armoredKey: key.publicKey, config });
 
-      if (!(await crypto.subtle.verify('Ed25519', imported, mark, covered(bytes)))) continue;
+      // The id is recomputed, so a key listed under another's id signs nothing in its name.
+      if (published.getFingerprint().toUpperCase() !== key.id) continue;
 
-      const document = JSON.parse(new TextDecoder().decode(bytes)) as SignedDocument;
+      // Checked against the key itself with its subkeys taken off, so a subkey's signature
+      // cannot pass under the key's name whatever the signature says of who made it.
+      published.subkeys = [];
+
+      const { signatures, data } = await pgp.verify({
+        message,
+        verificationKeys: published,
+        config,
+      });
+
+      // Throws where the signature is not this key's, or the key was not fit to make it.
+      await signatures[0]!.verified;
+
+      const document = JSON.parse(data) as SignedDocument;
 
       return document?.type === 'verity-evidence' &&
         document.version === 1 &&

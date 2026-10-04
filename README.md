@@ -402,13 +402,14 @@ Two more narrow what a subject is offered, for a backend whose sites don't all w
 
 ## Signed records
 
-Evidence is normally believed because the verifier's own origin serves it. Set a signing key and each public record can also be downloaded as a signed file, which anyone can check later without the instance being up.
+Evidence is normally believed because the verifier's own origin serves it. Set a signing key and each public record can also be downloaded as a file signed with OpenPGP, which anyone can check later with `gpg`, without the instance being up.
 
 ```ts
 import { createVerity, generateSigningKey } from '@bkazemi/verity';
 
-// Make the key once and keep it with your other secrets.
-console.log(generateSigningKey());
+// Make the key once and keep it with your other secrets. It is an armored OpenPGP
+// private key, so it spans several lines.
+console.log(await generateSigningKey('verifier.example'));
 
 createVerity({
   // ...
@@ -418,22 +419,31 @@ createVerity({
 
 With a key set:
 
-- **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form.
-- **`GET <baseUrl>/keys`** lists the public keys. The Cloudflare Worker also serves them at `/.well-known/verity-keys.json`.
+- **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form.
+- **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verity-keys.json`.
 - **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
-- The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
+- The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
 - The approval step tells the holder that a saved signed record outlives removal.
 
 To check a file yourself:
+
+```sh
+curl https://verifier.example/api/verity/keys.asc | gpg --import
+gpg --verify verity-<id>.asc
+```
+
+Or in code, which runs in a browser too:
 
 ```ts
 import { verifySigned } from '@bkazemi/verity';
 
 const { keys } = await (await fetch('https://verifier.example/api/verity/keys')).json();
-const record = await verifySigned(JSON.parse(file), keys); // undefined if no key signed it
+const record = await verifySigned(file, keys); // undefined if no key signed it
 ```
 
-A signed record proves what the verifier claimed and when (`issuedAt`). It does not prove the claim was true, and it does not say whether the record still stands: ask `evidenceUrl` for that. Save the keys with the file if it has to outlive the verifier's domain. When you change keys, list the old public key in `retiredKeys` so what it signed still checks.
+A signed record proves what the verifier claimed and when (`issuedAt`). It does not prove the claim was true, and it does not say whether the record still stands: ask `evidenceUrl` for that. Save the keys with the file if it has to outlive the verifier's domain. When you change keys, list the old key from `/keys` in `retiredKeys` so what it signed still checks.
+
+`generateSigningKey()` makes an Ed25519 key in the OpenPGP form GnuPG reads, with no subkeys. Any OpenPGP key that signs with its primary key works as `signingKey`; one that is revoked, expired or passphrase-protected is refused. Checking is done by OpenPGP.js under the format's own rules: a key is judged as it stood when the record was signed, so an expired key, or one revoked as retired or superseded, still answers for records it signed before then, and a key revoked as compromised signs nothing at all.
 
 The Cloudflare Worker signs by default, with a key it makes and stores itself. Set the `SIGNING_KEY` secret to supply your own, or `SIGNING` to `off` to sign nothing.
 
@@ -490,4 +500,4 @@ The Postgres and example tests only run when `TEST_DATABASE_URL` is set. The oth
 
 ## License
 
-MIT. `pgpProvider()` uses [OpenPGP.js](https://github.com/openpgpjs/openpgpjs), which is LGPL-3.0-or-later.
+MIT. Signed records and `pgpProvider()` use [OpenPGP.js](https://github.com/openpgpjs/openpgpjs), which is LGPL-3.0-or-later. The badge script `verity.js` includes it, unmodified, to check signatures; its licence is in [`docs/licenses/openpgp.txt`](docs/licenses/openpgp.txt).

@@ -30,9 +30,9 @@ import {
   type Transaction,
   type VerifierKey,
   type Visibility,
-  signer,
   verifySigned,
 } from '../core/index.js';
+import { signer } from './signing.js';
 
 export const secret = () => randomBytes(32).toString('base64url');
 
@@ -74,8 +74,8 @@ export interface ServiceOptions {
   sendLimits?: { day?: number; address?: number };
   /**
    * Signs public records, so a saved signed record can be checked away from this
-   * instance. A key
-   * from `generateSigningKey()`, or a function giving one where it is read from storage.
+   * instance, with `gpg` or anything else that reads OpenPGP. A key from
+   * `generateSigningKey()`, or a function giving one where it is read from storage.
    * Unset signs nothing. Losing the key puts every record it signed out of reach of a
    * check, so keep it wherever the instance's other secrets are kept.
    */
@@ -159,6 +159,11 @@ export class VerityService {
     const current = await this.signer();
 
     return [...(current ? [current.key] : []), ...(this.options.retiredKeys ?? [])];
+  }
+
+  /** The same keys as one armored text, which is what `gpg --import` takes. */
+  async armoredKeys(): Promise<string> {
+    return (await this.keys()).map((key) => key.publicKey.trim()).join('\n\n') + '\n';
   }
 
   /**

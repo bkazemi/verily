@@ -1,4 +1,4 @@
-import { verifySigned, type Evidence, type SignedEvidence } from '../core/index.js';
+import { signedBy, verifySigned, type Evidence } from '../core/index.js';
 
 /**
  * What came of checking a record against its signed record in this browser: the same
@@ -8,13 +8,13 @@ import { verifySigned, type Evidence, type SignedEvidence } from '../core/index.
  * published keys. The record is then drawn from the signed one, so what stands beside the
  * mark is what was signed. `invalid` is a signed record that was read and no published key
  * signed, or one signed over some other record. `unchecked` is no verdict, and says why:
- * the check ran out of time, the signed record or the keys could not be read, or this
- * browser cannot check an Ed25519 signature. The first two are worth trying again.
+ * the check ran out of time, or the signed record or the keys could not be read. Either is
+ * worth trying again.
  */
 export type Signature =
   | { state: 'valid'; keyId: string }
   | { state: 'invalid' }
-  | { state: 'unchecked'; why: 'timeout' | 'unreadable' | 'unsupported' };
+  | { state: 'unchecked'; why: 'timeout' | 'unreadable' };
 
 /** One check per record as shown while it holds, since a card is drawn again at every read. */
 const checks = new Map<string, Promise<Signature>>();
@@ -37,18 +37,6 @@ let drawable: (record: unknown) => record is Evidence = (record): record is Evid
 /** Sets the test a signed record's contents must pass before a record is drawn from them. */
 export function drawSignedWith(test: (record: unknown) => record is Evidence): void {
   drawable = test;
-}
-
-let supported: Promise<boolean> | undefined;
-
-/** Whether this browser signs and checks Ed25519 at all, asked once. */
-function able(): Promise<boolean> {
-  supported ??= crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify']).then(
-    () => true,
-    () => false,
-  );
-
-  return supported;
 }
 
 /** A value written the same way whatever order its fields were set in. */
@@ -145,8 +133,6 @@ type Checked = Signature & { record?: Evidence };
 
 async function check(evidence: Evidence): Promise<Checked> {
   try {
-    if (!(await able())) return { state: 'unchecked', why: 'unsupported' };
-
     // Both are read from where the record itself lives, never from an address the record
     // names for the purpose: whoever handed the record over could name a signed record and
     // keys of their own. The verifier's keys sit beside its records, `<base>/keys` for
@@ -158,10 +144,10 @@ async function check(evidence: Evidence): Promise<Checked> {
     const keysUrl = new URL('../keys', evidence.evidenceUrl).href;
 
     const [signed, held] = await Promise.all([
-      limited<SignedEvidence | undefined>(async (signal) => {
+      limited<string | undefined>(async (signal) => {
         const served = await fetch(expected, { signal });
 
-        return served.ok ? ((await served.json()) as SignedEvidence) : undefined;
+        return served.ok ? await served.text() : undefined;
       }),
       keysAt(keysUrl),
     ]);
@@ -172,10 +158,14 @@ async function check(evidence: Evidence): Promise<Checked> {
       return { state: 'unchecked', why: 'unreadable' };
 
     let keys: unknown = held;
+    const by = await signedBy(signed);
+
+    // Something else was served in a signed record's place, which is no verdict on this one.
+    if (by === undefined) return { state: 'unchecked', why: 'unreadable' };
 
     // A verifier may have changed keys since its list was read. A key this list does not
     // have is looked for in the list as it is now, before the record is called unsigned.
-    if (!held.some((key: { id?: unknown } | null) => key?.id === signed?.keyId)) {
+    if (!held.some((key: { id?: unknown } | null) => key?.id === by)) {
       keys = await keysAt(keysUrl, true);
 
       if (!Array.isArray(keys))
@@ -210,7 +200,7 @@ async function check(evidence: Evidence): Promise<Checked> {
 
     // Signed, but not something a page may draw: it is shown as read, with no mark.
     return drawable(record)
-      ? { state: 'valid', keyId: signed.keyId, record }
+      ? { state: 'valid', keyId: by, record }
       : { state: 'unchecked', why: 'unreadable' };
   } catch {
     return { state: 'unchecked', why: 'unreadable' };
