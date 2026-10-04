@@ -1385,7 +1385,12 @@ const pillText = (host: Element) =>
   host.all().find((e) => e.className.split(' ').includes('badge'))!.textContent;
 
 /** A page with the badge script loaded, answering each connection id from `served`. */
-async function groupHarness(served: Record<string, unknown>, hold?: () => Promise<void>) {
+async function groupHarness(
+  served: Record<string, unknown>,
+  hold?: () => Promise<void>,
+  /** Stands in for the page's timers, where a test cannot wait out a real one. */
+  timer: typeof setTimeout = setTimeout,
+) {
   const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
   const body = new Element();
   const asked: string[] = [];
@@ -1428,7 +1433,7 @@ async function groupHarness(served: Record<string, unknown>, hold?: () => Promis
     URL,
     Date,
     Promise,
-    setTimeout,
+    setTimeout: timer,
     clearTimeout,
     // The window a pill's panel is kept inside, and what it listens to while open.
     innerWidth: 1000,
@@ -2034,20 +2039,19 @@ test('a signed record says so on its card, and says how checking it went', async
 
     return {
       text: card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!,
-      link: card.links().find((link) => link.textContent.startsWith('signed')),
+      link: card.links().find((link) => link.textContent.startsWith('sign')),
       alert: card.all().find((found) => found.attributes['role'] === 'alert'),
+      caution: card.all().find((found) => found.className === 'caution'),
     };
   };
-
-  // Each signed card says so in a word that opens the verifier's page at its signature.
-  assert.equal(said('dave').text, ' · signed');
-  assert.equal(said('dave').link!.href, `${unread.evidenceUrl}#signed`);
 
   // A record from a verifier that signs nothing says nothing.
   assert.equal(said('erin').text, '');
 
   const settled = () =>
-    said('alice').text === ' · signed ✓' && ['bob', 'carol'].every((handle) => said(handle).alert);
+    said('alice').text === ' · signed ✓' &&
+    said('dave').text === ' · signed' &&
+    ['bob', 'carol'].every((handle) => said(handle).alert);
 
   for (let i = 0; i < 100 && !settled(); i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -2068,8 +2072,12 @@ test('a signed record says so on its card, and says how checking it went', async
     assert.equal(said(handle).link, undefined);
   }
 
-  // A signed record that could not be read is no verdict either way.
+  // A signed record that could not be read is no verdict either way: the card says it is
+  // signed, with a warning in place of a tick that says on hover why it was not checked.
   assert.equal(said('dave').text, ' · signed');
+  assert.equal(said('dave').link!.href, `${unread.evidenceUrl}#signed`);
+  assert.equal(said('dave').caution!.title, 'The signature could not be read, retrying.');
+  assert.equal(said('alice').caution, undefined);
 
   // A record whose signature failed is not called verified, on its card or in the pill.
   const state = (handle: string) =>
@@ -2115,6 +2123,150 @@ test('a signed record says so on its card, and says how checking it went', async
     verity.presentConnections(elsewhere, [linked('first', 'alice', 100, { signedUrl })]);
     assert.equal(elsewhere.textContent, 'Unavailable');
   }
+});
+
+test('a card says it is checking a signature until the check comes back', async () => {
+  const mine = await signer(generateSigningKey());
+
+  const good = linked('good', 'alice', 100, {
+    signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
+  });
+
+  const {
+    status: _status,
+    signedUrl: _signedUrl,
+    ...rest
+  } = good as typeof good & {
+    signedUrl: string;
+  };
+
+  let release = () => {};
+
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const { verity, cards } = await groupHarness(
+    {
+      keys: { keys: [mine.key] },
+      good: await mine.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never),
+    },
+    () => held,
+  );
+
+  const host = new Element();
+
+  verity.presentConnections(host, [good]);
+
+  const opened = await cards(host);
+
+  const card = () => opened.dialog.all().filter((found) => found.className.includes('account'))[1]!;
+
+  const waiting = () =>
+    card()
+      .all()
+      .filter((found) => found.attributes['role'] === 'status');
+
+  const said = () => card().textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!;
+
+  const reachable = () =>
+    card().children.filter((part) => !(part as unknown as { inert?: boolean }).inert);
+
+  // Nothing has answered yet. The whole card is veiled and out of reach, under a word
+  // saying its signature is being checked: nothing on it is read before it is borne out.
+  assert.equal(card().className, 'account veiled');
+
+  assert.deepEqual(
+    reachable().map((part) => part.textContent),
+    ['Checking signature…'],
+  );
+
+  assert.equal(waiting().length, 1);
+  assert.equal(said(), '');
+
+  release();
+
+  for (let i = 0; i < 100 && said() !== ' · signed ✓'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(said(), ' · signed ✓');
+  assert.equal(card().className, 'account');
+  assert.equal(reachable().length, card().children.length);
+  assert.equal(waiting().length, 0);
+});
+
+test('a signature check that never answers gives the card back, says why, and tries again', async () => {
+  const mine = await signer(generateSigningKey());
+
+  const good = linked('good', 'alice', 100, {
+    signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
+  });
+
+  const {
+    status: _status,
+    signedUrl: _signedUrl,
+    ...rest
+  } = good as typeof good & {
+    signedUrl: string;
+  };
+
+  const waits: number[] = [];
+  let answering = false;
+
+  // The verifier does not answer at first. The five-second limit is run in a moment, and
+  // no other timer is changed.
+  const { verity, cards, polls } = await groupHarness(
+    {
+      keys: { keys: [mine.key] },
+      good: await mine.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never),
+    },
+    () => (answering ? Promise.resolve() : new Promise(() => {})),
+    ((handler: () => void, ms = 0) => {
+      waits.push(ms);
+
+      return setTimeout(handler, ms === 5000 ? 30 : ms);
+    }) as typeof setTimeout,
+  );
+
+  const host = new Element();
+
+  verity.presentConnections(host, [good]);
+
+  const opened = await cards(host);
+  const card = () => opened.dialog.all().filter((found) => found.className.includes('account'))[1]!;
+  const said = () => card().textContent.match(/via: verifier\.test([^A-Z]*)/)![1];
+
+  const caution = () =>
+    card()
+      .all()
+      .find((found) => found.className === 'caution');
+
+  assert.equal(card().className, 'account veiled');
+
+  for (let i = 0; i < 100 && card().className !== 'account'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+  // No verdict: the card is in reach again, as the record was read. It is signed, and a
+  // warning where the tick would be says on hover that the check ran out of time.
+  assert.ok(waits.includes(5000));
+  assert.equal(card().className, 'account');
+  assert.ok(card().children.every((part) => !(part as unknown as { inert?: boolean }).inert));
+  assert.equal(said(), ' · signed');
+  assert.equal(caution()!.title, 'Signature check timed out, retrying.');
+  assert.match(card().textContent, /Verified/);
+
+  // The verifier comes back, and the dialog's next read checks again without being reopened.
+  answering = true;
+
+  for (const poll of polls) poll();
+
+  for (let i = 0; i < 100 && said() !== ' · signed ✓'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(said(), ' · signed ✓');
+  assert.equal(caution(), undefined);
+  // The card was never veiled again to do it.
+  assert.equal(card().className, 'account');
 });
 
 test('a signature mark stands only beside what the signed record says', async () => {
