@@ -21,8 +21,8 @@ import {
   type Instruction,
   type LocalAccount,
   type Provider,
+  signedBy,
   type SignedDocument,
-  type SignedEvidence,
   type Visibility,
 } from '../core/index.js';
 import { codeAttempts, VerityService, Unavailable, type ServiceOptions } from './service.js';
@@ -44,6 +44,8 @@ export { githubGistProvider } from './github-gist.js';
 export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './link.js';
 
 export { pgpProvider } from './pgp.js';
+
+export { generateSigningKey, signer } from './signing.js';
 
 export {
   emailProvider,
@@ -405,7 +407,7 @@ function evidencePage(
         ['Sharing link expires', e.linkExpiresAt],
       ]) +
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
-    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with key ${escape(keyId)}` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
+    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with OpenPGP key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
@@ -448,7 +450,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
         ['Approved', d.approvedAt],
         ['Valid until', d.expiresAt],
       ]) +
-      `<p class="fine">Signing key ${escape(keyId)}.</p>
+      `<p class="fine">Signing key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>.</p>
     <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
   );
 }
@@ -1016,6 +1018,9 @@ export function createVerity(options: ServerOptions) {
           return response;
         }
 
+        // The same keys as a file `gpg --import` reads.
+        if (path === '/keys.asc' && signs) return plain(await service.armoredKeys());
+
         if (path === '/check' && signs)
           return html(
             page(
@@ -1044,11 +1049,10 @@ export function createVerity(options: ServerOptions) {
           const id = path.slice(13);
 
           if (url.searchParams.get('format') === 'signed') {
-            const response = json(await service.signed(id));
+            const response = plain(await service.signed(id));
 
-            response.headers.set('Access-Control-Allow-Origin', '*');
-            // Kept as a file: the signature is over these bytes, so they are saved as served.
-            response.headers.set('Content-Disposition', `attachment; filename="verity-${id}.json"`);
+            // Kept as a file, which is what `gpg --verify` is given.
+            response.headers.set('Content-Disposition', `attachment; filename="verity-${id}.asc"`);
 
             return response;
           }
@@ -1079,13 +1083,12 @@ export function createVerity(options: ServerOptions) {
 
         if (path === '/check' && signs) {
           try {
-            const signed: unknown = JSON.parse(data.record ?? '');
+            const signed = data.record ?? '';
             const document = await service.checked(signed);
 
-            if (document)
-              return html(checkedPage(document, (signed as SignedEvidence).keyId, prefix));
+            if (document) return html(checkedPage(document, (await signedBy(signed))!, prefix));
           } catch {
-            // Not JSON, or a record this build cannot draw: neither is one it can vouch for.
+            // A record this build cannot draw is not one it can vouch for.
           }
 
           return html(

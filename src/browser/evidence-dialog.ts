@@ -330,14 +330,11 @@ function signedMark(evidence: Account, later: Later) {
     // word in place of a tick, and why is said on hover. A check that only ran out of time
     // or could not read what it needed is made again when the dialog next reads.
     const why = results.find((result) => result.state === 'unchecked');
-    const again = why?.state === 'unchecked' && why.why !== 'unsupported';
 
     const reason =
-      why?.state !== 'unchecked' || why.why === 'unreadable'
-        ? `The signature could not be read${again ? ', retrying' : ''}.`
-        : why.why === 'timeout'
-          ? 'Signature check timed out, retrying.'
-          : 'This browser cannot check signatures.';
+      why?.state === 'unchecked' && why.why === 'timeout'
+        ? 'Signature check timed out, retrying.'
+        : `The signature could not be read${why ? ', retrying' : ''}.`;
 
     const caution = node('span', '', 'caution');
 
@@ -349,7 +346,7 @@ function signedMark(evidence: Account, later: Later) {
     link.title = `${reason} ${see}`;
     mark.replaceChildren(document.createTextNode(' · '), link, caution);
 
-    if (again) later(() => void signatures(evidence).then(settle));
+    if (why) later(() => void signatures(evidence).then(settle));
   };
 
   // Nothing is said until the check comes back: the card is veiled until then.

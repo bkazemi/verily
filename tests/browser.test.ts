@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
-import { generateSigningKey, signer } from '../src/core/index.js';
+import { generateSigningKey, signer } from '../src/server/signing.js';
 
 class Element {
   children: Element[] = [];
@@ -1489,8 +1489,12 @@ async function groupHarness(
         return created;
       },
     },
-    // What checking a signed record needs of a browser.
+    // What checking a signed record needs of a browser. The byte arrays are this
+    // process's own, as its crypto and its text encoder hand back, so OpenPGP.js is given
+    // one kind of them as it would be on a page.
     crypto,
+    Uint8Array,
+    ArrayBuffer,
     TextEncoder,
     TextDecoder,
     atob,
@@ -1503,10 +1507,18 @@ async function groupHarness(
       // Held back on request, to model an answer that arrives after the page has moved on.
       await hold?.();
 
-      return { ok: id in served, json: async () => served[id], headers: { get: () => null } };
+      return {
+        ok: id in served,
+        json: async () => served[id],
+        // A signed record is served as the text it is.
+        text: async () => served[id],
+        headers: { get: () => null },
+      };
     },
   });
 
+  // A page's own name for itself, by which OpenPGP.js finds the crypto it is given.
+  vm.runInContext('globalThis.self = globalThis', context);
   vm.runInContext(asset, context);
 
   const verity = context.Verity as {
@@ -1999,8 +2011,8 @@ test('accounts of different subjects, or none readable, are not presented as one
 });
 
 test('a signed record says so on its card, and says how checking it went', async () => {
-  const mine = await signer(generateSigningKey());
-  const other = await signer(generateSigningKey());
+  const mine = await signer(await generateSigningKey('verifier.test'));
+  const other = await signer(await generateSigningKey('verifier.test'));
   const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
 
   const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
@@ -2126,7 +2138,7 @@ test('a signed record says so on its card, and says how checking it went', async
 });
 
 test('a card says it is checking a signature until the check comes back', async () => {
-  const mine = await signer(generateSigningKey());
+  const mine = await signer(await generateSigningKey('verifier.test'));
 
   const good = linked('good', 'alice', 100, {
     signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
@@ -2196,7 +2208,7 @@ test('a card says it is checking a signature until the check comes back', async 
 });
 
 test('a signature check that never answers gives the card back, says why, and tries again', async () => {
-  const mine = await signer(generateSigningKey());
+  const mine = await signer(await generateSigningKey('verifier.test'));
 
   const good = linked('good', 'alice', 100, {
     signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
@@ -2270,8 +2282,8 @@ test('a signature check that never answers gives the card back, says why, and tr
 });
 
 test('a signature mark stands only beside what the signed record says', async () => {
-  const mine = await signer(generateSigningKey());
-  const next = await signer(generateSigningKey());
+  const mine = await signer(await generateSigningKey('verifier.test'));
+  const next = await signer(await generateSigningKey('verifier.test'));
   const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
 
   const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
@@ -2406,7 +2418,11 @@ test('a signature mark stands only beside what the signed record says', async ()
   // A key no list has is asked after once more, and then the signed record fails.
   const forged = linked('forged', 'carol', 300, { signedUrl: `${at('forged')}?format=signed` });
 
-  served['forged'] = await signedBy(forged, await signer(generateSigningKey()));
+  served['forged'] = await signedBy(
+    forged,
+    await signer(await generateSigningKey('verifier.test')),
+  );
+
   assert.deepEqual((await marks([forged])).accounts, [['Unconfirmed', ' · invalid signature']]);
 });
 

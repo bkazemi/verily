@@ -186,9 +186,18 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     const { keys } = (await published.json()) as { keys: VerifierKey[] };
 
     assert.equal(keys.length, 1);
+    // An OpenPGP key under the verifier's own name, as `gpg --import` takes it.
+    assert.equal(keys[0]!.alg, 'OpenPGP');
+    assert.match(keys[0]!.publicKey, /^-----BEGIN PGP PUBLIC KEY BLOCK-----/);
+
+    assert.equal(
+      await (await request('/api/verity/keys.asc')).text(),
+      `${keys[0]!.publicKey.trim()}\n`,
+    );
+
     assert.deepEqual(await (await request('/api/verity/keys')).json(), { keys });
 
-    const signed = await (await request(`/api/verity/connections/${id}?format=signed`)).json();
+    const signed = await (await request(`/api/verity/connections/${id}?format=signed`)).text();
     const checked = (await verifySigned(signed, keys))!;
 
     assert.equal(checked.id, id);

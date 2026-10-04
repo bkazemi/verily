@@ -1,11 +1,5 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
-import {
-  externalName,
-  generateSigningKey,
-  localSide,
-  statusLabel,
-  type Evidence,
-} from '../src/core/index.js';
+import { externalName, localSide, statusLabel, type Evidence } from '../src/core/index.js';
 import { logo } from '../src/logo.js';
 import { escape } from '../src/server/escape.js';
 import { styleVersion } from '../src/server/style.js';
@@ -13,6 +7,7 @@ import {
   createVerity,
   discordProvider,
   emailProvider,
+  generateSigningKey,
   resendSender,
   youtubeProvider,
   githubLinkProvider,
@@ -54,7 +49,7 @@ export interface Env {
   /**
    * Public records are signed unless this is `off`. The key is made on first use and kept
    * in the object's storage, or is the secret `SIGNING_KEY` where one is set: a key from
-   * `generateSigningKey()`, which then outlives the deployment.
+   * `generateSigningKey()`, armored, which then outlives the deployment.
    */
   SIGNING?: string;
   SIGNING_KEY?: string;
@@ -766,13 +761,13 @@ export class VerityStore {
 
   /** This installation's own signing key, made the first time a record is signed. */
   private async signingKey(): Promise<string> {
-    const kept = await this.ctx.storage.get<string>('signing/key');
+    const kept = await this.ctx.storage.get<string>('signing/pgp');
 
     if (kept) return kept;
 
-    const made = generateSigningKey();
+    const made = await generateSigningKey(new URL(this.env.PUBLIC_ORIGIN).host);
 
-    await this.ctx.storage.put('signing/key', made);
+    await this.ctx.storage.put('signing/pgp', made);
 
     return made;
   }
