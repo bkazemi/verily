@@ -1,6 +1,7 @@
 import type { Evidence } from '../core/index.js';
 import {
   badgeShown,
+  quietBadge,
   renderBadge,
   renderBadgeMessage,
   renderBadgePending,
@@ -131,6 +132,41 @@ function details(element: HTMLElement) {
   }
 }
 
+/** How a pill of several accounts names them, where the page that placed it says. */
+export interface Arrangement {
+  /** Every account on a row of its own, in a pill as tall as its rows. */
+  stacked?: boolean;
+  /**
+   * Whether a short pill opens a panel naming its accounts while a pointer rests on it or
+   * the keyboard is on it. On unless this is false. A stacked pill has nothing to open.
+   */
+  peek?: boolean;
+}
+
+/**
+ * Hosts whose pill is stacked, and hosts whose pill opens no panel, where the page asked
+ * for either. Kept here so every later refresh of the host draws it the same way.
+ */
+const stackedHosts = new WeakSet<HTMLElement>();
+const quietHosts = new WeakSet<HTMLElement>();
+
+/**
+ * How many accounts a pill names before it counts the rest. A stacked pill pays for each
+ * row in the page's height. A panel floats over the page and pays nothing, but it cannot
+ * be scrolled, so it stops while it still fits a small window.
+ */
+const stackedAccounts = 4;
+const peekedAccounts = 8;
+
+/** Records how a host's pill is arranged, from what the page last said. */
+function arrange(element: HTMLElement, { stacked, peek }: Arrangement) {
+  if (stacked) stackedHosts.add(element);
+  else stackedHosts.delete(element);
+
+  if (peek === false) quietHosts.add(element);
+  else quietHosts.delete(element);
+}
+
 const live = (evidence: Evidence) =>
   evidence.status === 'verified' && evidence.expiresAt > Date.now();
 
@@ -140,7 +176,7 @@ const live = (evidence: Evidence) =>
  * way, or revoked once and connected again. Those are one account and get one card.
  *
  * Where any of an account's records is verified now, the earliest of those speaks for it,
- * and the ways the others show it are listed beneath as further methods. Its lapsed
+ * and the ways the others show it are listed beneath as other methods. Its lapsed
  * records are left out, having been replaced. Where none is verified, the latest one says
  * what became of it. Either way the account keeps the place of its first connection.
  * Each entry names every record of the account not yet revoked, shown or not, so removing
@@ -198,9 +234,20 @@ function presentGroup(element: HTMLElement, records: Evidence[], load: () => Pro
   latestGroup.set(element, records);
   loaders.set(element, load);
 
+  // The accounts the count stands for are named too, as far as there is room: in rows of
+  // the pill where it is stacked, and otherwise in the panel a short pill opens.
+  const stacked = stackedHosts.has(element);
+  const peek = !stacked && !quietHosts.has(element);
+
   const badge = renderBadge(element, lead, {
     more: Math.max(verified.length - 1, 0),
     linked: lead.visibility === 'public',
+    rows: stacked
+      ? verified.slice(1, stackedAccounts)
+      : peek
+        ? verified.slice(1, peekedAccounts)
+        : [],
+    peek,
   });
 
   // Null means the pill on screen is unchanged. Its handler stands, and reads the above.
@@ -232,8 +279,14 @@ function oneSubject(records: unknown): Evidence[] | undefined {
  * them in the page for the readers it chose. Nothing here can check them again, so the
  * page is what vouches for them, and an unlisted one is drawn with no link to follow.
  */
-export function presentConnections(element: HTMLElement, records: unknown): void {
+export function presentConnections(
+  element: HTMLElement,
+  records: unknown,
+  arrangement: Arrangement = {},
+): void {
   const subject = oneSubject(records);
+
+  arrange(element, arrangement);
 
   // Nothing is awaited here, but a read still out for this host must not land on top.
   begin(element);
@@ -573,8 +626,13 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
      * read is left out, since the rest are still true without it; with none left, or with
      * records of more than one subject, the pill says it is unavailable.
      */
-    async mountBadges(element: HTMLElement, { connectionIds }: { connectionIds: string[] }) {
+    async mountBadges(
+      element: HTMLElement,
+      { connectionIds, ...arrangement }: { connectionIds: string[] } & Arrangement,
+    ) {
       const ids = [...new Set(connectionIds)];
+
+      arrange(element, arrangement);
 
       if (ids.length === 1) return client.mountBadge(element, { connectionId: ids[0]! });
 
@@ -810,6 +868,8 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
         'connections',
         'handoff-url',
         'connect',
+        'stacked',
+        'peek',
       ];
 
       private handed?: unknown;
@@ -848,6 +908,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
 
       disconnectedCallback() {
         clearInterval(this.timer);
+        quietBadge(this);
       }
 
       attributeChangedCallback() {
@@ -881,6 +942,11 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
 
         const written = this.getAttribute('connections');
         const handoffUrl = this.getAttribute('handoff-url');
+
+        const arrangement = {
+          stacked: this.getAttribute('stacked') !== null,
+          peek: this.getAttribute('peek') !== 'off',
+        };
 
         // The holder's own badge, where the page says so: its dialog connects another
         // account, renews one and removes one, through the backend named. The host hears
@@ -922,7 +988,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
               records = undefined;
             }
 
-          presentConnections(this, records);
+          presentConnections(this, records, arrangement);
 
           return;
         }
@@ -930,7 +996,8 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
         const ids = (this.getAttribute('connection-ids') ?? '').split(/\s+/).filter(Boolean);
 
         if (ids.length) {
-          if (backendUrl) void init({ backendUrl }).mountBadges(this, { connectionIds: ids });
+          if (backendUrl)
+            void init({ backendUrl }).mountBadges(this, { connectionIds: ids, ...arrangement });
 
           return;
         }

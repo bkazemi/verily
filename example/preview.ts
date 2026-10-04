@@ -9,6 +9,16 @@ const page = await readFile(new URL('./preview.html', import.meta.url));
 const port = Number(process.env.PREVIEW_PORT ?? 3001);
 const origin = `http://localhost:${port}`;
 
+/**
+ * Extra accounts of the same subject, each a sign-in, so one tile has more of them than
+ * a stacked badge has rows for.
+ */
+const extra: Record<string, { provider: string; providerName: string; handle: string }> = {
+  discord: { provider: 'discord', providerName: 'Discord', handle: 'joe' },
+  youtube: { provider: 'youtube', providerName: 'YouTube', handle: 'joemarshall' },
+  work: { provider: 'github', providerName: 'GitHub', handle: 'joe-at-work' },
+};
+
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', origin);
 
@@ -36,7 +46,12 @@ const server = createServer((request, response) => {
   if (url.pathname.startsWith('/api/verity/connections/')) {
     const id = url.pathname.split('/').at(-1)!;
 
-    if (!['current', 'signed-in', 'signed', 'unconfirmed', 'expired', 'revoked'].includes(id)) {
+    if (
+      !['current', 'signed-in', 'signed', 'mailed', 'unconfirmed', 'expired', 'revoked'].includes(
+        id,
+      ) &&
+      !extra[id]
+    ) {
       response.writeHead(404);
       response.end('Unavailable');
 
@@ -75,13 +90,25 @@ const server = createServer((request, response) => {
               handle: 'joe@joesite.example',
               profileUrl: `${origin}/demo`,
             }
-          : { id: 'demo-account', handle: 'Joe', profileUrl: `${origin}/demo` },
-      provider: id === 'signed' ? 'openpgp' : 'github',
-      providerName: id === 'signed' ? 'OpenPGP' : 'GitHub',
+          : id === 'mailed'
+            ? {
+                id: 'joe@joesite.example',
+                kind: 'mailbox',
+                handle: 'joe@joesite.example',
+                profileUrl: 'mailto:joe@joesite.example',
+              }
+            : extra[id]
+              ? { id: `demo-${id}`, handle: extra[id].handle, profileUrl: `${origin}/demo` }
+              : { id: 'demo-account', handle: 'Joe', profileUrl: `${origin}/demo` },
+      provider:
+        extra[id]?.provider ?? (id === 'signed' ? 'openpgp' : id === 'mailed' ? 'email' : 'github'),
+      providerName:
+        extra[id]?.providerName ??
+        (id === 'signed' ? 'OpenPGP' : id === 'mailed' ? 'Email' : 'GitHub'),
       siteName: 'JoeSite',
       verifierName: 'JoeSite',
       visibility: 'public',
-      status: ['current', 'signed-in', 'signed'].includes(id)
+      status: ['current', 'signed-in', 'signed', 'mailed', ...Object.keys(extra)].includes(id)
         ? 'verified'
         : id === 'revoked'
           ? 'revoked'
@@ -90,7 +117,12 @@ const server = createServer((request, response) => {
             : 'expired',
       // Each was first connected on a different day, though all were renewed yesterday:
       // the tile showing several as one pill orders them by this.
-      connectedAt: Date.now() - 86400000 * ({ 'signed-in': 30, current: 20, signed: 10 }[id] ?? 40),
+      connectedAt:
+        Date.now() -
+        86400000 *
+          ({ 'signed-in': 30, current: 20, signed: 10, mailed: 5, discord: 4, youtube: 3, work: 2 }[
+            id
+          ] ?? 40),
       authenticatedAt: Date.now() - 86400000,
       approvedAt: Date.now() - 86400000,
       visibilityApprovedAt: Date.now() - 86400000,
@@ -105,22 +137,25 @@ const server = createServer((request, response) => {
         external:
           id === 'signed'
             ? [signature]
-            : ['current', 'unconfirmed'].includes(id)
-              ? [proof]
-              : [
-                  { by: 'provider', method: 'oauth', confirmedAt: Date.now() - 86400000 },
-                  ...(id === 'signed-in'
-                    ? [
-                        {
-                          by: 'provider' as const,
-                          method: 'backlink' as const,
-                          artifactUrl: `${origin}/demo`,
-                          expect: 'https://joesite.example/joe',
-                          confirmedAt: Date.now() - 3600000,
-                        },
-                      ]
-                    : []),
-                ],
+            : id === 'mailed'
+              ? // A mailed link or code, which like a sign-in publishes nothing.
+                [{ by: 'provider', method: 'code', confirmedAt: Date.now() - 86400000 }]
+              : ['current', 'unconfirmed'].includes(id)
+                ? [proof]
+                : [
+                    { by: 'provider', method: 'oauth', confirmedAt: Date.now() - 86400000 },
+                    ...(id === 'signed-in'
+                      ? [
+                          {
+                            by: 'provider' as const,
+                            method: 'backlink' as const,
+                            artifactUrl: `${origin}/demo`,
+                            expect: 'https://joesite.example/joe',
+                            confirmedAt: Date.now() - 3600000,
+                          },
+                        ]
+                      : []),
+                  ],
       },
     };
 

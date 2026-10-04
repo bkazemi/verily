@@ -5,12 +5,14 @@ import { providerMark } from './provider-mark.js';
 const styles = `
   :host { display: inline-block; max-width: 100%; vertical-align: middle; }
   * { box-sizing: border-box; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 5px;
+  .badge, .peek {
     border: 1px solid var(--verity-border, #dce2e0); border-radius: 6px;
     background: var(--verity-surface, #fff); color: var(--verity-text, #202c29);
     font: var(--verity-font-size, 13px)/1.35
       var(--verity-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 5px;
     text-decoration: none;
   }
   button.badge { margin: 0; cursor: pointer; }
@@ -30,6 +32,26 @@ const styles = `
     border: 2px solid currentColor; opacity: .3;
   }
   .divider { flex-shrink: 0; width: 1px; height: 12px; background: var(--verity-border, #dce2e0); }
+  /* Several accounts, one to a row. The mark stays beside them and the rule runs their height. */
+  .badge.stacked { align-items: stretch; padding: 5px 8px 5px 6px; text-align: left; }
+  .stacked .mark { align-self: center; }
+  .stacked .divider { height: auto; }
+  .rows { display: grid; gap: 4px; min-width: 0; }
+  .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  /*
+   * The accounts behind a short pill's count, opened beside it. Shut unless the browser
+   * has it open as a popover, so one without popovers never shows it at all.
+   */
+  .peek {
+    display: none; position: fixed; inset: auto; margin: 0; padding: 8px 10px;
+    width: max-content; max-width: min(320px, calc(100vw - 16px));
+    border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); pointer-events: none;
+    overflow: hidden;
+  }
+  /* A row taken out to fit the window: its own display would otherwise keep it showing. */
+  .row[hidden] { display: none; }
+  .peek:popover-open { display: block; }
+  .peek .via { display: block; margin-top: 6px; font-size: 11px; color: var(--verity-muted, #65726c); }
   .provider { display: block; flex-shrink: 0; width: 14px; height: 14px; }
   .expired .icon { color: #815a12; background: #fbefce; }
   .revoked .icon, .message .icon { color: #626d69; background: #edf0ee; }
@@ -53,6 +75,9 @@ interface Frame {
   root: ShadowRoot;
   pill?: HTMLElement;
   mark?: SVGSVGElement;
+  /** The panel a short pill opens beside itself, and what shuts it, while it has one. */
+  peek?: HTMLElement;
+  quiet?: () => void;
 }
 
 /** The shadow host already built inside an element, kept so refreshes reuse it. */
@@ -119,7 +144,21 @@ function frame(
   ])
     frame.pill.removeAttribute(attribute);
 
-  frame.pill.onclick = null;
+  // A panel belongs to the pill it was drawn for, so it goes with what that pill showed.
+  frame.quiet?.();
+  frame.quiet = undefined;
+  frame.peek?.remove();
+  frame.peek = undefined;
+
+  frame.pill.onclick =
+    frame.pill.onpointerenter =
+    frame.pill.onpointerleave =
+    frame.pill.onpointerdown =
+    frame.pill.onfocus =
+    frame.pill.onblur =
+    frame.pill.onkeydown =
+      null;
+
   frame.pill.className = `badge ${state}`;
   frame.mark ??= verificationMark('pending');
 
@@ -154,10 +193,14 @@ function renderKey(
   label: string,
   more: number,
   linked: boolean,
+  rows: Evidence[],
+  peek: boolean,
 ): string {
   return JSON.stringify([
     more,
     linked,
+    peek,
+    rows.map((row) => [row.provider, row.providerName, externalName(row.external)]),
     evidence.provider,
     evidence.providerName,
     externalName(evidence.external),
@@ -226,14 +269,24 @@ export function renderBadgeMessage(element: HTMLElement, message: string): void 
  * Draws the pill, or returns null when the host already shows exactly this evidence:
  * a periodic refresh that changes nothing must not disturb what is on screen.
  *
- * `more` is how many further accounts of the same subject stand behind the one shown, said
+ * `more` is how many other accounts of the same subject stand behind the one shown, said
  * as a count beside it. `linked` is whether the record has a page of its own a reader can
  * open: an unlisted one has none, so its pill is a button and never a link to nowhere.
+ *
+ * `rows` are those of the other accounts to name, in order. Stacked, each has a row of
+ * its own in the pill, which is then as tall as its rows. Otherwise the pill stays short
+ * and, with `peek`, names them in a panel that opens beside it while a pointer rests on it
+ * or the keyboard is on it. Either way the accounts past the rows are a count.
  */
 export function renderBadge(
   element: HTMLElement,
   evidence: Evidence,
-  { more = 0, linked = true }: { more?: number; linked?: boolean } = {},
+  {
+    more = 0,
+    linked = true,
+    rows = [],
+    peek = false,
+  }: { more?: number; linked?: boolean; rows?: Evidence[]; peek?: boolean } = {},
 ): HTMLElement | null {
   const provider = evidence.providerName;
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
@@ -241,13 +294,16 @@ export function renderBadge(
 
   const label = statusLabel(evidence, Date.now());
 
-  const key = renderKey(evidence, current, label, more, linked);
+  const key = renderKey(evidence, current, label, more, linked, rows, peek);
 
   if (intact(element) && shown.get(element) === key) return null;
 
   const handle = externalName(evidence.external);
   const { pill: badge, mark } = frame(element, state, !linked);
-  const others = more ? ` and ${more} more` : '';
+  const unnamed = Math.max(more - rows.length, 0);
+
+  const named = rows.map((row) => `, ${row.providerName} ${externalName(row.external)}`).join('');
+  const others = `${named}${unnamed ? ` and ${unnamed} more` : ''}`;
 
   paintMark(mark, current ? 'current' : 'inactive');
 
@@ -261,18 +317,49 @@ export function renderBadge(
     `${provider} ${handle}${others}: ${label} | via: ${evidence.verifierName} | inspect verification`,
   );
 
-  // The provider and handle are already visible in the pill itself.
-  badge.title = `${label} | via: ${evidence.verifierName} | Inspect verification for ${evidence.local.label}`;
+  const peeked = peek && rows.length > 0;
+
+  // The provider and handle are already visible in the pill itself. A pill with a panel
+  // says the rest there, and a tooltip of the browser's own would only sit on top of it.
+  if (!peeked)
+    badge.title = `${label} | via: ${evidence.verifierName} | Inspect verification for ${evidence.local.label}`;
+
   const divider = span('divider', '');
 
   divider.setAttribute('aria-hidden', 'true');
-  const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
   // A provider with no mark of its own is named instead, so the pill never drops it.
-  badge.append(divider, logo ?? span('name', provider), span('name', handle));
+  const account = (shown: Evidence) => [
+    providerMark(shown.provider, shown.attestations.external[0].method) ??
+      span('name', shown.providerName),
+    span('name', externalName(shown.external)),
+  ];
 
-  // The accounts behind the one shown, as a number. Each has its own card in the dialog.
-  if (more) badge.append(span('more', `+${more}`));
+  /** The account shown and those named after it, one to a row, then the rest as a count. */
+  const list = () => {
+    const listed = span('rows', '');
+
+    for (const shown of [evidence, ...rows]) {
+      const row = span('row', '');
+
+      row.append(...account(shown));
+      listed.append(row);
+    }
+
+    if (unnamed) listed.append(span('row more', `+${unnamed} more`));
+
+    return listed;
+  };
+
+  if (rows.length && !peek) {
+    badge.className += ' stacked';
+    badge.append(divider, list());
+  } else {
+    badge.append(divider, ...account(evidence));
+
+    // The accounts behind the one shown, as a number. Each has its own card in the dialog.
+    if (more) badge.append(span('more', `+${more}`));
+  }
 
   if (!current) {
     const icon = span('icon', '');
@@ -283,9 +370,171 @@ export function renderBadge(
     badge.append(span('label', label), icon);
   }
 
+  if (peeked) {
+    const panel = document.createElement('div');
+
+    panel.className = 'peek';
+    // The pill's own label already names every account here, so this is for the eye only.
+    panel.setAttribute('aria-hidden', 'true');
+    const listed = list();
+
+    panel.append(listed, span('via', `${label} | via: ${evidence.verifierName}`));
+    peeks(element, badge, panel, listed, unnamed);
+  }
+
   shown.set(element, key);
 
   return badge;
+}
+
+/**
+ * Shuts a host's panel and lets go of what it was listening for. For a host leaving the
+ * page: the browser shuts its popover then, but the wait for a scroll would stay behind.
+ */
+export function quietBadge(element: HTMLElement): void {
+  frames.get(element)?.quiet?.();
+}
+
+/** How long a pointer rests on a pill before its panel opens, so passing over opens nothing. */
+const peekDelayMs = 150;
+
+/**
+ * Opens a pill's panel while a mouse rests on it or the keyboard is on it, and shuts it
+ * the moment either leaves, the pill is pressed, or the page scrolls from under it.
+ *
+ * The panel is a popover, so it is drawn above the page and no container of the host's
+ * can clip it or sit over it. It takes no space in the page and nothing moves when it
+ * opens. It cannot be pointed at: the pill is the one thing to press. A browser without
+ * popovers never opens it, and the pill is then the short one it always was.
+ */
+function peeks(
+  element: HTMLElement,
+  pill: HTMLElement,
+  panel: HTMLElement,
+  listed: HTMLElement,
+  unnamed: number,
+) {
+  const frame = frames.get(element)!;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  // Asked of the panel each time and never remembered: the browser shuts a popover when
+  // its host leaves the page, and tells nobody.
+  const open = () => panel.matches(':popover-open');
+
+  // Everything is let go whether or not the panel is still open, for the same reason.
+  const hide = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    globalThis.removeEventListener?.('scroll', hide, true);
+
+    try {
+      if (open()) panel.hidePopover();
+    } catch {
+      // Gone from the page with its host.
+    }
+  };
+
+  const show = () => {
+    timer = undefined;
+
+    if (typeof panel.showPopover !== 'function' || open()) return;
+
+    try {
+      panel.showPopover();
+    } catch {
+      return;
+    }
+
+    place(panel, pill, listed, unnamed);
+    globalThis.addEventListener?.('scroll', hide, true);
+  };
+
+  panel.setAttribute('popover', 'manual');
+  frame.root.append(panel);
+  frame.peek = panel;
+  frame.quiet = hide;
+
+  // A finger has nowhere to rest: touching the pill presses it.
+  pill.onpointerenter = (event) => {
+    if (event.pointerType === 'touch') return;
+
+    clearTimeout(timer);
+    timer = setTimeout(show, peekDelayMs);
+  };
+
+  pill.onpointerleave = hide;
+  pill.onpointerdown = hide;
+  pill.onblur = hide;
+
+  // Only where the keyboard put the focus: a click focuses the pill too, and opens the details.
+  pill.onfocus = () => {
+    if (pill.matches(':focus-visible')) show();
+  };
+
+  pill.onkeydown = (event) => {
+    if (event.key === 'Escape') hide();
+  };
+}
+
+/**
+ * Puts an open panel just under its pill, or just over it where there is more room there,
+ * and keeps all of it inside the window.
+ *
+ * A panel cannot be scrolled or pointed at, so whatever of it fell outside the window
+ * could never be read. Where it is taller than the room it has, its last accounts are
+ * taken out one at a time and added to the count beneath them, until it fits or one
+ * account is left. Each opening starts again from every row, since the window may have
+ * grown since the last. Whatever still does not fit is cut off at the window's edge.
+ */
+function place(panel: HTMLElement, pill: HTMLElement, listed: HTMLElement, unnamed: number) {
+  const gap = 6;
+  const edge = 8;
+  const at = pill.getBoundingClientRect();
+  const below = innerHeight - edge - (at.bottom + gap);
+  const above = at.top - gap - edge;
+  const rows = [...listed.children] as HTMLElement[];
+  const accounts = rows.filter((row) => !row.className.includes('more'));
+  let count = rows.find((row) => row.className.includes('more'));
+  let dropped = 0;
+
+  const recount = () => {
+    const uncounted = unnamed + dropped;
+
+    if (uncounted && !count) {
+      count = span('row more', '');
+      listed.append(count);
+    }
+
+    if (count) {
+      count.textContent = `+${uncounted} more`;
+      count.hidden = !uncounted;
+    }
+  };
+
+  // The last opening's limit is lifted first. Left on, it would hold the panel to the
+  // height that fitted then, and a panel measured under it always seems to fit.
+  panel.style.maxHeight = '';
+
+  for (const row of accounts) row.hidden = false;
+
+  recount();
+
+  // Under the pill unless only the room above will take it whole or is the larger.
+  const under = panel.getBoundingClientRect().height <= below || below >= above;
+  const room = Math.max(under ? below : above, 0);
+
+  while (panel.getBoundingClientRect().height > room && dropped < accounts.length - 1) {
+    dropped += 1;
+    accounts[accounts.length - dropped]!.hidden = true;
+    recount();
+  }
+
+  const size = panel.getBoundingClientRect();
+  const height = Math.min(size.height, room);
+
+  panel.style.maxHeight = `${room}px`;
+  panel.style.top = `${under ? at.bottom + gap : at.top - gap - height}px`;
+  panel.style.left = `${Math.max(edge, Math.min(at.left, innerWidth - edge - size.width))}px`;
 }
 
 /**
