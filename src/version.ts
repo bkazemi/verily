@@ -7,4 +7,4 @@
  * output stays what tsc emitted and nothing has to be substituted into it. A version bump
  * changes this line with package.json.
  */
-export const version = 'v0.0.11';
+export const version = 'v0.0.12';
