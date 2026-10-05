@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createVerily } from '../src/server/index.js';
-import type { Provider } from '../src/core/index.js';
+import type { ArtifactProvider, Provider } from '../src/core/index.js';
 import {
   alice,
   bob,
@@ -654,4 +654,51 @@ test('pages allow forms to redirect to each sign-in provider and nowhere else', 
   )!;
 
   assert.match(policy, /form-action 'self' https:\/\/provider\.test$/);
+});
+
+test('the approval page says a link back was found and will be recorded', async () => {
+  const backlink: ArtifactProvider = {
+    id: 'github',
+    name: 'GitHub',
+    method: 'backlink',
+    artifact: 'location',
+    expect: (local) => local.profileUrl!,
+    instructions: (expect) => [{ code: expect }],
+    known: (account) => account.profileUrl,
+    verify: ({ artifact }) =>
+      Promise.resolve({
+        id: artifact,
+        kind: 'account',
+        handle: 'known-alice',
+        profileUrl: artifact,
+      }),
+  };
+
+  const f = fixture([fakeProvider(), backlink]);
+
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: { origin: 'https://site.test', cookie: 'local=alice' },
+    body: 'kind=connect&provider=github&method=oauth',
+  });
+
+  const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
+  const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
+  const callback = await f.request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
+  const path = callback.headers.get('location')!.replace('/api/verily', '');
+  const headers = { cookie: `${cookie}; local=alice` };
+
+  assert.match(
+    await (await f.request(path, { headers })).text(),
+    /This account already links back to Site\. Confirming records that too\./,
+  );
+
+  const view = (await (await f.request(`${path}?format=json`, { headers })).json()) as {
+    standingNote?: string;
+  };
+
+  assert.equal(
+    view.standingNote,
+    'This account already links back to Site. Confirming records that too.',
+  );
 });

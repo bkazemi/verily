@@ -140,6 +140,10 @@ export function linkProvider(options: LinkProviderOptions): ArtifactProvider {
 
       return account(page, profile);
     },
+
+    // A page that carries the link is at the address it is named by, so a record of one
+    // already says where to look.
+    known: (account) => account.profileUrl,
   };
 }
 
@@ -305,19 +309,39 @@ export function githubLinkProvider(
     id: 'github',
     name: 'GitHub',
     hosts: ['github.com'],
-    // GitHub's own rule: alphanumerics and single hyphens, never leading or trailing, 39 max.
-    profile: /^\/([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})$/,
+    profile: new RegExp(`^/(${username})$`),
   });
+
+  // A profile is at its username, so the username is all the holder needs to give. A
+  // leading @ is how one is written, and is not part of it.
+  const named = new RegExp(`^@?(${username})$`);
 
   return {
     ...provider,
     // GitHub writes the rel="me" itself, so the holder only fills in one field.
     instructions: (expect) => [
-      'Put this address in the website field of your GitHub profile, then paste your profile’s address below.',
+      'Put this address in the website field of your GitHub profile, then enter your GitHub username below.',
       { code: expect },
     ],
+    field: 'Your GitHub username',
+    input: 'text',
+
+    resolve(artifact) {
+      const name = named.exec(artifact.trim())?.[1];
+
+      return name ? `https://github.com/${name}` : artifact;
+    },
+
+    // Only an account has a username. The handle of anything else is not one.
+    known: (account) =>
+      (account.kind ?? 'account') === 'account' && named.test(account.handle)
+        ? account.handle.replace(/^@/, '')
+        : undefined,
   };
 }
+
+/** GitHub's own rule: alphanumerics and single hyphens, never leading or trailing, 39 max. */
+const username = '[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}';
 
 /**
  * Whether a link points at the subject. Every key in the subject's query must carry the

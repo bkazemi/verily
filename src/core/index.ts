@@ -140,6 +140,17 @@ export interface Flow {
   /** What the holder handed back: an address to read, or the proof itself. */
   artifact?: string;
   /**
+   * What the holder is offered to hand back, where a record of theirs already names the
+   * account. Only an offer: what is verified is whatever they then submit.
+   */
+  suggested?: string;
+  /**
+   * Proofs found already standing when another method named the account, such as a link
+   * back on the profile of an account that just signed in. Recorded with the method that
+   * found them once the holder approves.
+   */
+  standing?: Attestation[];
+  /**
    * A message on its way to the address the holder named, carrying a link to press and a
    * code to type. The account is only a claim until one of them comes back, which is why
    * it is kept here and not in `external`. Never public: either one is the whole proof, so
@@ -271,6 +282,25 @@ export interface ArtifactProvider {
    * character, and prose that reflows is prose a holder cannot safely copy.
    */
   instructions(expect: string): Instruction[];
+  /**
+   * What the holder is asked to hand back, where the method takes something a holder knows
+   * by a better name than "an address". `input` says how to ask for it: `text` where it
+   * need not be an address at all, such as a username.
+   */
+  field?: string;
+  input?: 'url' | 'text';
+  /**
+   * Turns what the holder typed into the address to read, for a method that takes something
+   * shorter. What it returns is what is verified and kept as the proof's location, so it
+   * must be the whole address. Anything it does not recognise is returned as it came.
+   */
+  resolve?(artifact: string): string;
+  /**
+   * What to hand back for an account the subject is already linked to, where the account
+   * alone says so: a profile that carries the link is at the account's own address. The
+   * holder is offered it instead of being asked, and may still hand back something else.
+   */
+  known?(account: ExternalAccount): string | undefined;
   /**
    * Reads what the holder handed back and returns whose it is. Must confirm it contains
    * `expect`. A `location` provider must also refuse any address outside itself, since

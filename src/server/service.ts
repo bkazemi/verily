@@ -337,12 +337,27 @@ export class VerilyService {
           ? artifact.expect(subject!)
           : `Verily proof for ${this.siteOf(subject!)}: ${secret()}`;
 
+      // These kinds are all started by the local holder, whose own record this is. Removal
+      // from the external side is started by anyone, and is told nothing.
+      if (artifact?.known && ['connect', 'renew', 'visibility'].includes(kind)) {
+        const suggested = connection
+          ? artifact.known(connection.external)
+          : await this.known(tx, subject!, artifact);
+
+        if (suggested) flow.suggested = suggested;
+      }
+
       await tx.put('flows', flow.id, flow);
 
       return provider;
     });
 
     const artifact = isArtifactProvider(provider) ? provider : undefined;
+
+    // Where a record already says whose account this is, there is nothing to ask the
+    // holder: the proof is either there to be read or it is not.
+    if (artifact && flow.suggested)
+      await this.offered(flow.id, binding, artifact, flow.expect!, flow.suggested);
 
     // A redirect provider hands the holder to its own site; an artifact provider tells
     // them what to publish and waits for them to say where they put it; a code provider
@@ -365,6 +380,67 @@ export class VerilyService {
             }),
           }
         : { flowId: flow.id, binding };
+  }
+
+  /**
+   * What a new flow can offer the holder to hand back: the one account this subject has
+   * already shown some other way, which is the record the flow would join. With several,
+   * which one they mean is theirs to say.
+   */
+  private async known(
+    tx: Transaction,
+    local: LocalAccount,
+    provider: ArtifactProvider,
+  ): Promise<string | undefined> {
+    const offers = (await tx.list('connections'))
+      .filter(
+        (c) =>
+          c.revokedAt === undefined &&
+          c.local.id === local.id &&
+          c.provider === provider.id &&
+          (c.attestations?.external[0].method ?? 'oauth') !== provider.method,
+      )
+      .map((c) => provider.known!(c.external))
+      .filter((offer) => offer !== undefined);
+
+    return new Set(offers.map((offer) => offer.toLowerCase())).size === 1 ? offers[0] : undefined;
+  }
+
+  /**
+   * Reads the proof at the account a record already names, before the holder is asked for
+   * anything. Found, the flow goes straight to approval, as if they had handed it back.
+   * Not found is no failure: they have not been told what to publish yet, so the flow
+   * stays where it was and tells them.
+   */
+  private async offered(
+    id: string,
+    binding: string,
+    provider: ArtifactProvider,
+    expect: string,
+    suggested: string,
+  ) {
+    try {
+      const handed = provider.resolve?.(suggested) ?? suggested;
+      const external = await this.deadline(provider.verify({ artifact: handed, expect }));
+
+      await this.transaction(async (tx) => {
+        const flow = await this.bound(tx, id, binding);
+
+        flow.phase = 'exchanging';
+        await tx.put('flows', id, flow);
+      });
+
+      await this.established(id, binding, external, handed);
+    } catch {
+      await this.transaction(async (tx) => {
+        const flow = await tx.get('flows', id);
+
+        if (flow?.phase === 'exchanging') {
+          flow.phase = 'pending';
+          await tx.put('flows', id, flow);
+        }
+      });
+    }
   }
 
   /**
@@ -431,9 +507,12 @@ export class VerilyService {
     });
 
     try {
-      const external = await provider.verify({ artifact, expect });
+      // Kept as the address that was read, never as the shorthand that named it: it is
+      // where a reader is sent, and what is read again later.
+      const handed = provider.resolve?.(artifact) ?? artifact;
+      const external = await provider.verify({ artifact: handed, expect });
 
-      await this.established(id, binding, external, artifact);
+      await this.established(id, binding, external, handed);
     } catch (error) {
       await this.failed(id, error);
     }
@@ -710,7 +789,9 @@ export class VerilyService {
     )
       throw new Unavailable();
 
-    await this.transaction(async (tx) => {
+    // The flow as it stands once this account is accepted for it, or a refusal. Asked
+    // twice, because what it is checked against can change while proofs are being read.
+    const accepted = async (tx: Transaction) => {
       const flow =
         binding === undefined ? await tx.get('flows', id) : await this.bound(tx, id, binding);
 
@@ -733,11 +814,94 @@ export class VerilyService {
       }
 
       flow.external = external;
+
+      return flow;
+    };
+
+    // The account is named now, so a proof that needs nothing but its name can be read
+    // without the holder choosing that method or handing anything back. Read while the
+    // flow is still exchanging: approval is shown once, and must show all it will record.
+    const shown = await this.transaction(accepted);
+    const standing = ['connect', 'renew'].includes(shown.kind) ? await this.standing(shown) : [];
+
+    await this.transaction(async (tx) => {
+      const flow = await accepted(tx);
+
       flow.artifact = artifact;
       flow.authenticatedAt = this.now();
+
+      if (standing.length) flow.standing = standing;
+
       flow.phase = 'approval';
       await tx.put('flows', id, flow);
     });
+  }
+
+  /**
+   * The proofs already standing for the account a flow just showed, by the other methods
+   * configured for its provider that can tell where to look from the account alone. One
+   * that is not there, or cannot be read, is simply not found: the holder asked for none
+   * of them, so none of them can fail the flow.
+   */
+  private async standing(flow: Flow): Promise<Attestation[]> {
+    const shownBy = this.providerOf(flow);
+    const found: Attestation[] = [];
+
+    for (const provider of this.providers) {
+      if (
+        !isArtifactProvider(provider) ||
+        provider.id !== shownBy.id ||
+        provider.method === providerMethod(shownBy) ||
+        provider.artifact !== 'location' ||
+        !provider.expect ||
+        !provider.known
+      )
+        continue;
+
+      try {
+        const expect = provider.expect(flow.local!);
+        const known = provider.known(flow.external!);
+
+        if (!known) continue;
+
+        const handed = provider.resolve?.(known) ?? known;
+        const external = await this.deadline(provider.verify({ artifact: handed, expect }));
+
+        if (!sameAccount(flow.external!, external)) continue;
+
+        found.push({
+          by: 'provider',
+          method: provider.method,
+          confirmedAt: this.now(),
+          artifactUrl: handed,
+          expect,
+        });
+      } catch {
+        continue;
+      }
+    }
+
+    return found;
+  }
+
+  /** Adds the proofs a flow found standing beneath the method the record was first shown by. */
+  private recordStanding(connection: Connection, flow: Flow) {
+    if (!flow.standing?.length || !connection.attestations) return;
+
+    const [main, ...rest] = connection.attestations.external;
+
+    for (const attestation of flow.standing) {
+      // The main method is reread against the id it named, so it is only ever replaced
+      // by a flow that ran it.
+      if (attestation.method === main.method) continue;
+
+      const at = rest.findIndex((a) => a.method === attestation.method);
+
+      if (at < 0) rest.push(attestation);
+      else rest[at] = attestation;
+    }
+
+    connection.attestations = { ...connection.attestations, external: [main, ...rest] };
   }
 
   /**
@@ -855,6 +1019,8 @@ export class VerilyService {
           connection.visibilityApprovedAt = this.now();
         }
       }
+
+      if (['connect', 'renew'].includes(flow.kind)) this.recordStanding(connection, flow);
 
       await tx.put('connections', connection.id, connection);
 
