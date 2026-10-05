@@ -4,7 +4,7 @@ import { logo } from '../src/logo.js';
 import { escape } from '../src/server/escape.js';
 import { styleVersion } from '../src/server/style.js';
 import {
-  createVerity,
+  createVerily,
   discordProvider,
   emailProvider,
   generateSigningKey,
@@ -20,7 +20,7 @@ import { allow, client, limits, prune } from './limits.js';
 import type { LocalAccount, LocalKind } from '../src/core/index.js';
 
 export interface Env {
-  VERITY: DurableObjectNamespace;
+  VERILY: DurableObjectNamespace;
   PUBLIC_ORIGIN: string;
   SITE_NAME: string;
   /** What this deployment links: one of its accounts, a page, or the site. Defaults to account. */
@@ -54,7 +54,7 @@ export interface Env {
   SIGNING?: string;
   SIGNING_KEY?: string;
   /**
-   * The sites that send their users here instead of hosting Verity, as a JSON list of
+   * The sites that send their users here instead of hosting Verily, as a JSON list of
    * `{ id, name, origin, authorizeUrl, returnUrl }`. Each needs its key in the secret
    * `SITE_<ID>_KEY`, such as `SITE_PARTNER_KEY`.
    */
@@ -77,7 +77,7 @@ const safeHeaders = {
  */
 const html = (heading: string, body: string, status = 200, variant = '') =>
   new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(heading)} · Verity</title><link rel="stylesheet" href="/api/verity/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(heading)}</h1>${body}</main></body></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(heading)} · Verily</title><link rel="stylesheet" href="/api/verily/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(heading)}</h1>${body}</main></body></html>`,
     { status, headers: { ...safeHeaders, 'Content-Type': 'text/html; charset=utf-8' } },
   );
 
@@ -124,10 +124,10 @@ function dailyMail(configured: string | number | undefined): number | undefined 
 }
 
 /** The library's own management routes, which a site session does not get. */
-const management = /^\/api\/verity\/connections\/[^/]+\/(disconnect|share|share-revoke)$/;
+const management = /^\/api\/verily\/connections\/[^/]+\/(disconnect|share|share-revoke)$/;
 
 /** GETs that create state, and so are limited like every POST. */
-const limitedGets = ['/begin', '/start', '/api/verity/sessions', '/api/verity/callback'];
+const limitedGets = ['/begin', '/start', '/api/verily/sessions', '/api/verily/callback'];
 
 /** Matches the library's own bound: large enough for a pasted key, small enough to buffer. */
 const maxBodyBytes = 65536;
@@ -138,10 +138,10 @@ const maxBodyBytes = 65536;
  * links. Everything else stays same-origin.
  */
 const dialogPaths =
-  /^\/api\/verity\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/disconnect)$/;
+  /^\/api\/verily\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/disconnect)$/;
 
 /** Carries a flow's binding for a page on another origin, where the cookie cannot. */
-const flowHeader = 'X-Verity-Flow';
+const flowHeader = 'X-Verily-Flow';
 
 /** A session or a binding as this instance mints them, and nothing that could bend a header. */
 const opaque = /^[A-Za-z0-9_-]{16,200}$/;
@@ -209,11 +209,11 @@ function parsed(text: string): Record<string, unknown> | undefined {
  * page is on. The instance takes the binding only if that origin is the site the flow
  * belongs to, so a page elsewhere cannot have someone sign in to a flow it started.
  */
-const enterScript = `const status=document.getElementById('status');const fail=()=>{status.textContent='This window could not start the sign-in. Close it and try again.'};let taken=false;if(!window.opener)fail();else{window.addEventListener('message',async(event)=>{const d=event.data;if(taken||event.source!==window.opener||!d||d.type!=='verity-enter'||typeof d.flow!=='string'||typeof d.binding!=='string'||typeof d.url!=='string')return;taken=true;let target;try{target=new URL(d.url)}catch{return fail()}if(target.protocol!=='https:')return fail();const response=await fetch('/api/verity/site/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow:d.flow,binding:d.binding,origin:event.origin})}).catch(()=>undefined);if(!response||!response.ok)return fail();location.replace(target.href)});window.opener.postMessage({type:'verity-enter'},'*')}`;
+const enterScript = `const status=document.getElementById('status');const fail=()=>{status.textContent='This window could not start the sign-in. Close it and try again.'};let taken=false;if(!window.opener)fail();else{window.addEventListener('message',async(event)=>{const d=event.data;if(taken||event.source!==window.opener||!d||d.type!=='verily-enter'||typeof d.flow!=='string'||typeof d.binding!=='string'||typeof d.url!=='string')return;taken=true;let target;try{target=new URL(d.url)}catch{return fail()}if(target.protocol!=='https:')return fail();const response=await fetch('/api/verily/site/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow:d.flow,binding:d.binding,origin:event.origin})}).catch(()=>undefined);if(!response||!response.ok)return fail();location.replace(target.href)});window.opener.postMessage({type:'verily-enter'},'*')}`;
 
 const enterPage = () =>
   new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Verity</title><link rel="stylesheet" href="/api/verity/style.css?v=${styleVersion}"><body><main class="single">${logo}<h1>Sign in</h1><p id="status">Opening the sign-in page.</p></main><script src="/api/verity/site/enter.js"></script></body></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Verily</title><link rel="stylesheet" href="/api/verily/style.css?v=${styleVersion}"><body><main class="single">${logo}<h1>Sign in</h1><p id="status">Opening the sign-in page.</p></main><script src="/api/verily/site/enter.js"></script></body></html>`,
     {
       headers: {
         ...safeHeaders,
@@ -268,7 +268,7 @@ export default {
     // Asked by a browser before a page on another origin may send the dialog's headers.
     if (
       request.method === 'OPTIONS' &&
-      (dialogPaths.test(url.pathname) || url.pathname === '/api/verity/site/session')
+      (dialogPaths.test(url.pathname) || url.pathname === '/api/verily/site/session')
     )
       return preflight(request);
 
@@ -284,7 +284,7 @@ export default {
 
     try {
       // One installation, with an identity that survives deployments and hostname changes.
-      return await env.VERITY.get(env.VERITY.idFromName('site-owner')).fetch(request.url, {
+      return await env.VERILY.get(env.VERILY.idFromName('site-owner')).fetch(request.url, {
         method: request.method,
         headers: Object.fromEntries(request.headers),
         body,
@@ -296,7 +296,7 @@ export default {
   },
 };
 
-export class VerityStore {
+export class VerilyStore {
   private readonly app;
   private readonly auth: OwnerAuth;
   private readonly sites: Sites;
@@ -329,7 +329,7 @@ export class VerityStore {
       profileUrl: env.OWNER_PROFILE_URL,
     };
 
-    this.app = createVerity({
+    this.app = createVerily({
       storage: new CloudflareStorage(ctx.storage),
       // Two ways of showing one GitHub account. Whichever is used first is the record's
       // main method, and the other is listed beneath it once used. Discord, YouTube and
@@ -368,7 +368,7 @@ export class VerityStore {
       ...(env.SIGNING === 'off'
         ? {}
         : { signingKey: env.SIGNING_KEY ?? (() => this.signingKey()) }),
-      baseUrl: `${env.PUBLIC_ORIGIN}/api/verity`,
+      baseUrl: `${env.PUBLIC_ORIGIN}/api/verily`,
       // The owner's own site. A registered site's subjects carry their site's name instead.
       siteName: env.SITE_NAME,
       // The verifier is the origin that ran the flow and serves the evidence, which a
@@ -456,7 +456,7 @@ export class VerityStore {
     // whose flow this browser signs in to, so it is held to the origin the browser itself
     // reports, before a missing or opaque one is read as ours below: a form in a sandboxed
     // frame has an opaque origin, and can put any origin it likes in its body.
-    if (request.method === 'POST' && url.pathname === '/api/verity/site/enter') {
+    if (request.method === 'POST' && url.pathname === '/api/verily/site/enter') {
       if (
         request.headers.get('origin') !== this.env.PUBLIC_ORIGIN ||
         !request.headers.get('content-type')?.startsWith('application/json')
@@ -471,7 +471,7 @@ export class VerityStore {
 
     if (
       request.method === 'POST' &&
-      url.pathname.startsWith('/api/verity/') &&
+      url.pathname.startsWith('/api/verily/') &&
       (!request.headers.has('origin') || request.headers.get('origin') === 'null')
     ) {
       const headers = new Headers(request.headers);
@@ -488,7 +488,7 @@ export class VerityStore {
     if (!(await this.allowed(request, url)))
       return html('Too many requests', '<p>Try again later.</p>', 429);
 
-    if (request.method === 'POST' && url.pathname === '/api/verity/site/session') {
+    if (request.method === 'POST' && url.pathname === '/api/verily/site/session') {
       const opened = await this.sites.dialog(
         String((await fields(request)).token ?? ''),
         request.headers.get('origin'),
@@ -506,9 +506,9 @@ export class VerityStore {
       );
     }
 
-    if (request.method === 'GET' && url.pathname === '/api/verity/site/enter') return enterPage();
+    if (request.method === 'GET' && url.pathname === '/api/verily/site/enter') return enterPage();
 
-    if (request.method === 'GET' && url.pathname === '/api/verity/site/enter.js')
+    if (request.method === 'GET' && url.pathname === '/api/verily/site/enter.js')
       return new Response(enterScript, {
         headers: { ...safeHeaders, 'Content-Type': 'text/javascript' },
       });
@@ -552,11 +552,11 @@ export class VerityStore {
 
       // Straight on, so the token leaves the address bar.
       return started
-        ? see(started.purpose === 'connect' ? '/api/verity/verify' : '/', started.cookies)
+        ? see(started.purpose === 'connect' ? '/api/verily/verify' : '/', started.cookies)
         : refused();
     }
 
-    if (url.pathname.startsWith('/api/verity/')) {
+    if (url.pathname.startsWith('/api/verily/')) {
       // A site session removes a link through this worker, which reports it back to the
       // site, and has no sharing links. The library's routes would do neither.
       if (
@@ -580,7 +580,7 @@ export class VerityStore {
     }
 
     // Where a reader who has only this domain's name finds the keys its records are signed by.
-    if (request.method === 'GET' && url.pathname === '/.well-known/verity-keys.json')
+    if (request.method === 'GET' && url.pathname === '/.well-known/verily-keys.json')
       return new Response(JSON.stringify({ keys: await this.app.service.keys() }), {
         headers: {
           ...safeHeaders,
@@ -650,12 +650,12 @@ export class VerityStore {
 
       // The dialog only connects. Every other kind of flow has a page of its own here.
       // Parsed as the library parses it, so the kind checked is the kind it will run.
-      if (url.pathname === '/api/verity/sessions' && parsed(body!)?.kind !== 'connect')
+      if (url.pathname === '/api/verily/sessions' && parsed(body!)?.kind !== 'connect')
         return unavailable();
     } else if (
-      url.pathname !== '/api/verity/methods' &&
+      url.pathname !== '/api/verily/methods' &&
       !(
-        /^\/api\/verity\/flows\/[^/]+$/.test(url.pathname) &&
+        /^\/api\/verily\/flows\/[^/]+$/.test(url.pathname) &&
         url.searchParams.get('format') === 'json'
       )
     )
@@ -873,7 +873,7 @@ export class VerityStore {
       `<div class="side"><p class="who">${escape(local.heading)}</p>
       <p class="name">${escape(local.value)}</p>
       <p class="reference">${escape(subject.reference)}</p></div>
-      <p><a href="/api/verity/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
+      <p><a href="/api/verily/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
       ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p>'}
       ${connections.map((e) => this.connection(e, site)).join('')}
       ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
@@ -882,7 +882,7 @@ export class VerityStore {
 
   /** One connection, with the state, the visibility and the expiry each said once. */
   private connection(e: Evidence, site?: Site) {
-    const embed = `<script src="/assets/verity.js" defer></script>\n<verity-badge backend-url="${this.env.PUBLIC_ORIGIN}/api/verity" connection-id="${e.id}"></verity-badge>`;
+    const embed = `<script src="/assets/verily.js" defer></script>\n<verily-badge backend-url="${this.env.PUBLIC_ORIGIN}/api/verily" connection-id="${e.id}"></verily-badge>`;
 
     const shown = site
       ? e.visibility === 'public'
@@ -895,13 +895,13 @@ export class VerityStore {
     const actions =
       site && e.status === 'revoked'
         ? ''
-        : `<p><a href="/api/verity/renew/${escape(e.id)}">Renew this connection</a></p>
+        : `<p><a href="/api/verily/renew/${escape(e.id)}">Renew this connection</a></p>
       <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
-      ${site?.visibility?.length === 1 ? '' : `<p><a href="/api/verity/visibility/${escape(e.id)}">Change visibility</a></p>`}
+      ${site?.visibility?.length === 1 ? '' : `<p><a href="/api/verily/visibility/${escape(e.id)}">Change visibility</a></p>`}
       ${
         site
           ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`
-          : `<form action="/api/verity/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form>`
+          : `<form action="/api/verily/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form>`
       }`;
 
     return `<section><p class="who">${escape(e.providerName ?? e.provider)}</p>

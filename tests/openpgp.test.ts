@@ -18,11 +18,11 @@ import {
 const fixture = (name: string) =>
   readFile(new URL(`./fixtures/pgp/${name}`, import.meta.url), 'utf8');
 
-const message = 'Verity proof for Site: aGVsbG8td29ybGQtdGVzdC10b2tlbg';
+const message = 'Verily proof for Site: aGVsbG8td29ybGQtdGVzdC10b2tlbg';
 
-const ed25519 = '7FDEB37E4F6EAD8E2FEFD8511347D93FEB1342AF';
+const ed25519 = '05975AC2F819C57438C06248E7E21D206C283B44';
 
-const rsa = 'EF5F48AF2A27A1E9C4C1620A033980BF75474649';
+const rsa = '48FFDA207DB189E1F8E7C295A027F99DB3A878F6';
 
 test('a key names itself by fingerprint and its signature over a message checks out', async () => {
   for (const [name, expected] of [
@@ -125,7 +125,7 @@ test('a signing subkey counts, but only where the primary key vouched for it', a
   const cleartext = await readCleartext(await fixture('subkey.sig.asc'));
 
   // Signing with a subkey is what gpg does by default, without ever mentioning it.
-  assert.equal(fingerprint(certificate), '1AAE015081900B9E11C8968B6D424D5A9415E9D3');
+  assert.equal(fingerprint(certificate), 'A6F3BB8120DAE0CC4232F3541F55681E282EC9B7');
   assert.equal(certificate.subkeys.length, 1);
   assert.equal(cleartext.getText().trim(), message);
   assert.equal(await signed(certificate, cleartext), true);
@@ -151,7 +151,7 @@ test('a signing subkey counts, but only where the primary key vouched for it', a
 test('a name counts only where the key signed for it, however it arrived', async () => {
   const honest = await readCertificate(await fixture('ed25519.pub.asc'));
 
-  assert.deepEqual(await identities(honest), ['Verity Test Ed25519 <ed25519@example.test>']);
+  assert.deepEqual(await identities(honest), ['Verily Test Ed25519 <ed25519@example.test>']);
 
   // The same key republished with two names added: one simply appended with nothing on
   // it, and one carrying a genuine certification that a different key made. Both are
@@ -160,7 +160,7 @@ test('a name counts only where the key signed for it, however it arrived', async
 
   assert.equal(fingerprint(forged), ed25519);
   assert.equal(forged.users.length, 3);
-  assert.deepEqual(await identities(forged), ['Verity Test Ed25519 <ed25519@example.test>']);
+  assert.deepEqual(await identities(forged), ['Verily Test Ed25519 <ed25519@example.test>']);
 
   // A key can also arrive with no name at all, which is what a keyserver serves when it
   // has confirmed none of them.

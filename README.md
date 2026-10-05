@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="docs/design/verity-logo-plate.svg" alt="Verity" width="320" />
+  <img src="docs/design/verily-logo-plate.svg" alt="Verily" width="320" />
 </h1>
 
 <p align="center">
@@ -7,30 +7,30 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/bkazemi/verity/actions/workflows/ci.yml"><img src="https://github.com/bkazemi/verity/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://www.npmjs.com/package/@bkazemi/verity"><img src="https://img.shields.io/npm/v/@bkazemi/verity" alt="npm" /></a>
+  <a href="https://github.com/bkazemi/verily/actions/workflows/ci.yml"><img src="https://github.com/bkazemi/verily/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/@bkazemi/verily"><img src="https://img.shields.io/npm/v/@bkazemi/verily" alt="npm" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
 </p>
 
 <p align="center">
-  <img src="docs/images/badge.png" alt="A profile card with a Verity badge showing a GitHub account" width="480" />
+  <img src="docs/images/badge.png" alt="A profile card with a Verily badge showing a GitHub account" width="480" />
 </p>
 
-Verity is a self-hosted library for Node.js. A signed-in user of your site proves they control an external account, by signing in with GitHub, publishing a gist, linking back with `rel="me"`, or signing with an OpenPGP key. They approve the connection, and Verity publishes it as a record anyone can inspect, with a badge for their profile.
+Verily is a self-hosted library for Node.js. A signed-in user of your site proves they control an external account, by signing in with GitHub, publishing a gist, linking back with `rel="me"`, or signing with an OpenPGP key. They approve the connection, and Verily publishes it as a record anyone can inspect, with a badge for their profile.
 
 It doesn't sign anyone into your site, and it doesn't establish legal identity.
 
 ## How it works
 
-1. Your site tells Verity who is signed in. Verity never handles your logins.
+1. Your site tells Verily who is signed in. Verily never handles your logins.
 2. The user opens `<baseUrl>/verify`, picks a method, and proves they control the external account.
-3. They approve the connection. Verity stores it and publishes the evidence at a public URL.
-4. A `<verity-badge>` on their profile shows the external account. Clicking it opens the evidence.
-5. Verity keeps the record honest: published proofs are re-read, records expire, and either side can revoke.
+3. They approve the connection. Verily stores it and publishes the evidence at a public URL.
+4. A `<verily-badge>` on their profile shows the external account. Clicking it opens the evidence.
+5. Verily keeps the record honest: published proofs are re-read, records expire, and either side can revoke.
 
 ## Two ways to use it
 
-- **Run it yourself.** Your site hosts Verity beside its own backend and registers its own app with each sign-in provider. Everything from [Install](#install) to [Operations](#operations) is this. Nothing else is needed, and nothing depends on anyone else's server.
+- **Run it yourself.** Your site hosts Verily beside its own backend and registers its own app with each sign-in provider. Everything from [Install](#install) to [Operations](#operations) is this. Nothing else is needed, and nothing depends on anyone else's server.
 - **Use an instance someone else runs.** The instance holds the provider apps and the records, and your site registers nothing with any provider. Your backend makes two calls. See [Using a hosted instance](#using-a-hosted-instance).
 
 Both give your backend the same records in the same shape, so the code that shows them does not change if you move from one to the other.
@@ -38,17 +38,17 @@ Both give your backend the same records in the same shape, so the code that show
 ## Install
 
 ```sh
-npm install @bkazemi/verity
+npm install @bkazemi/verily
 ```
 
-Requires Node.js 22.13+ or 24+. In Node, `@bkazemi/verity` exports the server. Browser bundlers get a browser-only entry with no server or database code. With TypeScript, use `moduleResolution: "NodeNext"` for the server and `"Bundler"` for the browser.
+Requires Node.js 22.13+ or 24+. In Node, `@bkazemi/verily` exports the server. Browser bundlers get a browser-only entry with no server or database code. With TypeScript, use `moduleResolution: "NodeNext"` for the server and `"Bundler"` for the browser.
 
 ## Set up the server
 
 ### 1. Storage
 
 ```ts
-import { Pool, PostgresStorage } from '@bkazemi/verity';
+import { Pool, PostgresStorage } from '@bkazemi/verily';
 
 const storage = new PostgresStorage(new Pool({ connectionString: process.env.DATABASE_URL }));
 await storage.migrate(); // creates its one table if it doesn't exist
@@ -57,9 +57,9 @@ await storage.migrate(); // creates its one table if it doesn't exist
 ### 2. Create the handler
 
 ```ts
-import { createVerity, githubProvider } from '@bkazemi/verity';
+import { createVerily, githubProvider } from '@bkazemi/verily';
 
-const verity = createVerity({
+const verily = createVerily({
   storage,
   providers: [
     githubProvider({
@@ -67,7 +67,7 @@ const verity = createVerity({
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
     }),
   ],
-  baseUrl: 'https://community.example/api/verity',
+  baseUrl: 'https://community.example/api/verily',
   siteName: 'Example Community',
   verifierName: 'community.example',
   profileOrigins: ['https://community.example'],
@@ -89,14 +89,14 @@ const verity = createVerity({
 | Option           | Meaning                                                                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------- |
 | `provider`       | How users prove an external account. One provider or an array; see [Proof methods](#proof-methods). |
-| `baseUrl`        | The public URL you mount Verity at. Every route it serves is under this path.                       |
+| `baseUrl`        | The public URL you mount Verily at. Every route it serves is under this path.                       |
 | `siteName`       | Your site's name, shown on evidence.                                                                |
 | `verifierName`   | Who vouches for the record, shown on evidence. Usually the backend's domain.                        |
 | `profileOrigins` | The origins a local `profileUrl` may be on.                                                         |
 | `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                          |
 | `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in.           |
 
-Sign-in methods need an app registered with the provider, and each site running Verity registers its own. The callback URL is always `<baseUrl>/callback`, so for `baseUrl: 'https://example.com/api/verity'` it is `https://example.com/api/verity/callback`. The provider redirects only to URLs registered in advance, so each place you run Verity, a local one for development included, needs its callback registered.
+Sign-in methods need an app registered with the provider, and each site running Verily registers its own. The callback URL is always `<baseUrl>/callback`, so for `baseUrl: 'https://example.com/api/verily'` it is `https://example.com/api/verily/callback`. The provider redirects only to URLs registered in advance, so each place you run Verily, a local one for development included, needs its callback registered.
 
 - **GitHub:** [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) and set its callback URL. An OAuth app has only one, so development and production each need their own app.
 - **Discord:** create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the callback URL under **OAuth2 → Redirects**. One application can list several. Discord shows the client secret only when you reset it.
@@ -106,16 +106,16 @@ Pass the app's client id and secret to `githubProvider()`, `discordProvider()` o
 
 ### 3. Mount it
 
-`verity.handle` takes a `Request` and returns a `Response`, so it plugs into any fetch-style router. For `node:http`, wrap it with `nodeHandler` and route the requests under `baseUrl` to it:
+`verily.handle` takes a `Request` and returns a `Response`, so it plugs into any fetch-style router. For `node:http`, wrap it with `nodeHandler` and route the requests under `baseUrl` to it:
 
 ```ts
 import { createServer } from 'node:http';
-import { nodeHandler } from '@bkazemi/verity';
+import { nodeHandler } from '@bkazemi/verily';
 
-const handleVerity = nodeHandler(verity.handle, 'https://community.example');
+const handleVerily = nodeHandler(verily.handle, 'https://community.example');
 
 createServer((req, res) => {
-  if (req.url?.startsWith('/api/verity')) return handleVerity(req, res);
+  if (req.url?.startsWith('/api/verily')) return handleVerily(req, res);
   // ...the rest of your site
 }).listen(3000);
 ```
@@ -125,11 +125,11 @@ createServer((req, res) => {
 Put the connect pill on your settings page. Clicking it opens a dialog where the user picks a method, proves it and approves the connection, without leaving the page:
 
 ```html
-<script src="/assets/verity.js" defer></script>
-<verity-connect backend-url="/api/verity"></verity-connect>
+<script src="/assets/verily.js" defer></script>
+<verily-connect backend-url="/api/verily"></verily-connect>
 ```
 
-GitHub sign-in still happens on GitHub, in a small window. The dialog picks the flow back up when the user returns. When a connection is recorded, the element fires a `verity-result` event whose `detail` holds the new `connectionId`. The backend must be on the same origin as the page.
+GitHub sign-in still happens on GitHub, in a small window. The dialog picks the flow back up when the user returns. When a connection is recorded, the element fires a `verily-result` event whose `detail` holds the new `connectionId`. The backend must be on the same origin as the page.
 
 The full-page flow at `<baseUrl>/verify` still works, for links and for browsers without JavaScript. `<baseUrl>/mine` returns the user's connections as JSON, for your settings page.
 
@@ -140,18 +140,18 @@ Then schedule the upkeep described under [Operations](#operations).
 With a bundler:
 
 ```js
-import { init } from '@bkazemi/verity'; // also registers <verity-badge>
+import { init } from '@bkazemi/verily'; // also registers <verily-badge>
 
-const client = init({ backendUrl: '/api/verity' });
+const client = init({ backendUrl: '/api/verily' });
 ```
 
-Without one, serve `node_modules/@bkazemi/verity/dist/verity.js` yourself, or load it from a CDN such as `https://cdn.jsdelivr.net/npm/@bkazemi/verity@0.0.12/dist/verity.js`. The script defines a global `Verity`.
+Without one, serve `node_modules/@bkazemi/verily/dist/verily.js` yourself, or load it from a CDN such as `https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.0.12/dist/verily.js`. The script defines a global `Verily`.
 
 Then place the badge wherever the account appears:
 
 ```html
-<script src="/assets/verity.js" defer></script>
-<verity-badge backend-url="/api/verity" connection-id="CONNECTION_ID"></verity-badge>
+<script src="/assets/verily.js" defer></script>
+<verily-badge backend-url="/api/verily" connection-id="CONNECTION_ID"></verily-badge>
 ```
 
 Clicking the badge opens the verification details:
@@ -163,7 +163,7 @@ Clicking the badge opens the verification details:
 A user with several accounts gets one badge for all of them. Give it every connection id, in any order:
 
 ```html
-<verity-badge backend-url="/api/verity" connection-ids="ID_ONE ID_TWO ID_THREE"></verity-badge>
+<verily-badge backend-url="/api/verily" connection-ids="ID_ONE ID_TWO ID_THREE"></verily-badge>
 ```
 
 It shows the account that was connected first, then how many more there are, such as `+2`. Clicking it opens the same details, with each account on its own card in the order they were connected. Only accounts that are verified now are counted, and one of those leads if the first has lapsed. An account that appears on more than one record, because it was shown a second way or removed and connected again, is shown once. The ids must all belong to the same user.
@@ -173,11 +173,11 @@ On a desktop, resting the pointer on that badge, or reaching it with the keyboar
 Add `stacked` to name the accounts in the badge itself, one to a row:
 
 ```html
-<verity-badge
-  backend-url="/api/verity"
+<verily-badge
+  backend-url="/api/verily"
   connection-ids="ID_ONE ID_TWO ID_THREE"
   stacked
-></verity-badge>
+></verily-badge>
 ```
 
 It lists up to four verified accounts in the order they were connected, then counts the rest as `+2 more`. It is still one badge that opens the one set of details. It is as tall as its rows, so give it a line of its own. With one verified account it is the ordinary badge. `mountBadges` and `presentConnections` take the same choices as `{ stacked: true }` and `{ peek: false }`.
@@ -191,7 +191,7 @@ await client.mountBadge(element, { connectionId }); // draws once; call again to
 await client.disconnect(connectionId);
 ```
 
-To match your site's look, set any of these CSS variables on an ancestor: `--verity-surface`, `--verity-text`, `--verity-border`, `--verity-muted`, `--verity-hover`, `--verity-font-family`, `--verity-font-size`.
+To match your site's look, set any of these CSS variables on an ancestor: `--verily-surface`, `--verily-text`, `--verily-border`, `--verily-muted`, `--verily-hover`, `--verily-font-family`, `--verily-font-size`.
 
 ## Proof methods
 
@@ -204,7 +204,7 @@ import {
   linkProvider,
   githubLinkProvider,
   pgpProvider,
-} from '@bkazemi/verity';
+} from '@bkazemi/verily';
 ```
 
 | Provider               | The user proves it by                                                                 | Setup                                   |
@@ -212,13 +212,13 @@ import {
 | `githubProvider()`     | signing in with GitHub.                                                               | A GitHub OAuth app.                     |
 | `discordProvider()`    | signing in with Discord.                                                              | A Discord application.                  |
 | `youtubeProvider()`    | signing in with Google and choosing their YouTube channel.                            | A Google OAuth client.                  |
-| `githubGistProvider()` | publishing a public gist containing a line Verity gives them.                         | None.                                   |
+| `githubGistProvider()` | publishing a public gist containing a line Verily gives them.                         | None.                                   |
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                     | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile.               | The local account needs a `profileUrl`. |
-| `pgpProvider()`        | signing a line Verity gives them with their OpenPGP key, then pasting it and the key. | None.                                   |
-| `emailProvider()`      | entering a code Verity mails to their address.                                        | A function that sends one message.      |
+| `pgpProvider()`        | signing a line Verily gives them with their OpenPGP key, then pasting it and the key. | None.                                   |
+| `emailProvider()`      | entering a code Verily mails to their address.                                        | A function that sends one message.      |
 
-All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verity re-reads them on a schedule. A PGP signature is kept by Verity and published at `<baseUrl>/connections/<id>/proof`.
+All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
 
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
@@ -228,11 +228,11 @@ providers: [githubProvider({ clientId, clientSecret }), githubLinkProvider()],
 
 Proving the same account a second way adds that proof to the existing record instead of creating another.
 
-**Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verity checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
+**Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verily checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
 
 **OpenPGP.** The key's fingerprint is the identity. An email address is shown only when the key signed it **and** either keys.openpgp.org has confirmed it or the address's domain publishes the key in its [web key directory](https://datatracker.ietf.org/doc/draft-koch-openpgp-webkey-service/). The key must be valid when the proof is checked (not expired or revoked), SHA-1 signatures are refused, and a signing subkey must be properly bound to its key.
 
-**Email.** Verity sends no mail itself. Give `emailProvider()` a `send` function and it hands that one message per flow, written as both HTML and plain text, through whatever already sends your mail:
+**Email.** Verily sends no mail itself. Give `emailProvider()` a `send` function and it hands that one message per flow, written as both HTML and plain text, through whatever already sends your mail:
 
 ```ts
 emailProvider({
@@ -254,17 +254,17 @@ emailProvider({
 }),
 ```
 
-The HTML loads nothing from anywhere, so nothing in it is blocked and it tells nobody it was opened. Its one image, the Verity logo, is attached to the message; a sender that drops `images` still sends a whole message, with the word in the logo's place.
+The HTML loads nothing from anywhere, so nothing in it is blocked and it tells nobody it was opened. Its one image, the Verily logo, is attached to the message; a sender that drops `images` still sends a whole message, with the word in the logo's place.
 
-The user types an address and Verity mails it a button to press, with an eight-character code beneath it as the other way in. The button opens a page on your backend, in whatever browser the mail is read in, and pressing **Confirm** there proves the mailbox; the page the user started on then carries on to the approval. Opening the link alone confirms nothing, so a mail scanner that follows links cannot answer for anyone. Both the link and the code last the flow's ten minutes, and the code gets five tries. The address is the account's name on the record, so a public link shows it to everyone; the user is told before the code is sent. It proves somebody could read that mailbox on the day, like a sign-in, and nothing is published or re-read later.
+The user types an address and Verily mails it a button to press, with an eight-character code beneath it as the other way in. The button opens a page on your backend, in whatever browser the mail is read in, and pressing **Confirm** there proves the mailbox; the page the user started on then carries on to the approval. Opening the link alone confirms nothing, so a mail scanner that follows links cannot answer for anyone. Both the link and the code last the flow's ten minutes, and the code gets five tries. The address is the account's name on the record, so a public link shows it to everyone; the user is told before the code is sent. It proves somebody could read that mailbox on the day, like a sign-in, and nothing is published or re-read later.
 
-A visitor chooses where the message goes, so Verity counts what it sends: at most 100 messages in any twenty-four hours, and at most 5 to any one address. Past either, the flow fails and tells the user to try again tomorrow. Set `sendLimits: { day, address }` beside `providers` to change them, or `Infinity` to lift one. The day's count is shared, so one visitor can still spend it; rate limit `POST <baseUrl>/sessions` and `POST <baseUrl>/flows/*/submit` as well.
+A visitor chooses where the message goes, so Verily counts what it sends: at most 100 messages in any twenty-four hours, and at most 5 to any one address. Past either, the flow fails and tells the user to try again tomorrow. Set `sendLimits: { day, address }` beside `providers` to change them, or `Infinity` to lift one. The day's count is shared, so one visitor can still spend it; rate limit `POST <baseUrl>/sessions` and `POST <baseUrl>/flows/*/submit` as well.
 
 `resendSender({ apiKey, from })` is a ready-made `send` for [Resend](https://resend.com), using only `fetch`:
 
 ```ts
 emailProvider({
-  send: resendSender({ apiKey: process.env.RESEND_API_KEY!, from: 'Verity <verify@community.example>' }),
+  send: resendSender({ apiKey: process.env.RESEND_API_KEY!, from: 'Verily <verify@community.example>' }),
 }),
 ```
 
@@ -276,32 +276,32 @@ A static site only needs the script and the badge markup; the backend runs somew
 
 1. Clone this repository, run `npm ci`, and copy `wrangler.example.jsonc` to `wrangler.jsonc`. Fill in your account, origin and owner details.
 2. Run `wrangler secret put` for `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `OWNER_KEY`, then `npm run cloudflare:deploy`.
-3. On the backend's site, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/api/verity/mine`.
+3. On the backend's site, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/api/verily/mine`.
 4. Add the script and the badge to your site:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@bkazemi/verity@0.0.12/dist/verity.js" defer></script>
-<verity-badge
-  backend-url="https://your-backend.example/api/verity"
+<script src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.0.12/dist/verily.js" defer></script>
+<verily-badge
+  backend-url="https://your-backend.example/api/verily"
   connection-id="CONNECTION_ID"
-></verity-badge>
+></verily-badge>
 ```
 
 Run the backend on a domain readers can connect to your site, because `PUBLIC_ORIGIN` is shown as the verifier. If your site sets a Content Security Policy, allow the backend in `connect-src`.
 
 ## Using a hosted instance
 
-A site can use an instance someone else runs. The instance's operator registers your site and gives you its id and a key. You register nothing with any sign-in provider, store no Verity records and run no Verity backend. Your backend sends a signed-in user to the instance and reads their connections back.
+A site can use an instance someone else runs. The instance's operator registers your site and gives you its id and a key. You register nothing with any sign-in provider, store no Verily records and run no Verily backend. Your backend sends a signed-in user to the instance and reads their connections back.
 
 You are trusting that operator. They can read every record made through their instance, unlisted ones included, and for sign-in and email methods a reader has only the operator's word that the account was verified. Link-back, gist and PGP proofs can be rechecked by anyone. A site that does not want to rely on an operator runs its own instance.
 
 ```ts
-import { createSiteClient } from '@bkazemi/verity/site';
+import { createSiteClient } from '@bkazemi/verily/site';
 
-const verity = createSiteClient({
-  instance: 'https://verity.example',
+const verily = createSiteClient({
+  instance: 'https://verily.example',
   site: 'your-site-id',
-  key: process.env.VERITY_SITE_KEY,
+  key: process.env.VERILY_SITE_KEY,
 });
 ```
 
@@ -310,7 +310,7 @@ The client has no dependencies and uses only Web Crypto and `fetch`, so it runs 
 **1. Mount the handler.** It serves the endpoints the instance and the pill need. Give it your own session lookup, and mount it on every path under one prefix:
 
 ```ts
-const handle = verity.handler({
+const handle = verily.handler({
   authenticate: async (request) => {
     const user = await yourSession(request);
     if (!user) return undefined;
@@ -325,8 +325,8 @@ const handle = verity.handler({
   returnUrl: '/settings', // where a user lands when they come back
 });
 
-// GET and POST /api/verity/*
-app.all('/api/verity/*', (request) => handle(request));
+// GET and POST /api/verily/*
+app.all('/api/verily/*', (request) => handle(request));
 ```
 
 The authorize and return URLs the instance's operator registers for you are `<prefix>/authorize` and `<prefix>/return`.
@@ -334,38 +334,38 @@ The authorize and return URLs the instance's operator registers for you are `<pr
 **2. Show the connect pill.** The user verifies in a dialog on your page, without leaving it. Only the provider's own sign-in opens in a small window:
 
 ```html
-<script src="/assets/verity.js" defer></script>
-<verity-connect
-  backend-url="https://verity.example/api/verity"
-  handoff-url="/api/verity/handoff"
-></verity-connect>
+<script src="/assets/verily.js" defer></script>
+<verily-connect
+  backend-url="https://verily.example/api/verily"
+  handoff-url="/api/verily/handoff"
+></verily-connect>
 ```
 
-The element fires `verity-result` when a link is made, so read the user's connections again then.
+The element fires `verily-result` when a link is made, so read the user's connections again then.
 
 Once a user has a link, show their badge in place of the pill, and give it the same two attributes. On the user's own page only: they mark the reader as the holder.
 
 ```html
-<verity-badge
+<verily-badge
   connections="[...the records, as JSON...]"
-  backend-url="https://verity.example/api/verity"
-  handoff-url="/api/verity/handoff"
-></verity-badge>
+  backend-url="https://verily.example/api/verily"
+  handoff-url="/api/verily/handoff"
+></verily-badge>
 ```
 
-The badge's dialog then has Renew and Remove under each account, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verity-result` on each change. `verity.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
+The badge's dialog then has Renew and Remove under each account, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verily-result` on each change. `verily.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
 
 **3. Read connections where you show them.**
 
 ```ts
-const { [user.id]: connections } = await verity.connections([user.id]);
+const { [user.id]: connections } = await verily.connections([user.id]);
 const verified = connections.filter((c) => c.status === 'verified');
 ```
 
 To show them, hand the records to the badge. It draws them as given and fetches nothing, so it works for unlisted links, which a browser cannot read for itself:
 
 ```html
-<verity-badge connections="[...the records, as JSON...]"></verity-badge>
+<verily-badge connections="[...the records, as JSON...]"></verily-badge>
 ```
 
 From script, set the property instead: `badge.connections = records`. Send a page only the records its reader may see: whatever is in the page, the reader has. Several records become one badge, as under [Show the badge](#show-the-badge), and an unlisted one opens its details without linking anywhere.
@@ -375,18 +375,18 @@ Each record has the provider, the external account's handle and profile address,
 If you would rather your user ids never left your site, give the client a secret:
 
 ```ts
-const verity = createSiteClient({ instance, site, key, idSecret: process.env.VERITY_ID_SECRET });
+const verily = createSiteClient({ instance, site, key, idSecret: process.env.VERILY_ID_SECRET });
 ```
 
 Every id you pass is then your own, and the instance is sent a stand-in. A subject with no `reference` gets one made the same way. The same secret and user always give the same stand-in, so nothing is stored. That secret must never change, so keep one for this alone.
 
-A site that would rather write its own endpoints can: `verity.authorize(state, subject)` signs the redirect handoff, `verity.handoff(subject)` the pill's, and `verity.result(token)` checks what a user returns with.
+A site that would rather write its own endpoints can: `verily.authorize(state, subject)` signs the redirect handoff, `verily.handoff(subject)` the pill's, and `verily.result(token)` checks what a user returns with.
 
-**Moving to your own instance.** Hosting Verity yourself replaces `verity.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Set up the server](#set-up-the-server). Records are not moved between instances, so users verify again.
+**Moving to your own instance.** Hosting Verily yourself replaces `verily.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Set up the server](#set-up-the-server). Records are not moved between instances, so users verify again.
 
 ## Serving other sites
 
-One backend can serve sites that don't run Verity themselves, so none of them registers anything with a sign-in provider. A subject from such a site names it in `LocalAccount.siteName`, and every page, proof line and record describing that subject uses the name in place of the `siteName` option. The backend stays the verifier.
+One backend can serve sites that don't run Verily themselves, so none of them registers anything with a sign-in provider. A subject from such a site names it in `LocalAccount.siteName`, and every page, proof line and record describing that subject uses the name in place of the `siteName` option. The backend stays the verifier.
 
 Three options tie a flow to the site that sent the holder:
 
@@ -405,22 +405,22 @@ Two more narrow what a subject is offered, for a backend whose sites don't all w
 Evidence is normally believed because the verifier's own origin serves it. Set a signing key and each public record can also be downloaded as a file signed with OpenPGP, which anyone can check later with `gpg`, without the instance being up.
 
 ```ts
-import { createVerity, generateSigningKey } from '@bkazemi/verity';
+import { createVerily, generateSigningKey } from '@bkazemi/verily';
 
 // Make the key once and keep it with your other secrets. It is an armored OpenPGP
 // private key, so it spans several lines.
 console.log(await generateSigningKey('verifier.example'));
 
-createVerity({
+createVerily({
   // ...
-  signingKey: process.env.VERITY_SIGNING_KEY,
+  signingKey: process.env.VERILY_SIGNING_KEY,
 });
 ```
 
 With a key set:
 
 - **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form.
-- **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verity-keys.json`.
+- **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verily-keys.json`.
 - **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
 - The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
 - The approval step tells the holder that a saved signed record outlives removal.
@@ -428,16 +428,16 @@ With a key set:
 To check a file yourself:
 
 ```sh
-curl https://verifier.example/api/verity/keys.asc | gpg --import
-gpg --verify verity-<id>.asc
+curl https://verifier.example/api/verily/keys.asc | gpg --import
+gpg --verify verily-<id>.asc
 ```
 
 Or in code, which runs in a browser too:
 
 ```ts
-import { verifySigned } from '@bkazemi/verity';
+import { verifySigned } from '@bkazemi/verily';
 
-const { keys } = await (await fetch('https://verifier.example/api/verity/keys')).json();
+const { keys } = await (await fetch('https://verifier.example/api/verily/keys')).json();
 const record = await verifySigned(file, keys); // undefined if no key signed it
 ```
 
@@ -457,10 +457,10 @@ Run the upkeep on a schedule, for example hourly:
 setInterval(
   async () => {
     try {
-      await verity.service.prune();
-      await verity.service.recheck(); // only needed if you use a method other than signing in
+      await verily.service.prune();
+      await verily.service.recheck(); // only needed if you use a method other than signing in
     } catch (error) {
-      console.error('Verity upkeep failed', error);
+      console.error('Verily upkeep failed', error);
     }
   },
   60 * 60 * 1000,
@@ -476,7 +476,7 @@ setInterval(
 
 Clone the repository and run `npm ci`. `npm run preview` then shows the badge in every state at http://localhost:3001, with no other setup.
 
-The full example also needs Postgres and a GitHub OAuth app, a Discord application or a Google OAuth client (any of them) with the callback URL `http://localhost:3000/api/verity/callback`:
+The full example also needs Postgres and a GitHub OAuth app, a Discord application or a Google OAuth client (any of them) with the callback URL `http://localhost:3000/api/verily/callback`:
 
 ```sh
 npm run build
@@ -492,7 +492,7 @@ npm run build
 npm run check
 npm run format:check   # npm run format fixes formatting
 npm test
-TEST_DATABASE_URL=postgres://verity:verity@localhost:5432/verity npm test
+TEST_DATABASE_URL=postgres://verily:verily@localhost:5432/verily npm test
 npm run test:consumer
 ```
 
@@ -500,4 +500,4 @@ The Postgres and example tests only run when `TEST_DATABASE_URL` is set. The oth
 
 ## License
 
-MIT. Signed records and `pgpProvider()` use [OpenPGP.js](https://github.com/openpgpjs/openpgpjs), which is LGPL-3.0-or-later. The badge script `verity.js` includes it, unmodified, to check signatures; its licence is in [`docs/licenses/openpgp.txt`](docs/licenses/openpgp.txt).
+MIT. Signed records and `pgpProvider()` use [OpenPGP.js](https://github.com/openpgpjs/openpgpjs), which is LGPL-3.0-or-later. The badge script `verily.js` includes it, unmodified, to check signatures; its licence is in [`docs/licenses/openpgp.txt`](docs/licenses/openpgp.txt).

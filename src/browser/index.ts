@@ -336,7 +336,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     const vouched: unknown = handed.ok ? await handed.json() : undefined;
 
     if (!record(vouched) || typeof vouched.token !== 'string')
-      throw new Error('Verity request unavailable');
+      throw new Error('Verily request unavailable');
 
     const traded = await fetch(`${base.href}/site/session`, {
       method: 'POST',
@@ -349,7 +349,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     const opened: unknown = traded.ok ? await traded.json() : undefined;
 
     if (!record(opened) || typeof opened.session !== 'string')
-      throw new Error('Verity request unavailable');
+      throw new Error('Verily request unavailable');
 
     return opened.session;
   }
@@ -366,16 +366,16 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       method: data ? 'POST' : 'GET',
       headers: {
         Authorization: `Bearer ${await (session ??= openSession())}`,
-        ...(binding ? { 'X-Verity-Flow': binding } : {}),
+        ...(binding ? { 'X-Verily-Flow': binding } : {}),
         ...(data ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(data ? { body: JSON.stringify(data) } : {}),
     });
 
-    if (!response.ok) throw new Error('Verity request unavailable');
+    if (!response.ok) throw new Error('Verily request unavailable');
 
     const answer: unknown = await response.json();
-    const bound = response.headers.get('X-Verity-Flow');
+    const bound = response.headers.get('X-Verily-Flow');
 
     // Only starting a flow sets a binding, and the answer names the flow it is for.
     if (bound && record(answer) && typeof answer.id === 'string') bindings.set(answer.id, bound);
@@ -396,7 +396,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
         : {}),
     });
 
-    if (!response.ok) throw new Error('Verity request unavailable');
+    if (!response.ok) throw new Error('Verily request unavailable');
 
     return response.json();
   }
@@ -446,7 +446,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
                 event.source !== popup ||
                 event.origin !== base.origin ||
                 !record(event.data) ||
-                event.data.type !== 'verity-enter'
+                event.data.type !== 'verily-enter'
               )
                 return;
 
@@ -454,7 +454,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
               popup.postMessage(
                 {
-                  type: 'verity-enter',
+                  type: 'verily-enter',
                   flow: flow.id,
                   binding: bindings.get(flow.id),
                   url: flow.authorizationUrl,
@@ -489,7 +489,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       return openConnectDialog(opener, flows, back, provider);
     },
     /**
-     * Draws the pill that opens the connect dialog. The host receives a `verity-result`
+     * Draws the pill that opens the connect dialog. The host receives a `verily-result`
      * event, whose detail is the Result, whenever the dialog closes on a new connection.
      */
     mountConnect(element: HTMLElement) {
@@ -508,7 +508,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
         if (result.outcome === 'complete')
           element.dispatchEvent(
-            new CustomEvent('verity-result', { detail: result, bubbles: true, composed: true }),
+            new CustomEvent('verily-result', { detail: result, bubbles: true, composed: true }),
           );
       };
     },
@@ -544,7 +544,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
               event.origin !== base.origin ||
               event.source !== popup ||
               !record(event.data) ||
-              event.data.type !== 'verity-result'
+              event.data.type !== 'verily-result'
             )
               return;
 
@@ -840,14 +840,14 @@ function validEvidence(value: unknown): value is Evidence {
   );
 }
 
-if (typeof customElements !== 'undefined' && !customElements.get('verity-connect')) {
+if (typeof customElements !== 'undefined' && !customElements.get('verily-connect')) {
   /**
    * The pill a signed-in holder clicks to connect an account, in a dialog over the page.
    * A site registered with an instance on another origin names it in `backend-url` and
    * adds `handoff-url`, its own endpoint that vouches for its signed-in user.
    */
   customElements.define(
-    'verity-connect',
+    'verily-connect',
     class extends HTMLElement {
       static observedAttributes = ['backend-url', 'handoff-url'];
 
@@ -872,9 +872,9 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-connect
   );
 }
 
-if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')) {
+if (typeof customElements !== 'undefined' && !customElements.get('verily-badge')) {
   customElements.define(
-    'verity-badge',
+    'verily-badge',
     class extends HTMLElement {
       /**
        * Evidence an embed already fetched, handed over before the badge is presented so
@@ -979,13 +979,13 @@ if (typeof customElements !== 'undefined' && !customElements.get('verity-badge')
 
         // The holder's own badge, where the page says so: its dialog connects another
         // account, renews one and removes one, through the backend named. The host hears
-        // of each change in a `verity-result` event, to read its records again.
+        // of each change in a `verily-result` event, to read its records again.
         if (backendUrl && (handoffUrl !== null || this.getAttribute('connect') !== null)) {
           const client = init({ backendUrl, handoffUrl: handoffUrl ?? undefined });
 
           const changed = (detail: object) =>
             this.dispatchEvent(
-              new CustomEvent('verity-result', { detail, bubbles: true, composed: true }),
+              new CustomEvent('verily-result', { detail, bubbles: true, composed: true }),
             );
 
           managers.set(this, {

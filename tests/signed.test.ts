@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as openpgp from 'openpgp';
 import {
-  createVerity,
+  createVerily,
   emailProvider,
   generateSigningKey,
   signer,
@@ -28,10 +28,10 @@ function fixture(signing: { signingKey?: string | (() => Promise<string>) } = {}
   let now = 1000000;
   const outbox: EmailMessage[] = [];
 
-  const app = createVerity({
+  const app = createVerily({
     storage: new MemoryStorage(),
     providers: [emailProvider({ send: async (message) => void outbox.push(message) })],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'verifier.test',
     profileOrigins: ['https://site.test'],
@@ -51,7 +51,7 @@ function fixture(signing: { signingKey?: string | (() => Promise<string>) } = {}
   }
 
   const request = (path: string, options: RequestInit = {}) =>
-    app.handle(new Request(`https://site.test/api/verity${path}`, options));
+    app.handle(new Request(`https://site.test/api/verily${path}`, options));
 
   const check = (record: string) =>
     request('/check', {
@@ -75,7 +75,7 @@ function fixture(signing: { signingKey?: string | (() => Promise<string>) } = {}
 }
 
 const document: SignedDocument = {
-  type: 'verity-evidence',
+  type: 'verily-evidence',
   version: 1,
   issuedAt: 5,
   id: 'c1',
@@ -95,7 +95,7 @@ const document: SignedDocument = {
   approvedAt: 1,
   visibilityApprovedAt: 1,
   expiresAt: 10,
-  evidenceUrl: 'https://site.test/api/verity/connections/c1',
+  evidenceUrl: 'https://site.test/api/verily/connections/c1',
 };
 
 test('a signed record checks against its key, and against nothing else', async () => {
@@ -169,7 +169,7 @@ test('what this signs, OpenPGP.js and GnuPG both read as signed by the same key'
 
   if (spawnSync('gpg', ['--version']).status !== 0) return t.diagnostic('gpg is not installed');
 
-  const home = mkdtempSync(join(tmpdir(), 'verity-gpg-'));
+  const home = mkdtempSync(join(tmpdir(), 'verily-gpg-'));
 
   try {
     const gpg = (file: string, text: string, ...args: string[]) => {
@@ -611,7 +611,7 @@ test('a public record is served signed as of now, and checks against the publish
   const id = await f.connect();
   const evidence = await f.service.read(id);
 
-  assert.equal(evidence.signedUrl, `https://site.test/api/verity/connections/${id}?format=signed`);
+  assert.equal(evidence.signedUrl, `https://site.test/api/verily/connections/${id}?format=signed`);
 
   f.advance(5000);
 
@@ -622,7 +622,7 @@ test('a public record is served signed as of now, and checks against the publish
 
   assert.match(
     response.headers.get('content-disposition')!,
-    /^attachment; filename="verity-.+\.asc"$/,
+    /^attachment; filename="verily-.+\.asc"$/,
   );
 
   const signed = await response.text();
@@ -642,7 +642,7 @@ test('a public record is served signed as of now, and checks against the publish
   assert.match(
     await (await f.request(`/connections/${id}`)).text(),
     new RegExp(
-      `<p class="signed" id="signed"><strong>Signed by verifier\\.test</strong> with OpenPGP key <a href="/api/verity/keys\\.asc">${await signedBy(signed)}</a>\\. <a [^>]*>Download the signed record`,
+      `<p class="signed" id="signed"><strong>Signed by verifier\\.test</strong> with OpenPGP key <a href="/api/verily/keys\\.asc">${await signedBy(signed)}</a>\\. <a [^>]*>Download the signed record`,
     ),
   );
 });
@@ -704,7 +704,7 @@ test('the check page reads a signed record back, and refuses one it did not sign
   assert.match(page, /verifier\.test signed this record/);
   assert.match(page, /alice@example\.test/);
   assert.match(page, new RegExp(`Signing key <a [^>]*>${await signedBy(signed)}</a>`));
-  assert.match(page, new RegExp(`href="https://site\\.test/api/verity/connections/${id}"`));
+  assert.match(page, new RegExp(`href="https://site\\.test/api/verily/connections/${id}"`));
 
   const forged = await (
     await signer(await newKey())
@@ -726,10 +726,10 @@ test('a retired key still checks what it signed', async () => {
   const before = fixture({ signingKey: old });
   const signed = await before.service.signed(await before.connect());
 
-  const after = createVerity({
+  const after = createVerily({
     storage: new MemoryStorage(),
     providers: [emailProvider({ send: async () => {} })],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'verifier.test',
     profileOrigins: ['https://site.test'],

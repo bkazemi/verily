@@ -15,11 +15,11 @@ const resultMs = 10 * 60000;
 /** How many subjects one read may name. */
 const maxReadIds = 50;
 
-const stateCookie = 'verity_handoff';
+const stateCookie = 'verily_handoff';
 
-export const sessionCookie = 'verity_site';
+export const sessionCookie = 'verily_site';
 
-/** A site that sends its users here instead of hosting Verity itself. */
+/** A site that sends its users here instead of hosting Verily itself. */
 export interface Site {
   /** Prefixes its subjects' ids, and names it in every token. */
   id: string;

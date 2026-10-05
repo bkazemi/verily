@@ -124,7 +124,7 @@ export function linkProvider(options: LinkProviderOptions): ArtifactProvider {
       const response = await request(page.href, {
         // Workers refuse 'error', so a redirect comes back as a response and is refused below.
         redirect: 'manual',
-        headers: { Accept: 'text/html, */*;q=0.1', 'User-Agent': 'Verity-V0' },
+        headers: { Accept: 'text/html, */*;q=0.1', 'User-Agent': 'Verily-V0' },
         signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
       }).catch(() => {
         throw new Refused('Page could not be reached');

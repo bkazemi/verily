@@ -18,15 +18,15 @@ const sites = [
     id: 'partner',
     name: 'Partner',
     origin: 'https://partner.test',
-    authorizeUrl: 'https://partner.test/verity/authorize',
-    returnUrl: 'https://partner.test/verity/return',
+    authorizeUrl: 'https://partner.test/verily/authorize',
+    returnUrl: 'https://partner.test/verily/return',
   },
   {
     id: 'other',
     name: 'Other',
     origin: 'https://other.test',
-    authorizeUrl: 'https://other.test/verity/authorize',
-    returnUrl: 'https://other.test/verity/return',
+    authorizeUrl: 'https://other.test/verily/authorize',
+    returnUrl: 'https://other.test/verily/return',
     // This site's holders are offered Discord and nothing else the instance has.
     providers: ['discord'],
   },
@@ -34,8 +34,8 @@ const sites = [
     id: 'quiet',
     name: 'Quiet',
     origin: 'https://quiet.test',
-    authorizeUrl: 'https://quiet.test/verity/authorize',
-    returnUrl: 'https://quiet.test/verity/return',
+    authorizeUrl: 'https://quiet.test/verily/authorize',
+    returnUrl: 'https://quiet.test/verily/return',
     // This site's holders make unlisted links only, which the site reads with its key.
     visibility: ['unlisted'],
   },
@@ -45,7 +45,7 @@ let directory: string;
 let scriptPath: string;
 
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'verity-sites-'));
+  directory = await mkdtemp(join(tmpdir(), 'verily-sites-'));
   scriptPath = join(directory, 'worker.mjs');
   await buildWorker(scriptPath);
 });
@@ -56,14 +56,14 @@ after(() => rm(directory, { recursive: true, force: true }));
 function instance() {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
-      name: 'verity-sites-test',
+      name: 'verily-sites-test',
       rootPath: directory,
       modules: true,
       scriptPath,
       compatibilityDate: '2026-07-01',
       compatibilityFlags: ['nodejs_compat'],
       durableObjects: {
-        VERITY: { className: 'VerityStore', useSQLite: true },
+        VERILY: { className: 'VerilyStore', useSQLite: true },
         PROBE: { className: 'StorageProbe', useSQLite: true },
       },
       bindings: {
@@ -98,7 +98,7 @@ function instance() {
 
   /** The object's own storage and alarm, through the fixture's test-only door. */
   const probe = async (path: string, init?: RequestInit) => {
-    const namespace = await mf.getDurableObjectNamespace('VERITY');
+    const namespace = await mf.getDurableObjectNamespace('VERILY');
     const stub = namespace.get(namespace.idFromName('site-owner'));
 
     return (await (await stub.fetch(`https://probe${path}`, init as never)).json()) as Record<
@@ -160,13 +160,13 @@ class Browser {
 
   /** Runs a GitHub sign-in flow from its first request to its approval page's path. */
   async signIn(start: string) {
-    const begun = start.startsWith('/api/verity/sessions?')
+    const begun = start.startsWith('/api/verily/sessions?')
       ? await this.fetch(start)
-      : await this.post('/api/verity/sessions', start);
+      : await this.post('/api/verily/sessions', start);
 
     assert.equal(begun.status, 303, await begun.text());
     const state = new URL(begun.headers.get('location')!).searchParams.get('state')!;
-    const callback = await this.fetch(`/api/verity/callback?state=${state}&code=fixture`);
+    const callback = await this.fetch(`/api/verily/callback?state=${state}&code=fixture`);
 
     return callback.headers.get('location')!;
   }
@@ -219,7 +219,7 @@ test('a handoff binds to the browser that asked for it, and every bad one is ref
 
     const state = await a.begin();
 
-    assert.ok(a.cookies.has('verity_handoff'));
+    assert.ok(a.cookies.has('verily_handoff'));
     const token = handoff(state);
 
     // Binding: an unused handoff sent to another browser is refused there, whether that
@@ -235,11 +235,11 @@ test('a handoff binds to the browser that asked for it, and every bad one is ref
     const accepted = await a.fetch(`/start?token=${token}`);
 
     assert.equal(accepted.status, 303);
-    assert.equal(accepted.headers.get('location'), '/api/verity/verify');
-    assert.ok(a.cookies.has('verity_site'));
-    assert.ok(!a.cookies.has('verity_handoff'));
+    assert.equal(accepted.headers.get('location'), '/api/verily/verify');
+    assert.ok(a.cookies.has('verily_site'));
+    assert.ok(!a.cookies.has('verily_handoff'));
 
-    const verify = await (await a.fetch('/api/verity/verify')).text();
+    const verify = await (await a.fetch('/api/verily/verify')).text();
 
     assert.match(verify, /Account on Partner/);
     assert.ok(!verify.includes('shirkadeh.test'));
@@ -348,21 +348,21 @@ test('a site holder connects, returns with a signed result, and manages from a s
       return response.headers.get('location')!;
     };
 
-    assert.equal(await open('connect', 'txn-1'), '/api/verity/verify');
+    assert.equal(await open('connect', 'txn-1'), '/api/verily/verify');
 
-    const binding = () => [...a.cookies].find(([name]) => name.startsWith('verity_flow_'))!;
+    const binding = () => [...a.cookies].find(([name]) => name.startsWith('verily_flow_'))!;
 
     // Two more flows from the same handoff: one left at the provider, one at its approval page.
-    const early = await a.fetch('/api/verity/sessions?kind=connect&provider=github&method=oauth');
+    const early = await a.fetch('/api/verily/sessions?kind=connect&provider=github&method=oauth');
     const earlyState = new URL(early.headers.get('location')!).searchParams.get('state')!;
     const earlyBinding = binding();
 
     const stranded = await a.signIn(
-      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+      '/api/verily/sessions?kind=connect&provider=github&method=oauth',
     );
 
     const strandedBinding = binding();
-    const flow = await a.signIn('/api/verity/sessions?kind=connect&provider=github&method=oauth');
+    const flow = await a.signIn('/api/verily/sessions?kind=connect&provider=github&method=oauth');
     const review = await a.fetch(flow);
     const page = await review.text();
 
@@ -380,7 +380,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     const connected = result(approved.headers.get('location')!);
 
-    assert.equal(connected.at, 'https://partner.test/verity/return');
+    assert.equal(connected.at, 'https://partner.test/verily/return');
     assert.equal(connected.site, 'partner');
     assert.equal(connected.id, '123');
     assert.equal(connected.operation, 'connect');
@@ -413,7 +413,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // Nor does one that ends afterwards return a second result for the same transaction.
     a.cookies.set(...earlyBinding);
 
-    const late = await a.fetch(`/api/verity/callback?state=${earlyState}&error=access_denied`);
+    const late = await a.fetch(`/api/verily/callback?state=${earlyState}&error=access_denied`);
     const lateEnd = await a.fetch(late.headers.get('location')!);
 
     assert.equal(lateEnd.status, 200);
@@ -422,8 +422,8 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.equal((await a.fetch(flow)).headers.get('location'), approved.headers.get('location'));
 
     // The return closed the session: nothing new starts from that handoff.
-    assert.equal((await a.fetch('/api/verity/verify')).status, 404);
-    assert.equal((await a.fetch('/api/verity/sessions?kind=connect')).status, 404);
+    assert.equal((await a.fetch('/api/verily/verify')).status, 404);
+    assert.equal((await a.fetch('/api/verily/sessions?kind=connect')).status, 404);
     assert.match(await (await a.fetch('/')).text(), /Session ended/);
 
     // A manage handoff lands on the settings page for that subject, without sharing or embeds.
@@ -447,12 +447,12 @@ test('a site holder connects, returns with a signed result, and manages from a s
     );
 
     assert.match(settings, /action="\/disconnect"/);
-    assert.ok(!settings.includes('verity-badge'));
+    assert.ok(!settings.includes('verily-badge'));
     assert.ok(!settings.includes('Sign out'));
 
     for (const route of ['disconnect', 'share', 'share-revoke'])
       assert.equal(
-        (await a.post(`/api/verity/connections/${connected.connection}/${route}`)).status,
+        (await a.post(`/api/verily/connections/${connected.connection}/${route}`)).status,
         404,
         route,
       );
@@ -468,7 +468,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.equal(made.connection, connected.connection);
     assert.equal(made.txn, 'txn-2');
 
-    const evidence = `/api/verity/connections/${connected.connection}?format=json`;
+    const evidence = `/api/verily/connections/${connected.connection}?format=json`;
 
     const status = async () =>
       ((await (await a.fetch(evidence)).json()) as { status: string }).status;
@@ -480,7 +480,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     // A visibility flow is already at the provider when the disconnect is attempted.
     const waiting = await a.post(
-      '/api/verity/sessions',
+      '/api/verily/sessions',
       `kind=visibility&connectionId=${connected.connection}`,
     );
 
@@ -498,10 +498,10 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.equal(await status(), 'verified');
 
     // The pending disconnect holds the session's one result, so nothing else starts.
-    assert.equal((await a.fetch(`/api/verity/visibility/${connected.connection}`)).status, 404);
+    assert.equal((await a.fetch(`/api/verily/visibility/${connected.connection}`)).status, 404);
 
     assert.equal(
-      (await a.post('/api/verity/sessions', `kind=visibility&connectionId=${connected.connection}`))
+      (await a.post('/api/verily/sessions', `kind=visibility&connectionId=${connected.connection}`))
         .status,
       404,
     );
@@ -511,7 +511,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // That earlier flow ends when the holder comes back from the provider, which needs no
     // session. It ends on its own page: the disconnect holds this transaction's result.
     const declined = await a.fetch(
-      `/api/verity/callback?state=${waitingState}&error=access_denied`,
+      `/api/verily/callback?state=${waitingState}&error=access_denied`,
     );
 
     const ending = await a.fetch(declined.headers.get('location')!);
@@ -526,7 +526,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.deepEqual(
       { ...removed, exp: undefined },
       {
-        at: 'https://partner.test/verity/return',
+        at: 'https://partner.test/verily/return',
         site: 'partner',
         id: '123',
         operation: 'disconnect',
@@ -543,7 +543,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // A failure after it commits, before the result is marked, is finished by a retry with
     // the one result, however many times it is asked again.
     await open('connect', 'txn-4');
-    const second = await a.signIn('/api/verity/sessions?kind=connect&provider=github&method=oauth');
+    const second = await a.signIn('/api/verily/sessions?kind=connect&provider=github&method=oauth');
 
     const secondId = result(
       (await a.post(`${second}/approve`, 'action=approve&visibility=unlisted')).headers.get(
@@ -586,7 +586,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.equal(ownApproval.status, 200);
     assert.match(await ownApproval.text(), /data-outcome="complete"/);
 
-    const ownerRecords = (await (await owner.fetch('/api/verity/mine')).json()) as {
+    const ownerRecords = (await (await owner.fetch('/api/verily/mine')).json()) as {
       id: string;
       siteName: string;
       local: { kind: string };
@@ -602,7 +602,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     await owner.fetch(`/start?token=${handoff(await owner.begin(), { txn: 'txn-owner' })}`);
 
     const cancelled = await owner.signIn(
-      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+      '/api/verily/sessions?kind=connect&provider=github&method=oauth',
     );
 
     assert.equal(
@@ -613,7 +613,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.match(await (await owner.fetch('/')).text(), /Owner settings/);
 
     assert.equal(
-      (await owner.post(`/api/verity/connections/${ownerRecords[0]!.id}/disconnect`)).status,
+      (await owner.post(`/api/verily/connections/${ownerRecords[0]!.id}/disconnect`)).status,
       200,
     );
 
@@ -651,8 +651,8 @@ test('requests are limited per session, per client and per site, GETs that creat
     // A cookie that is no session earns no bucket of its own.
     const forged = browser('198.51.100.1');
 
-    forged.cookies.set('verity_owner', 'forged');
-    assert.equal((await forged.fetch('/api/verity/sessions?kind=connect')).status, 429);
+    forged.cookies.set('verily_owner', 'forged');
+    assert.equal((await forged.fetch('/api/verily/sessions?kind=connect')).status, 429);
 
     const real = browser('198.51.100.3');
 
@@ -660,10 +660,10 @@ test('requests are limited per session, per client and per site, GETs that creat
     await real.post('/login', `key=${'a'.repeat(43)}`);
 
     for (let i = 0; i < 60; i++)
-      assert.equal((await real.fetch('/api/verity/callback?state=x')).status, 404);
+      assert.equal((await real.fetch('/api/verily/callback?state=x')).status, 404);
 
-    assert.equal((await real.fetch('/api/verity/callback?state=x')).status, 429);
-    assert.equal((await browser('198.51.100.3').fetch('/api/verity/callback?state=x')).status, 404);
+    assert.equal((await real.fetch('/api/verily/callback?state=x')).status, 429);
+    assert.equal((await browser('198.51.100.3').fetch('/api/verily/callback?state=x')).status, 404);
 
     // One site's traffic reaches its ceiling without reaching another site's.
     for (let client = 0; client < 20; client++) {
@@ -682,7 +682,7 @@ test('requests are limited per session, per client and per site, GETs that creat
     // A dialog's handoff arrives with no cookie to say whose it is, and still counts
     // against the site that signed it. One that does not verify spends nothing of a site's.
     const trade = (key: string) =>
-      mf.dispatchFetch(`${origin}/api/verity/site/session`, {
+      mf.dispatchFetch(`${origin}/api/verily/site/session`, {
         method: 'POST',
         body: JSON.stringify({
           token: sign(
@@ -765,7 +765,7 @@ test('the alarm deletes abandoned handoffs, expired sessions and idle buckets, a
       );
     }
 
-    assert.match(await (await session.fetch('/api/verity/verify')).text(), /Account on Partner/);
+    assert.match(await (await session.fetch('/api/verily/verify')).text(), /Account on Partner/);
   } finally {
     await mf.dispose();
   }
@@ -785,7 +785,7 @@ test('a site that lists its providers has its holders offered those, and held to
 
     assert.equal((await member.fetch(`/start?token=${token}`)).status, 303);
 
-    const offered = await (await member.fetch('/api/verity/verify')).text();
+    const offered = await (await member.fetch('/api/verily/verify')).text();
 
     assert.match(offered, /<h1>Verify with Discord<\/h1>/);
     assert.match(offered, /Account on Other/);
@@ -795,16 +795,16 @@ test('a site that lists its providers has its holders offered those, and held to
     for (const method of ['oauth', 'backlink']) {
       const query = `kind=connect&provider=github&method=${method}`;
 
-      assert.equal((await member.fetch(`/api/verity/sessions?${query}`)).status, 404, method);
-      assert.equal((await member.post('/api/verity/sessions', query)).status, 404, method);
+      assert.equal((await member.fetch(`/api/verily/sessions?${query}`)).status, 404, method);
+      assert.equal((await member.post('/api/verily/sessions', query)).status, 404, method);
     }
 
-    assert.equal((await member.fetch('/api/verity/verify?provider=github')).status, 404);
+    assert.equal((await member.fetch('/api/verily/verify?provider=github')).status, 404);
 
     // Asking for nothing runs the first one the site lists, not the first one configured.
     for (const start of [
-      await member.fetch('/api/verity/sessions?kind=connect'),
-      await member.post('/api/verity/sessions', 'kind=connect'),
+      await member.fetch('/api/verily/sessions?kind=connect'),
+      await member.post('/api/verily/sessions', 'kind=connect'),
     ]) {
       assert.equal(start.status, 303);
       assert.equal(new URL(start.headers.get('location')!).host, 'discord.com');
@@ -814,7 +814,7 @@ test('a site that lists its providers has its holders offered those, and held to
     const all = browser('192.0.2.31');
 
     await all.fetch(`/start?token=${handoff(await all.begin())}`);
-    const everything = await (await all.fetch('/api/verity/verify')).text();
+    const everything = await (await all.fetch('/api/verily/verify')).text();
 
     assert.match(everything, /Sign in with GitHub/);
     assert.match(everything, /Sign in with Discord/);
@@ -822,7 +822,7 @@ test('a site that lists its providers has its holders offered those, and held to
     const owner = browser('192.0.2.32');
 
     await owner.post('/login', `key=${'a'.repeat(43)}`);
-    assert.match(await (await owner.fetch('/api/verity/verify')).text(), /Sign in with GitHub/);
+    assert.match(await (await owner.fetch('/api/verily/verify')).text(), /Sign in with GitHub/);
   } finally {
     await mf.dispose();
   }
@@ -843,7 +843,7 @@ test('a site held to unlisted links reads its own subjects with its key, and nob
     assert.equal((await member.fetch(`/start?token=${token}`)).status, 303);
 
     const flow = await member.signIn(
-      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+      '/api/verily/sessions?kind=connect&provider=github&method=oauth',
     );
 
     const page = await (await member.fetch(flow)).text();
@@ -865,13 +865,13 @@ test('a site held to unlisted links reads its own subjects with its key, and nob
     assert.equal(
       (
         await browser('192.0.2.41').fetch(
-          `/api/verity/connections/${connected.connection}?format=json`,
+          `/api/verily/connections/${connected.connection}?format=json`,
         )
       ).status,
       404,
     );
 
-    assert.deepEqual(await (await member.fetch('/api/verity/published')).json(), []);
+    assert.deepEqual(await (await member.fetch('/api/verily/published')).json(), []);
 
     // The settings page offers no change of visibility either.
     await member.fetch(
@@ -993,7 +993,7 @@ test('the site client carries a holder through the instance and reads the link b
     assert.deepEqual({ ...(await client.connections(['u-9'])) }, { 'u-9': [] });
 
     const flow = await member.signIn(
-      '/api/verity/sessions?kind=connect&provider=github&method=oauth',
+      '/api/verily/sessions?kind=connect&provider=github&method=oauth',
     );
 
     const approved = await member.post(`${flow}/approve`, 'action=approve&visibility=unlisted');
@@ -1046,7 +1046,7 @@ test('nothing the instance sends an outsider says which sites it serves', async 
     const flow = await owner.signIn('kind=connect');
 
     await owner.post(`${flow}/approve`, 'action=approve&visibility=public');
-    const [record] = (await (await owner.fetch('/api/verity/mine')).json()) as { id: string }[];
+    const [record] = (await (await owner.fetch('/api/verily/mine')).json()) as { id: string }[];
 
     const outsider = browser('192.0.2.82');
 
@@ -1056,13 +1056,13 @@ test('nothing the instance sends an outsider says which sites it serves', async 
       '/start?token=x',
       '/site/connections',
       '/begin?site=nowhere&purpose=connect',
-      '/api/verity/verify',
-      '/api/verity/published',
-      '/api/verity/style.css',
-      '/api/verity/mine',
-      `/api/verity/connections/${record!.id}`,
-      `/api/verity/connections/${record!.id}?format=json`,
-      `/api/verity/external-revoke/${record!.id}`,
+      '/api/verily/verify',
+      '/api/verily/published',
+      '/api/verily/style.css',
+      '/api/verily/mine',
+      `/api/verily/connections/${record!.id}`,
+      `/api/verily/connections/${record!.id}?format=json`,
+      `/api/verily/external-revoke/${record!.id}`,
     ])
       assert.doesNotMatch(await everything(await outsider.fetch(path)), named, path);
 
@@ -1070,10 +1070,10 @@ test('nothing the instance sends an outsider says which sites it serves', async 
 
     // Signed in as the owner is an outsider to every site too.
     assert.doesNotMatch(await everything(await owner.fetch('/')), named);
-    assert.doesNotMatch(await everything(await owner.fetch('/api/verity/verify')), named);
+    assert.doesNotMatch(await everything(await owner.fetch('/api/verily/verify')), named);
 
     // The holder is told their own site, and no other.
-    const own = await everything(await member.fetch('/api/verity/verify'));
+    const own = await everything(await member.fetch('/api/verily/verify'));
 
     assert.match(
       own,
@@ -1166,13 +1166,13 @@ test('the dialog on a site page connects with a session and a binding carried in
           origin: init.from ?? site,
           ...(init.body ? { 'content-type': 'application/json' } : {}),
           ...(init.session ? { authorization: `Bearer ${init.session}` } : {}),
-          ...(init.binding ? { 'x-verity-flow': init.binding } : {}),
+          ...(init.binding ? { 'x-verily-flow': init.binding } : {}),
         },
       });
 
     // A browser asks first, and is told nothing about which origins are sites.
     for (const from of [site, 'https://stranger.test']) {
-      const asked = await page('/api/verity/site/session', { method: 'OPTIONS', from });
+      const asked = await page('/api/verily/site/session', { method: 'OPTIONS', from });
 
       assert.equal(asked.status, 204);
       assert.equal(asked.headers.get('access-control-allow-origin'), from);
@@ -1188,9 +1188,9 @@ test('the dialog on a site page connects with a session and a binding carried in
       [dialogToken({ txn: 'bad-5', exp: now() - 1 }), site],
       [dialogToken({ txn: 'bad-6', profileUrl: 'https://other.test/u/alice' }), site],
     ] as const)
-      assert.equal((await page('/api/verity/site/session', { body: { token }, from })).status, 404);
+      assert.equal((await page('/api/verily/site/session', { body: { token }, from })).status, 404);
 
-    const traded = await page('/api/verity/site/session', { body: { token: dialogToken() } });
+    const traded = await page('/api/verily/site/session', { body: { token: dialogToken() } });
 
     assert.equal(traded.status, 200);
     assert.equal(traded.headers.get('access-control-allow-origin'), site);
@@ -1200,7 +1200,7 @@ test('the dialog on a site page connects with a session and a binding carried in
 
     // The handoff works once.
     assert.equal(
-      (await page('/api/verity/site/session', { body: { token: dialogToken() } })).status,
+      (await page('/api/verily/site/session', { body: { token: dialogToken() } })).status,
       404,
     );
 
@@ -1212,21 +1212,21 @@ test('the dialog on a site page connects with a session and a binding carried in
 
     // The session is good from its own site's origin and from nowhere else.
     assert.equal(
-      (await page('/api/verity/methods', { session, from: 'https://other.test' })).status,
+      (await page('/api/verily/methods', { session, from: 'https://other.test' })).status,
       404,
     );
 
-    const methods = await page('/api/verity/methods', { session });
+    const methods = await page('/api/verily/methods', { session });
 
     assert.equal(methods.status, 200);
     assert.equal(((await methods.json()) as { siteName: string }).siteName, 'Partner');
 
     // It reaches the dialog's requests and nothing else the library serves.
-    assert.equal((await page('/api/verity/mine', { session })).status, 404);
+    assert.equal((await page('/api/verily/mine', { session })).status, 404);
 
     assert.equal(
       (
-        await page('/api/verity/sessions', {
+        await page('/api/verily/sessions', {
           session,
           body: { kind: 'renew', connectionId: 'x', provider: 'github' },
         })
@@ -1234,25 +1234,25 @@ test('the dialog on a site page connects with a session and a binding carried in
       404,
     );
 
-    const started = await page('/api/verity/sessions', {
+    const started = await page('/api/verily/sessions', {
       session,
       body: { kind: 'connect', provider: 'github', method: 'oauth' },
     });
 
     assert.equal(started.status, 200);
     assert.equal(started.headers.get('set-cookie'), null);
-    assert.equal(started.headers.get('access-control-expose-headers'), 'X-Verity-Flow');
+    assert.equal(started.headers.get('access-control-expose-headers'), 'X-Verily-Flow');
 
-    const binding = started.headers.get('x-verity-flow')!;
+    const binding = started.headers.get('x-verily-flow')!;
     const flow = (await started.json()) as { id: string; authorizationUrl: string };
     const state = new URL(flow.authorizationUrl).searchParams.get('state')!;
 
     // Without its binding the flow is nobody's.
-    assert.equal((await page(`/api/verity/flows/${flow.id}?format=json`, { session })).status, 404);
+    assert.equal((await page(`/api/verily/flows/${flow.id}?format=json`, { session })).status, 404);
 
     // The sign-in window: a page of this origin that takes the binding from the site's page.
     const popup = browser('192.0.2.40');
-    const entered = await popup.fetch('/api/verity/site/enter');
+    const entered = await popup.fetch('/api/verily/site/enter');
 
     assert.equal(entered.status, 200);
     assert.match(entered.headers.get('content-security-policy')!, /script-src 'self'/);
@@ -1265,7 +1265,7 @@ test('the dialog on a site page connects with a session and a binding carried in
       sent: { flow: string; binding: string } = { flow: flow.id, binding },
       headers: Record<string, string> = { origin, 'content-type': 'application/json' },
     ) => {
-      const response = await mf.dispatchFetch(`${origin}/api/verity/site/enter`, {
+      const response = await mf.dispatchFetch(`${origin}/api/verily/site/enter`, {
         method: 'POST',
         body: JSON.stringify({ ...sent, origin: from }),
         headers: { 'cf-connecting-ip': '192.0.2.40', ...headers },
@@ -1301,7 +1301,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     assert.equal(await enter(site), 204);
     assert.equal([...popup.cookies.values()][0], binding);
 
-    const callback = await popup.fetch(`/api/verity/callback?state=${state}&code=fixture`);
+    const callback = await popup.fetch(`/api/verily/callback?state=${state}&code=fixture`);
 
     assert.equal(callback.status, 303);
 
@@ -1316,13 +1316,13 @@ test('the dialog on a site page connects with a session and a binding carried in
       404,
     );
 
-    const review = await page(`/api/verity/flows/${flow.id}?format=json`, { session, binding });
+    const review = await page(`/api/verily/flows/${flow.id}?format=json`, { session, binding });
     const view = (await review.json()) as { phase: string; external: { handle: string } };
 
     assert.equal(view.phase, 'approval');
     assert.equal(view.external.handle, 'octocat');
 
-    const approved = await page(`/api/verity/flows/${flow.id}/approve`, {
+    const approved = await page(`/api/verily/flows/${flow.id}/approve`, {
       session,
       binding,
       body: { action: 'approve', visibility: 'unlisted' },
@@ -1353,7 +1353,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     // the library will read, which is the last.
     assert.equal(
       (
-        await page('/api/verity/sessions', {
+        await page('/api/verily/sessions', {
           session,
           body: `{"kind":"connect","kind":"renew","connectionId":"${outcome.connectionId}"}`,
         })
@@ -1364,7 +1364,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     // A request that is refused is counted against its sender, so guessing sessions is
     // limited like anything else from an address with no session.
     const guess = () =>
-      page('/api/verity/sessions', {
+      page('/api/verily/sessions', {
         session: 'g'.repeat(43),
         body: { kind: 'connect', provider: 'github', method: 'oauth' },
         ip: '192.0.2.77',
@@ -1380,12 +1380,12 @@ test('the dialog on a site page connects with a session and a binding carried in
     // A sign-in refused at the provider ends that flow and nothing else. The window is
     // not sent back to the site, the dialog reads how the flow ended, and it can start
     // another with the same session.
-    const second = await page('/api/verity/sessions', {
+    const second = await page('/api/verily/sessions', {
       session,
       body: { kind: 'connect', provider: 'github', method: 'oauth' },
     });
 
-    const secondBinding = second.headers.get('x-verity-flow')!;
+    const secondBinding = second.headers.get('x-verily-flow')!;
     const refusedFlow = (await second.json()) as { id: string; authorizationUrl: string };
 
     popup.cookies.clear();
@@ -1393,7 +1393,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     assert.equal(await enter(site, { flow: refusedFlow.id, binding: secondBinding }), 204);
 
     const denied = await popup.fetch(
-      `/api/verity/callback?state=${new URL(refusedFlow.authorizationUrl).searchParams.get('state')!}&error=access_denied`,
+      `/api/verily/callback?state=${new URL(refusedFlow.authorizationUrl).searchParams.get('state')!}&error=access_denied`,
     );
 
     const ended = await popup.fetch(denied.headers.get('location')!);
@@ -1401,7 +1401,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     assert.equal(ended.status, 200);
     assert.match(await ended.text(), /data-outcome="cancelled"/);
 
-    const read = await page(`/api/verity/flows/${refusedFlow.id}?format=json`, {
+    const read = await page(`/api/verily/flows/${refusedFlow.id}?format=json`, {
       session,
       binding: secondBinding,
     });
@@ -1411,7 +1411,7 @@ test('the dialog on a site page connects with a session and a binding carried in
 
     assert.equal(
       (
-        await page('/api/verity/sessions', {
+        await page('/api/verily/sessions', {
           session,
           body: { kind: 'connect', provider: 'github', method: 'oauth' },
         })
@@ -1422,7 +1422,7 @@ test('the dialog on a site page connects with a session and a binding carried in
     // The holder removes their own link from the dialog too, and no other request about a
     // connection is the dialog's to make.
     const remove = (id: string, action = 'disconnect') =>
-      page(`/api/verity/connections/${id}/${action}`, { session, body: {} });
+      page(`/api/verily/connections/${id}/${action}`, { session, body: {} });
 
     assert.equal((await remove('no-such-connection')).status, 404);
     // Not the dialog's, so held to this origin like any other request, which the page is not on.

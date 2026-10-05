@@ -55,7 +55,7 @@ test('a site takes each result once, for its user and their current transaction 
 
   /** Starts a handoff for Alice and returns the transaction the site signed into it. */
   const handoff = async () => {
-    const authorized = await f.request('/verity/authorize?state=s', {
+    const authorized = await f.request('/verily/authorize?state=s', {
       headers: { cookie: alice.cookie },
     });
 
@@ -85,7 +85,7 @@ test('a site takes each result once, for its user and their current transaction 
     });
 
   const deliver = async (token: string, cookie = alice.cookie) =>
-    (await f.request(`/verity/return?result=${token}`, { headers: { cookie } })).status;
+    (await f.request(`/verily/return?result=${token}`, { headers: { cookie } })).status;
 
   const first = await handoff();
   const unlisted = result(first, { visibility: 'unlisted' });

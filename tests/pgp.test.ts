@@ -9,11 +9,11 @@ import { written } from './helpers.js';
 const fixture = (name: string) =>
   readFile(new URL(`./fixtures/pgp/${name}`, import.meta.url), 'utf8');
 
-const expect = 'Verity proof for Site: aGVsbG8td29ybGQtdGVzdC10b2tlbg';
+const expect = 'Verily proof for Site: aGVsbG8td29ybGQtdGVzdC10b2tlbg';
 
-const ed25519 = '7FDEB37E4F6EAD8E2FEFD8511347D93FEB1342AF';
+const ed25519 = '05975AC2F819C57438C06248E7E21D206C283B44';
 
-const impostor = '304D4205366EC12CF1A3FDB68CEFD26FAEDE3108';
+const impostor = 'DF83A56C57890211E39E3D01C80C67EB9EC433CF';
 
 /** The holder pastes both blocks, so the artifact is what they would actually hand over. */
 const pasted = async (key: string, signature: string) =>
@@ -89,12 +89,12 @@ test('an address shows only where the key signed it and a keyserver confirmed it
     expect,
   });
 
-  assert.equal(absent.handle, '1347 D93F EB13 42AF');
+  assert.equal(absent.handle, 'E7E2 1D20 6C28 3B44');
   assert.equal(absent.id, ed25519);
 });
 
 test('a minted key cannot put somebody else’s address beside a real proof', async () => {
-  // A key made this morning, self-signing "Verity Bank Support <support@bank.example>".
+  // A key made this morning, self-signing "Verily Bank Support <support@bank.example>".
   // The signature over the line is real and the self-certification is real; what is
   // missing is anybody at that address ever having agreed to it. Printing it on a badge
   // is the whole attack, and it costs seconds to mount.
@@ -104,7 +104,7 @@ test('a minted key cannot put somebody else’s address beside a real proof', as
   });
 
   assert.equal(minted.id, impostor);
-  assert.equal(minted.handle, '8CEF D26F AEDE 3108');
+  assert.equal(minted.handle, 'C80C 67EB 9EC4 33CF');
   assert.ok(!JSON.stringify(minted).includes('bank.example'));
 
   // Nor can an address be put on a key by serving it alongside one: the served copy is
@@ -132,7 +132,7 @@ test('a keyserver that is down or lying costs the address, never the proof', asy
     keyserver({ [at(ed25519)]: { status: 500, body: 'oh no' } }),
   ).verify({ artifact, expect });
 
-  assert.equal(broken.handle, '1347 D93F EB13 42AF');
+  assert.equal(broken.handle, 'E7E2 1D20 6C28 3B44');
   assert.equal(broken.id, ed25519);
 
   // Answering with a different key entirely buys nothing either.
@@ -140,7 +140,7 @@ test('a keyserver that is down or lying costs the address, never the proof', asy
     keyserver({ [at(ed25519)]: { status: 200, body: await fixture('impostor.pub.asc') } }),
   ).verify({ artifact, expect });
 
-  assert.equal(swapped.handle, '1347 D93F EB13 42AF');
+  assert.equal(swapped.handle, 'E7E2 1D20 6C28 3B44');
   assert.ok(!JSON.stringify(swapped).includes('bank.example'));
 });
 
@@ -156,7 +156,7 @@ test('a key with no confirmed address at all is named by its fingerprint', async
     expect,
   });
 
-  assert.equal(account.handle, '1347 D93F EB13 42AF');
+  assert.equal(account.handle, 'E7E2 1D20 6C28 3B44');
   assert.equal(account.id, ed25519);
 
   // Pasted without a single name, though, the key has no self-signature to say what it may
@@ -175,7 +175,7 @@ test('a signature for a different line, key or flow proves nothing', async () =>
   await assert.rejects(
     instance.verify({
       artifact: await pasted('ed25519.pub.asc', 'ed25519.sig.asc'),
-      expect: 'Verity proof for Site: a different token',
+      expect: 'Verily proof for Site: a different token',
     }),
   );
 
@@ -200,7 +200,7 @@ test('a signature for a different line, key or flow proves nothing', async () =>
 });
 
 test('a subkey signature is accepted, and a stapled one is not', async () => {
-  const subkey = '1AAE015081900B9E11C8968B6D424D5A9415E9D3';
+  const subkey = 'A6F3BB8120DAE0CC4232F3541F55681E282EC9B7';
 
   // Signing with a subkey is what gpg does unprompted, so it has to work.
   const confirmed = keyserver({
@@ -224,7 +224,7 @@ test('a subkey signature is accepted, and a stapled one is not', async () => {
 
 test('a revocation the keyserver serves is believed only because the key signed it', async () => {
   const held = await fixture('revoked-before.pub.asc');
-  const fingerprint = '6767116C8A6B4240B176E0B4CF1941B6DA901270';
+  const fingerprint = 'F2473D85E1C6281D55A250DC8869ED95B7240EC3';
   const account = { id: fingerprint, handle: '', profileUrl: '' };
 
   // Nothing published there yet, which is not the same as nothing having been revoked.
@@ -248,7 +248,7 @@ test('a revocation the keyserver serves is believed only because the key signed 
 
 test('a keyserver cannot revoke a key by answering for it', async () => {
   const held = await fixture('revoked-before.pub.asc');
-  const fingerprint = '6767116C8A6B4240B176E0B4CF1941B6DA901270';
+  const fingerprint = 'F2473D85E1C6281D55A250DC8869ED95B7240EC3';
   const account = { id: fingerprint, handle: '', profileUrl: '' };
 
   // A different key, revoked, served under the fingerprint that was asked for. The
@@ -366,7 +366,7 @@ test('a domain publishing some other key confirms nothing', async () => {
     expect,
   });
 
-  assert.equal(account.handle, '1347 D93F EB13 42AF');
+  assert.equal(account.handle, 'E7E2 1D20 6C28 3B44');
   assert.equal(account.id, ed25519);
   assert.deepEqual(wrong.calls, [at(ed25519), wkd[0], wkd[1]]);
 });
@@ -393,7 +393,7 @@ test('a keyserver answer settles it, and an unaskable address is never fetched',
     expect,
   });
 
-  assert.equal(account.handle, '8CEF D26F AEDE 3108');
+  assert.equal(account.handle, 'C80C 67EB 9EC4 33CF');
   assert.ok(!JSON.stringify(account).includes('bank.example'));
   assert.equal(minted.calls.length, 3);
   assert.ok(minted.calls.every((url) => url.startsWith('https://')));

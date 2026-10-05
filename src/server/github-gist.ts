@@ -35,7 +35,7 @@ export function githubGistProvider(options: { fetch?: typeof fetch } = {}): Arti
       if (!/^[0-9a-f]{20,32}$/.test(id)) throw new Refused('Not a gist address');
 
       const response = await request(`https://api.github.com/gists/${id}`, {
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Verity-V0' },
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Verily-V0' },
         signal: AbortSignal.timeout(15000),
       });
 

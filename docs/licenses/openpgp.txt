@@ -1,8 +1,8 @@
 OpenPGP.js (https://github.com/openpgpjs/openpgpjs), LGPL-3.0-or-later.
 
-dist/verity.js includes OpenPGP.js, unmodified, to check signed records. To use a changed
+dist/verily.js includes OpenPGP.js, unmodified, to check signed records. To use a changed
 copy of it, change the `openpgp` dependency and run `npm run build`, which rebuilds
-dist/verity.js from source. The GNU General Public License the text below refers to is in
+dist/verily.js from source. The GNU General Public License the text below refers to is in
 gpl-3.0.txt beside this file.
 
                    GNU LESSER GENERAL PUBLIC LICENSE

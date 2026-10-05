@@ -19,7 +19,7 @@ export interface VerifierKey {
  * to ask.
  */
 export type SignedDocument = Omit<Evidence, 'status' | 'revokedAt' | 'signedUrl'> & {
-  type: 'verity-evidence';
+  type: 'verily-evidence';
   version: 1;
   issuedAt: number;
 };
@@ -164,7 +164,7 @@ export async function verifySigned(
 
       const document = JSON.parse(data) as SignedDocument;
 
-      return document?.type === 'verity-evidence' &&
+      return document?.type === 'verily-evidence' &&
         document.version === 1 &&
         typeof document.issuedAt === 'number'
         ? document

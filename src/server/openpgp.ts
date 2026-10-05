@@ -1,5 +1,5 @@
 /**
- * The few questions Verity asks of OpenPGP, answered by OpenPGP.js: whether a cleartext
+ * The few questions Verily asks of OpenPGP, answered by OpenPGP.js: whether a cleartext
  * signature was made by a given key, whether a key carries its own revocation, and which
  * names the key signed for itself. The format's rules on when a valid signature still does
  * not count — expiry, subkey back-signatures, key flags, critical subpackets — are the

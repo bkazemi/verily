@@ -52,7 +52,7 @@ export function githubProvider(options: {
         headers: {
           Authorization: `Bearer ${token.access_token}`,
           Accept: 'application/vnd.github+json',
-          'User-Agent': 'Verity-V0',
+          'User-Agent': 'Verily-V0',
         },
         signal: AbortSignal.timeout(15000),
       });

@@ -22,19 +22,19 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: verity
-          POSTGRES_PASSWORD: verity
-          POSTGRES_DB: verity
+          POSTGRES_USER: verily
+          POSTGRES_PASSWORD: verily
+          POSTGRES_DB: verily
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U verity"
+          --health-cmd "pg_isready -U verily"
           --health-interval 2s
           --health-timeout 5s
           --health-retries 15
 
     env:
-      TEST_DATABASE_URL: postgres://verity:verity@localhost:5432/verity
+      TEST_DATABASE_URL: postgres://verily:verily@localhost:5432/verily
       WRANGLER_SEND_METRICS: 'false'
 
     steps:

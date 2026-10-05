@@ -12,7 +12,7 @@ await build({
   entryPoints: ['src/browser.ts'],
   bundle: true,
   format: 'iife',
-  globalName: 'Verity',
+  globalName: 'Verily',
   platform: 'browser',
-  outfile: 'dist/verity.js',
+  outfile: 'dist/verily.js',
 });

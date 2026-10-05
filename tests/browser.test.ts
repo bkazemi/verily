@@ -191,7 +191,7 @@ class Element {
 }
 
 test('distributed badge renders current/expired/revoked evidence and fails closed on private or malformed results', async () => {
-  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
 
   let fetches = 0;
 
@@ -203,7 +203,7 @@ test('distributed badge renders current/expired/revoked evidence and fails close
     verifierName: 'Self-hosted Example',
     local: { label: 'Original account', reference: 'member-1' },
     external: { id: '42', handle: '<Alice>', profileUrl: 'https://github.com/alice' },
-    evidenceUrl: 'https://site.test/api/verity/connections/original',
+    evidenceUrl: 'https://site.test/api/verily/connections/original',
     status: 'verified',
     visibility: 'public',
     authenticatedAt: 1,
@@ -253,7 +253,7 @@ test('distributed badge renders current/expired/revoked evidence and fails close
 
   vm.runInContext(asset, context);
 
-  const client = context.Verity.init({ backendUrl: '/api/verity' }) as {
+  const client = context.Verily.init({ backendUrl: '/api/verily' }) as {
     mountBadge(
       element: Element,
       options: { connectionId: string; evidence?: unknown },
@@ -284,7 +284,7 @@ test('distributed badge renders current/expired/revoked evidence and fails close
   );
 
   assert.ok(!element.textContent.includes('✓'));
-  assert.equal(element.links().at(-1)!.href, 'https://site.test/api/verity/connections/original');
+  assert.equal(element.links().at(-1)!.href, 'https://site.test/api/verily/connections/original');
 
   // A refresh keeps the pill on screen while it asks, and finding the same evidence
   // leaves the very same nodes in place: a check nobody needed changes nothing.
@@ -456,7 +456,7 @@ test('distributed badge renders current/expired/revoked evidence and fails close
           by: 'provider',
           method: 'gist',
           artifactUrl: 'https://gist.github.com/alice/abc',
-          expect: 'verity-token',
+          expect: 'verily-token',
           confirmedAt: 2,
         },
       ],
@@ -514,7 +514,7 @@ async function renderDialog(
   attestations: Record<string, unknown>,
   overrides: Record<string, unknown> = {},
 ) {
-  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
 
   const evidence = {
     id: 'c1',
@@ -528,7 +528,7 @@ async function renderDialog(
       profileUrl: 'https://site.test/about/',
     },
     external: { id: '11813054', handle: 'alice', profileUrl: 'https://github.com/alice' },
-    evidenceUrl: 'https://verifier.test/api/verity/connections/c1',
+    evidenceUrl: 'https://verifier.test/api/verily/connections/c1',
     status: 'verified',
     visibility: 'public',
     authenticatedAt: 1,
@@ -584,7 +584,7 @@ async function renderDialog(
 
   vm.runInContext(asset, context);
 
-  const client = context.Verity.init({ backendUrl: 'https://verifier.test/api/verity' }) as {
+  const client = context.Verily.init({ backendUrl: 'https://verifier.test/api/verily' }) as {
     mountBadge(host: Element, options: { connectionId: string }): Promise<void>;
   };
 
@@ -625,7 +625,7 @@ test('the evidence dialog presents both sides of a link as parallel cards', asyn
         by: 'provider',
         method: 'gist',
         artifactUrl: 'https://gist.github.com/alice/abc',
-        expect: 'verity-c1',
+        expect: 'verily-c1',
         confirmedAt: 2,
       },
     ],
@@ -759,7 +759,7 @@ test('a proof gone unread reads as unconfirmed, not as an approval that ran out'
 });
 
 test('a key is named by its fingerprint, with no @ and the provider written once', async () => {
-  const fingerprint = '7FDEB37E4F6EAD8E2FEFD8511347D93FEB1342AF';
+  const fingerprint = '05975AC2F819C57438C06248E7E21D206C283B44';
 
   const { cards } = await renderDialog(
     {
@@ -768,7 +768,7 @@ test('a key is named by its fingerprint, with no @ and the provider written once
         {
           by: 'provider',
           method: 'signature',
-          artifactUrl: 'https://verifier.test/api/verity/connections/c1/proof',
+          artifactUrl: 'https://verifier.test/api/verily/connections/c1/proof',
           hosted: true,
           confirmedAt: 2,
         },
@@ -1091,7 +1091,7 @@ test('the dialog shows the full version beside the logotype, as text', async () 
  * may hold one back to model a slow server; the sign-in poll is fired by hand.
  */
 async function connectHarness(answer: (path: string, body?: string) => Promise<unknown>) {
-  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
   const body = new Element();
   const polls: (() => Promise<void>)[] = [];
 
@@ -1147,7 +1147,7 @@ async function connectHarness(answer: (path: string, body?: string) => Promise<u
       },
     },
     fetch: async (url: string, init?: { body?: string }) => {
-      const data = await answer(new URL(url).pathname.replace('/api/verity', ''), init?.body);
+      const data = await answer(new URL(url).pathname.replace('/api/verily', ''), init?.body);
 
       return { ok: true, json: async () => data };
     },
@@ -1155,7 +1155,7 @@ async function connectHarness(answer: (path: string, body?: string) => Promise<u
 
   vm.runInContext(asset, context);
 
-  const client = context.Verity.init({ backendUrl: '/api/verity' }) as {
+  const client = context.Verily.init({ backendUrl: '/api/verily' }) as {
     openConnect(opener: Element): Promise<{ outcome: string; connectionId?: string }>;
   };
 
@@ -1356,7 +1356,7 @@ test('a link in the instructions opens in a new tab, and only if it is http(s)',
           { text: 'here', href: 'javascript:alert(1)' },
           '.',
         ],
-        { code: 'Verity proof' },
+        { code: 'Verily proof' },
       ],
     };
   });
@@ -1391,7 +1391,7 @@ async function groupHarness(
   /** Stands in for the page's timers, where a test cannot wait out a real one. */
   timer: typeof setTimeout = setTimeout,
 ) {
-  const asset = await readFile(new URL('../dist/verity.js', import.meta.url), 'utf8');
+  const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
   const body = new Element();
   const asked: string[] = [];
   const defined: Record<string, new () => Element> = {};
@@ -1521,7 +1521,7 @@ async function groupHarness(
   vm.runInContext('globalThis.self = globalThis', context);
   vm.runInContext(asset, context);
 
-  const verity = context.Verity as {
+  const verily = context.Verily as {
     init(options: { backendUrl: string }): {
       mountBadges(
         host: Element,
@@ -1559,7 +1559,7 @@ async function groupHarness(
     (context as { innerHeight: number }).innerHeight = height;
   };
 
-  return { verity, asked, cards, defined, polls, upgrade, body, heard, resize };
+  return { verily, asked, cards, defined, polls, upgrade, body, heard, resize };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -1571,7 +1571,7 @@ const linked = (id: string, handle: string, connectedAt: number, overrides: obje
   verifierName: 'verifier.test',
   local: { label: 'Alice', reference: 'member-1' },
   external: { id: `ext-${id}`, handle, profileUrl: `https://github.com/${handle}` },
-  evidenceUrl: `https://verifier.test/api/verity/connections/${id}`,
+  evidenceUrl: `https://verifier.test/api/verily/connections/${id}`,
   status: 'verified',
   visibility: 'public',
   connectedAt,
@@ -1586,14 +1586,14 @@ const linked = (id: string, handle: string, connectedAt: number, overrides: obje
 });
 
 test('several accounts of one subject are one pill: the first connected, then how many more', async () => {
-  const { verity, cards } = await groupHarness({
+  const { verily, cards } = await groupHarness({
     // Listed out of order, and all renewed at the same moment since.
     third: linked('third', 'carol', 300),
     first: linked('first', 'alice', 100),
     second: linked('second', 'bob', 200),
   });
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
 
   await client.mountBadges(host, { connectionIds: ['third', 'first', 'second', 'missing'] });
@@ -1602,7 +1602,7 @@ test('several accounts of one subject are one pill: the first connected, then ho
   // not be read is left out and takes nothing else down with it.
   assert.equal(pillText(host), '@alice+2');
   assert.equal(host.links().length, 1);
-  assert.equal(host.links()[0]!.href, 'https://verifier.test/api/verity/connections/first');
+  assert.equal(host.links()[0]!.href, 'https://verifier.test/api/verily/connections/first');
 
   // Read aloud, the pill names the accounts its number stands for.
   assert.match(
@@ -1632,8 +1632,8 @@ test('a stacked pill names each verified account on a row of its own, and counts
     ]),
   );
 
-  const { verity, cards } = await groupHarness(records);
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const { verily, cards } = await groupHarness(records);
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
   const connectionIds = Object.keys(records).reverse();
 
@@ -1675,8 +1675,8 @@ test('a short pill of several accounts opens a panel naming them while a mouse r
     ),
   );
 
-  const { verity } = await groupHarness(records);
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const { verily } = await groupHarness(records);
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
 
   await client.mountBadges(host, { connectionIds: Object.keys(records) });
@@ -1754,11 +1754,11 @@ test('a panel the browser shut with its host leaves nothing behind and opens aga
     second: linked('second', 'bob', 200),
   };
 
-  const { verity, defined, heard } = await groupHarness(records);
-  const badge = new defined['verity-badge']!() as Element & { disconnectedCallback(): void };
+  const { verily, defined, heard } = await groupHarness(records);
+  const badge = new defined['verily-badge']!() as Element & { disconnectedCallback(): void };
 
-  await verity
-    .init({ backendUrl: 'https://verifier.test/api/verity' })
+  await verily
+    .init({ backendUrl: 'https://verifier.test/api/verily' })
     .mountBadges(badge, { connectionIds: Object.keys(records) });
 
   const pill = badge.links()[0]!;
@@ -1810,11 +1810,11 @@ test('a panel taller than the window drops its last accounts into the count unti
     ]),
   );
 
-  const { verity, resize } = await groupHarness(records);
+  const { verily, resize } = await groupHarness(records);
   const host = new Element();
 
-  await verity
-    .init({ backendUrl: 'https://verifier.test/api/verity' })
+  await verily
+    .init({ backendUrl: 'https://verifier.test/api/verily' })
     .mountBadges(host, { connectionIds: Object.keys(records) });
 
   const pill = host.links()[0]!;
@@ -1900,8 +1900,8 @@ test('a pill opens no panel where the page said not to, where it is stacked, or 
     second: linked('second', 'bob', 200),
   };
 
-  const { verity } = await groupHarness(records);
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const { verily } = await groupHarness(records);
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
   const connectionIds = Object.keys(records);
 
@@ -1924,12 +1924,12 @@ test('a pill opens no panel where the page said not to, where it is stacked, or 
 });
 
 test('a stacked pill of one account is the ordinary pill', async () => {
-  const { verity } = await groupHarness({
+  const { verily } = await groupHarness({
     first: linked('first', 'alice', 100),
     second: linked('second', 'bob', 200, { status: 'expired', expiresAt: 1 }),
   });
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
 
   await client.mountBadges(host, { connectionIds: ['first', 'second'], stacked: true });
@@ -1939,14 +1939,14 @@ test('a stacked pill of one account is the ordinary pill', async () => {
 });
 
 test('a lapsed account never leads the pill or counts, but keeps its place in the dialog', async () => {
-  const { verity, cards } = await groupHarness({
+  const { verily, cards } = await groupHarness({
     first: linked('first', 'alice', 100, { status: 'expired', expiresAt: 1 }),
     second: linked('second', 'bob', 200),
     third: linked('third', 'carol', 300, { status: 'revoked', revokedAt: 5 }),
     fourth: linked('fourth', 'dave', 400),
   });
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
 
   await client.mountBadges(host, { connectionIds: ['first', 'second', 'third', 'fourth'] });
@@ -1972,15 +1972,15 @@ test('a lapsed account never leads the pill or counts, but keeps its place in th
 
   const none = new Element();
 
-  await lapsed.verity
-    .init({ backendUrl: 'https://verifier.test/api/verity' })
+  await lapsed.verily
+    .init({ backendUrl: 'https://verifier.test/api/verily' })
     .mountBadges(none, { connectionIds: ['second', 'first'] });
 
   assert.match(none.textContent, /^@aliceExpired$/);
 });
 
 test('accounts of different subjects, or none readable, are not presented as one', async () => {
-  const { verity } = await groupHarness({
+  const { verily } = await groupHarness({
     mine: linked('mine', 'alice', 100),
     theirs: linked('theirs', 'mallory', 200, {
       local: { label: 'Mallory', reference: 'member-2' },
@@ -1989,7 +1989,7 @@ test('accounts of different subjects, or none readable, are not presented as one
     hidden: linked('hidden', 'bob', 400, { visibility: 'unlisted' }),
   });
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
 
   for (const ids of [
     ['mine', 'theirs'],
@@ -2013,12 +2013,12 @@ test('accounts of different subjects, or none readable, are not presented as one
 test('a signed record says so on its card, and says how checking it went', async () => {
   const mine = await signer(await generateSigningKey('verifier.test'));
   const other = await signer(await generateSigningKey('verifier.test'));
-  const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
+  const at = (name: string) => `https://verifier.test/api/verily/connections/${name}`;
 
   const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
     const { status: _status, ...rest } = record;
 
-    return by.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never);
+    return by.sign({ type: 'verily-evidence', version: 1, issuedAt: 1, ...rest } as never);
   };
 
   const good = linked('good', 'alice', 100, { signedUrl: `${at('good')}?format=signed` });
@@ -2027,7 +2027,7 @@ test('a signed record says so on its card, and says how checking it went', async
   const unread = linked('unread', 'dave', 400, { signedUrl: `${at('unread')}?format=signed` });
   const plain = linked('plain', 'erin', 500);
 
-  const { verity, cards } = await groupHarness({
+  const { verily, cards } = await groupHarness({
     keys: { keys: [mine.key] },
     good: await signedBy(good),
     // A true signature, over another record.
@@ -2038,7 +2038,7 @@ test('a signed record says so on its card, and says how checking it went', async
 
   const host = new Element();
 
-  verity.presentConnections(host, [good, swapped, forged, unread, plain]);
+  verily.presentConnections(host, [good, swapped, forged, unread, plain]);
 
   const opened = await cards(host);
 
@@ -2111,13 +2111,13 @@ test('a signed record says so on its card, and says how checking it went', async
 
   const alone = new Element();
 
-  verity.presentConnections(alone, [swapped]);
+  verily.presentConnections(alone, [swapped]);
   assert.equal(alone.textContent, '@bobUnconfirmed');
 
   // A record whose signed record is at no address a page may follow is not drawn at all.
   const refused = new Element();
 
-  verity.presentConnections(refused, [
+  verily.presentConnections(refused, [
     linked('first', 'alice', 100, { signedUrl: 'javascript:alert(1)' }),
   ]);
 
@@ -2126,13 +2126,13 @@ test('a signed record says so on its card, and says how checking it went', async
   // Nor is one whose signed record is anywhere but beside the record it was made from: the
   // keys are read from where the record lives, and one from elsewhere has no claim on them.
   for (const signedUrl of [
-    'https://elsewhere.test/api/verity/connections/first?format=signed',
-    'https://verifier.test/api/verity/connections/second?format=signed',
-    'https://verifier.test/api/verity/connections/first',
+    'https://elsewhere.test/api/verily/connections/first?format=signed',
+    'https://verifier.test/api/verily/connections/second?format=signed',
+    'https://verifier.test/api/verily/connections/first',
   ]) {
     const elsewhere = new Element();
 
-    verity.presentConnections(elsewhere, [linked('first', 'alice', 100, { signedUrl })]);
+    verily.presentConnections(elsewhere, [linked('first', 'alice', 100, { signedUrl })]);
     assert.equal(elsewhere.textContent, 'Unavailable');
   }
 });
@@ -2141,7 +2141,7 @@ test('a card says it is checking a signature until the check comes back', async 
   const mine = await signer(await generateSigningKey('verifier.test'));
 
   const good = linked('good', 'alice', 100, {
-    signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
+    signedUrl: 'https://verifier.test/api/verily/connections/good?format=signed',
   });
 
   const {
@@ -2158,17 +2158,17 @@ test('a card says it is checking a signature until the check comes back', async 
     release = resolve;
   });
 
-  const { verity, cards } = await groupHarness(
+  const { verily, cards } = await groupHarness(
     {
       keys: { keys: [mine.key] },
-      good: await mine.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never),
+      good: await mine.sign({ type: 'verily-evidence', version: 1, issuedAt: 1, ...rest } as never),
     },
     () => held,
   );
 
   const host = new Element();
 
-  verity.presentConnections(host, [good]);
+  verily.presentConnections(host, [good]);
 
   const opened = await cards(host);
 
@@ -2211,7 +2211,7 @@ test('a signature check that never answers gives the card back, says why, and tr
   const mine = await signer(await generateSigningKey('verifier.test'));
 
   const good = linked('good', 'alice', 100, {
-    signedUrl: 'https://verifier.test/api/verity/connections/good?format=signed',
+    signedUrl: 'https://verifier.test/api/verily/connections/good?format=signed',
   });
 
   const {
@@ -2227,10 +2227,10 @@ test('a signature check that never answers gives the card back, says why, and tr
 
   // The verifier does not answer at first. The five-second limit is run in a moment, and
   // no other timer is changed.
-  const { verity, cards, polls } = await groupHarness(
+  const { verily, cards, polls } = await groupHarness(
     {
       keys: { keys: [mine.key] },
-      good: await mine.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never),
+      good: await mine.sign({ type: 'verily-evidence', version: 1, issuedAt: 1, ...rest } as never),
     },
     () => (answering ? Promise.resolve() : new Promise(() => {})),
     ((handler: () => void, ms = 0) => {
@@ -2242,7 +2242,7 @@ test('a signature check that never answers gives the card back, says why, and tr
 
   const host = new Element();
 
-  verity.presentConnections(host, [good]);
+  verily.presentConnections(host, [good]);
 
   const opened = await cards(host);
   const card = () => opened.dialog.all().filter((found) => found.className.includes('account'))[1]!;
@@ -2284,7 +2284,7 @@ test('a signature check that never answers gives the card back, says why, and tr
 test('a signature mark stands only beside what the signed record says', async () => {
   const mine = await signer(await generateSigningKey('verifier.test'));
   const next = await signer(await generateSigningKey('verifier.test'));
-  const at = (name: string) => `https://verifier.test/api/verity/connections/${name}`;
+  const at = (name: string) => `https://verifier.test/api/verily/connections/${name}`;
 
   const signedBy = (record: ReturnType<typeof linked>, by = mine) => {
     const {
@@ -2293,7 +2293,7 @@ test('a signature mark stands only beside what the signed record says', async ()
       ...rest
     } = record as ReturnType<typeof linked> & { signedUrl?: string };
 
-    return by.sign({ type: 'verity-evidence', version: 1, issuedAt: 1, ...rest } as never);
+    return by.sign({ type: 'verily-evidence', version: 1, issuedAt: 1, ...rest } as never);
   };
 
   const good = linked('good', 'alice', 100, { signedUrl: `${at('good')}?format=signed` });
@@ -2303,7 +2303,7 @@ test('a signature mark stands only beside what the signed record says', async ()
     good: await signedBy(good),
   };
 
-  const { verity, cards, body, asked } = await groupHarness(served);
+  const { verily, cards, body, asked } = await groupHarness(served);
 
   /**
    * Draws records, opens their dialog and, once settled, says for each account its state,
@@ -2314,7 +2314,7 @@ test('a signature mark stands only beside what the signed record says', async ()
 
     const host = new Element();
 
-    verity.presentConnections(host, records);
+    verily.presentConnections(host, records);
 
     const opened = await cards(host);
 
@@ -2427,7 +2427,7 @@ test('a signature mark stands only beside what the signed record says', async ()
 });
 
 test('records the page hands over are drawn without a fetch, unlisted ones with no link', async () => {
-  const { verity, asked, cards } = await groupHarness({});
+  const { verily, asked, cards } = await groupHarness({});
 
   const records = [
     linked('second', 'bob', 200, { visibility: 'unlisted' }),
@@ -2436,7 +2436,7 @@ test('records the page hands over are drawn without a fetch, unlisted ones with 
 
   const host = new Element();
 
-  verity.presentConnections(host, records);
+  verily.presentConnections(host, records);
   assert.equal(pillText(host), '@alice+1');
 
   // Nobody can open an unlisted record's page, so the pill is a button and links nowhere.
@@ -2458,9 +2458,9 @@ test('records the page hands over are drawn without a fetch, unlisted ones with 
   // A public record handed over keeps its link, and one alone is the pill it always was.
   const shown = new Element();
 
-  verity.presentConnections(shown, [linked('only', 'alice', 100)]);
+  verily.presentConnections(shown, [linked('only', 'alice', 100)]);
   assert.equal(shown.textContent, '@alice');
-  assert.equal(shown.links()[0]!.href, 'https://verifier.test/api/verity/connections/only');
+  assert.equal(shown.links()[0]!.href, 'https://verifier.test/api/verily/connections/only');
 
   for (const bad of [
     undefined,
@@ -2476,7 +2476,7 @@ test('records the page hands over are drawn without a fetch, unlisted ones with 
   ]) {
     const refused = new Element();
 
-    verity.presentConnections(refused, bad);
+    verily.presentConnections(refused, bad);
     assert.match(refused.textContent, /Unavailable/);
   }
 
@@ -2484,7 +2484,7 @@ test('records the page hands over are drawn without a fetch, unlisted ones with 
 });
 
 test('one account on several records is one card, and counts once', async () => {
-  const { verity, cards } = await groupHarness({});
+  const { verily, cards } = await groupHarness({});
 
   const gist = {
     by: 'provider',
@@ -2499,7 +2499,7 @@ test('one account on several records is one card, and counts once', async () => 
 
   const host = new Element();
 
-  verity.presentConnections(host, [
+  verily.presentConnections(host, [
     // The same GitHub account three times over: revoked once, connected again by signing
     // in, and since shown a second way on a record of its own.
     linked('old', 'alice', 100, { ...same, status: 'revoked', revokedAt: 150 }),
@@ -2537,7 +2537,7 @@ test('one account on several records is one card, and counts once', async () => 
   const lapsed = await groupHarness({});
   const none = new Element();
 
-  lapsed.verity.presentConnections(none, [
+  lapsed.verily.presentConnections(none, [
     linked('first', 'alice', 100, { ...same, status: 'expired', expiresAt: 1, approvedAt: 100 }),
     linked('second', 'alice', 200, { ...same, status: 'revoked', revokedAt: 250, approvedAt: 200 }),
   ]);
@@ -2549,20 +2549,20 @@ test('one account on several records is one card, and counts once', async () => 
   const two = await groupHarness({});
   const pair = new Element();
 
-  two.verity.presentConnections(pair, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+  two.verily.presentConnections(pair, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
   assert.equal(pillText(pair), '@alice+1');
   assert.equal((await two.cards(pair)).cards.length, 3);
 });
 
 test('new records that leave the pill unchanged still open in the dialog', async () => {
-  const { verity, cards } = await groupHarness({});
+  const { verily, cards } = await groupHarness({});
   const host = new Element();
 
-  verity.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+  verily.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
   assert.equal(pillText(host), '@alice+1');
 
   // Bob is gone and Carol is there in his place: the same account leads, with one more.
-  verity.presentConnections(host, [linked('a', 'alice', 100), linked('c', 'carol', 300)]);
+  verily.presentConnections(host, [linked('a', 'alice', 100), linked('c', 'carol', 300)]);
   assert.equal(pillText(host), '@alice+1');
 
   // The dialog opens on the new records and is still on them after its first check.
@@ -2577,7 +2577,7 @@ test('new records that leave the pill unchanged still open in the dialog', async
 test('connections set on a badge before its script has run are still presented', async () => {
   const { defined } = await groupHarness({});
 
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     connections: unknown;
   };
@@ -2612,11 +2612,11 @@ test('evidence set on a badge before its script has run seeds its first paint', 
   // The fetch never answers, so only the evidence handed over can have drawn the pill.
   const { upgrade } = await groupHarness({}, () => new Promise(() => {}));
 
-  const badge = upgrade('verity-badge', { evidence: linked('a', 'alice', 100) }) as Element & {
+  const badge = upgrade('verily-badge', { evidence: linked('a', 'alice', 100) }) as Element & {
     connectedCallback(): void;
   };
 
-  badge.attributes['backend-url'] = 'https://verity.test';
+  badge.attributes['backend-url'] = 'https://verily.test';
   badge.attributes['connection-id'] = 'a';
   badge.connectedCallback();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -2631,7 +2631,7 @@ test('a badge that goes from one record to several opens its dialog on all of th
     confirmedAt: Date.now(),
   };
 
-  const { verity, cards } = await groupHarness({
+  const { verily, cards } = await groupHarness({
     a: linked('a', 'alice', 100),
     lapsed: linked('lapsed', 'bob', 200, { status: 'expired', expiresAt: 1 }),
     again: linked('again', 'alice', 300, {
@@ -2643,7 +2643,7 @@ test('a badge that goes from one record to several opens its dialog on all of th
     }),
   });
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
   const host = new Element();
 
   await client.mountBadges(host, { connectionIds: ['a'] });
@@ -2666,7 +2666,7 @@ test('a badge that goes from one record to several opens its dialog on all of th
   });
 
   const other = new Element();
-  const again = back.verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const again = back.verily.init({ backendUrl: 'https://verifier.test/api/verily' });
 
   await again.mountBadges(other, { connectionIds: ['a', 'b'] });
   await again.mountBadges(other, { connectionIds: ['a'] });
@@ -2674,17 +2674,17 @@ test('a badge that goes from one record to several opens its dialog on all of th
 });
 
 test('records taken away while the dialog is open stop being shown in it', async () => {
-  const { verity, cards, polls } = await groupHarness({});
+  const { verily, cards, polls } = await groupHarness({});
   const host = new Element();
 
-  verity.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
+  verily.presentConnections(host, [linked('a', 'alice', 100), linked('b', 'bob', 200)]);
 
   const opened = await cards(host);
 
   assert.equal(opened.cards.length, 3);
 
   // The page clears them. The pill says so at once, and the dialog on its next check.
-  verity.presentConnections(host, []);
+  verily.presentConnections(host, []);
   assert.match(host.textContent, /Unavailable/);
 
   for (const poll of polls) poll();
@@ -2695,11 +2695,11 @@ test('records taken away while the dialog is open stop being shown in it', async
 });
 
 test('each account in an open dialog lapses at its own deadline', async () => {
-  const { verity, cards } = await groupHarness({});
+  const { verily, cards } = await groupHarness({});
   const host = new Element();
   const soon = Date.now();
 
-  verity.presentConnections(host, [
+  verily.presentConnections(host, [
     linked('a', 'alice', 100, { expiresAt: soon + 60 }),
     linked('b', 'bob', 200, { expiresAt: soon + 140 }),
     linked('c', 'carol', 300),
@@ -2723,7 +2723,7 @@ test('each account in an open dialog lapses at its own deadline', async () => {
 });
 
 test('an account whose leading record runs out is taken up by another of its records', async () => {
-  const { verity, cards } = await groupHarness({});
+  const { verily, cards } = await groupHarness({});
   const host = new Element();
 
   const same = {
@@ -2737,7 +2737,7 @@ test('an account whose leading record runs out is taken up by another of its rec
     confirmedAt: Date.now(),
   };
 
-  verity.presentConnections(host, [
+  verily.presentConnections(host, [
     // One account on two records. The earlier one speaks for it, and runs out first.
     linked('early', 'alice', 100, { ...same, expiresAt: Date.now() + 60 }),
     linked('later', 'alice', 200, {
@@ -2779,7 +2779,7 @@ test('a badge whose connection ids are cleared stops its open dialog showing the
     b: linked('b', 'bob', 200),
   });
 
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     attributeChangedCallback(): void;
   };
@@ -2787,7 +2787,7 @@ test('a badge whose connection ids are cleared stops its open dialog showing the
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const badge = new Badge();
 
-  badge.setAttribute('backend-url', 'https://verifier.test/api/verity');
+  badge.setAttribute('backend-url', 'https://verifier.test/api/verily');
   badge.setAttribute('connection-ids', 'a b');
   badge.connectedCallback();
   await settle();
@@ -2814,35 +2814,35 @@ test('a read that finishes after the host has moved on changes nothing', async (
   const gate = new Promise<void>((resolve) => (release = resolve));
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  const { verity, cards, defined } = await groupHarness(
+  const { verily, cards, defined } = await groupHarness(
     { a: linked('a', 'alice', 100), b: linked('b', 'bob', 200) },
     () => gate,
   );
 
-  const client = verity.init({ backendUrl: 'https://verifier.test/api/verity' });
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
 
   // Records handed over while a fetch for other ones is still out.
   const replaced = new Element();
   const slow = client.mountBadges(replaced, { connectionIds: ['a', 'b'] });
 
-  verity.presentConnections(replaced, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
+  verily.presentConnections(replaced, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
   assert.equal(replaced.textContent, '@carol');
 
   // A fetch that will fail, overtaken the same way: its failure is not this host's either.
   const failing = new Element();
   const doomed = client.mountBadges(failing, { connectionIds: ['missing', 'gone'] });
 
-  verity.presentConnections(failing, [linked('d', 'dave', 400, { visibility: 'unlisted' })]);
+  verily.presentConnections(failing, [linked('d', 'dave', 400, { visibility: 'unlisted' })]);
 
   // The ids cleared from a badge while its fetch is out.
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     attributeChangedCallback(): void;
   };
 
   const cleared = new Badge();
 
-  cleared.setAttribute('backend-url', 'https://verifier.test/api/verity');
+  cleared.setAttribute('backend-url', 'https://verifier.test/api/verily');
   cleared.setAttribute('connection-ids', 'a b');
   cleared.connectedCallback();
   await settle();
@@ -2871,15 +2871,15 @@ test('an open dialog does not show a read the host moved on from while it was ou
   let release!: () => void;
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-  const { verity, cards, polls } = await groupHarness(
+  const { verily, cards, polls } = await groupHarness(
     { a: linked('a', 'alice', 100), b: linked('b', 'bob', 200) },
     () => gate ?? Promise.resolve(),
   );
 
   const host = new Element();
 
-  await verity
-    .init({ backendUrl: 'https://verifier.test/api/verity' })
+  await verily
+    .init({ backendUrl: 'https://verifier.test/api/verily' })
     .mountBadges(host, { connectionIds: ['a', 'b'] });
 
   const opened = await cards(host);
@@ -2893,7 +2893,7 @@ test('an open dialog does not show a read the host moved on from while it was ou
   for (const poll of polls) poll();
 
   await settle();
-  verity.presentConnections(host, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
+  verily.presentConnections(host, [linked('c', 'carol', 300, { visibility: 'unlisted' })]);
   release();
   gate = undefined;
   await settle();
@@ -2913,7 +2913,7 @@ test("a holder's own badge connects, renews and removes from its dialog, and com
     disconnect: { ok: true },
   });
 
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     connections: unknown;
     dispatched: { type: string; detail: unknown }[];
@@ -2940,8 +2940,8 @@ test("a holder's own badge connects, renews and removes from its dialog, and com
   // The holder's own, which the page marks by naming where a handoff comes from.
   const badge = new Badge();
 
-  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
-  badge.attributes['handoff-url'] = '/api/verity/handoff';
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
 
   badge.connections = [
     linked('a', 'alice', 100, { visibility: 'unlisted' }),
@@ -2994,7 +2994,7 @@ test("a holder's own badge connects, renews and removes from its dialog, and com
 
   const told = badge.dispatched.at(-1)!;
 
-  assert.equal(told.type, 'verity-result');
+  assert.equal(told.type, 'verily-result');
   assert.equal(JSON.stringify(told.detail), '{"outcome":"removed","connectionId":"a"}');
 
   // The dialog shows it removed at once, before the page hands over new records.
@@ -3011,7 +3011,7 @@ test('removing an account that stands on several records removes every one of th
     disconnect: { ok: true },
   });
 
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     connections: unknown;
     dispatched: { type: string; detail: unknown }[];
@@ -3024,8 +3024,8 @@ test('removing an account that stands on several records removes every one of th
 
   const badge = new Badge();
 
-  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
-  badge.attributes['handoff-url'] = '/api/verity/handoff';
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
 
   // One account shown two ways, signed in and by a published proof, with a third record
   // that could not be confirmed lately and so is not shown. One card.
@@ -3042,7 +3042,7 @@ test('removing an account that stands on several records removes every one of th
             by: 'provider',
             method: 'gist',
             artifactUrl: 'https://gist.github.com/alice/abc',
-            expect: 'verity-token',
+            expect: 'verily-token',
             confirmedAt: 2,
           },
         ],
@@ -3092,7 +3092,7 @@ test('an account shown as removed can still have its older unrevoked records rem
     disconnect: { ok: true },
   });
 
-  const Badge = defined['verity-badge']! as unknown as new () => Element & {
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
     connectedCallback(): void;
     connections: unknown;
     dispatched: { type: string; detail: unknown }[];
@@ -3105,8 +3105,8 @@ test('an account shown as removed can still have its older unrevoked records rem
 
   const badge = new Badge();
 
-  badge.attributes['backend-url'] = 'https://verifier.test/api/verity';
-  badge.attributes['handoff-url'] = '/api/verity/handoff';
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
 
   // The record approved last was revoked and so speaks for the account, but an earlier
   // one is only unconfirmed and could be confirmed again.

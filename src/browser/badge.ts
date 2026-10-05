@@ -6,21 +6,21 @@ const styles = `
   :host { display: inline-block; max-width: 100%; vertical-align: middle; }
   * { box-sizing: border-box; }
   .badge, .peek {
-    border: 1px solid var(--verity-border, #dce2e0); border-radius: 6px;
-    background: var(--verity-surface, #fff); color: var(--verity-text, #202c29);
-    font: var(--verity-font-size, 13px)/1.35
-      var(--verity-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+    border: 1px solid var(--verily-border, #dce2e0); border-radius: 6px;
+    background: var(--verily-surface, #fff); color: var(--verily-text, #202c29);
+    font: var(--verily-font-size, 13px)/1.35
+      var(--verily-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
   }
   .badge {
     display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 5px;
     text-decoration: none;
   }
   button.badge { margin: 0; cursor: pointer; }
-  a[href]:hover, button.badge:hover { background: var(--verity-hover, #f3f6f4); border-color: var(--verity-border, #dce2e0); }
+  a[href]:hover, button.badge:hover { background: var(--verily-hover, #f3f6f4); border-color: var(--verily-border, #dce2e0); }
   .badge:focus-visible { outline: 2px solid #357ce5; outline-offset: 2px; }
   .name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-  .more { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--verity-muted, #65726c); }
-  .label { display: none; font-size: 11px; color: var(--verity-muted, #65726c); }
+  .more { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--verily-muted, #65726c); }
+  .label { display: none; font-size: 11px; color: var(--verily-muted, #65726c); }
   .badge:hover .label, .badge:focus-within .label { display: inline; }
   .icon { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 750; }
   .icon .glyph { display: block; width: 12px; height: 12px; }
@@ -31,7 +31,7 @@ const styles = `
     flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
     border: 2px solid currentColor; opacity: .3;
   }
-  .divider { flex-shrink: 0; width: 1px; height: 12px; background: var(--verity-border, #dce2e0); }
+  .divider { flex-shrink: 0; width: 1px; height: 12px; background: var(--verily-border, #dce2e0); }
   /* Several accounts, one to a row. The mark stays beside them and the rule runs their height. */
   .badge.stacked { align-items: stretch; padding: 5px 8px 5px 6px; text-align: left; }
   .stacked .mark { align-self: center; }
@@ -51,19 +51,19 @@ const styles = `
   /* A row taken out to fit the window: its own display would otherwise keep it showing. */
   .row[hidden] { display: none; }
   .peek:popover-open { display: block; }
-  .peek .via { display: block; margin-top: 6px; font-size: 11px; color: var(--verity-muted, #65726c); }
+  .peek .via { display: block; margin-top: 6px; font-size: 11px; color: var(--verily-muted, #65726c); }
   .provider { display: block; flex-shrink: 0; width: 14px; height: 14px; }
   .expired .icon { color: #815a12; background: #fbefce; }
   .revoked .icon, .message .icon { color: #626d69; background: #edf0ee; }
-  .message { color: var(--verity-muted, #65726c); }
+  .message { color: var(--verily-muted, #65726c); }
   .add { font-weight: 600; }
   @media (prefers-reduced-motion: no-preference) {
     a, button { transition: background .12s, border-color .12s; }
     /* The mark is drawn before the answer arrives, so it resolves rather than swaps. */
     .mark, .mark path { transition: opacity .18s ease, stroke .18s ease; }
-    .spinner { border-top-color: transparent; opacity: .4; animation: verity-spin .7s linear infinite; }
+    .spinner { border-top-color: transparent; opacity: .4; animation: verily-spin .7s linear infinite; }
   }
-  @keyframes verity-spin { to { transform: rotate(360deg); } }
+  @keyframes verily-spin { to { transform: rotate(360deg); } }
   ${markStyles}
 `;
 

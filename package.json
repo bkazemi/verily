@@ -1,16 +1,19 @@
 {
-  "name": "@bkazemi/verity",
+  "name": "@bkazemi/verily",
   "version": "0.0.12",
   "description": "Self-hosted account-to-account verification for Node.js",
   "type": "module",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bkazemi/verity.git"
+    "url": "git+https://github.com/bkazemi/verily.git"
   },
-  "homepage": "https://github.com/bkazemi/verity#readme",
+  "homepage": "https://github.com/bkazemi/verily#readme",
   "bugs": {
-    "url": "https://github.com/bkazemi/verity/issues"
+    "url": "https://github.com/bkazemi/verily/issues"
   },
   "engines": {
     "node": "^22.13.0 || >=24"
@@ -78,6 +81,6 @@
       "types": "./dist/site/index.d.ts",
       "default": "./dist/site/index.js"
     },
-    "./verity.js": "./dist/verity.js"
+    "./verily.js": "./dist/verily.js"
   }
 }

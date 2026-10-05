@@ -1,7 +1,7 @@
 import type { Evidence, LocalKind, Visibility } from '../core/index.js';
 
 /**
- * For a site that uses a hosted Verity instance instead of running its own. The site's
+ * For a site that uses a hosted Verily instance instead of running its own. The site's
  * backend does three things, and this is all of them: it vouches to the instance for its
  * signed-in user; it reads its users' connections back; and, if it wants, it checks the
  * result a user returns with. `handler()` serves the endpoints the first of those needs,
@@ -11,7 +11,7 @@ import type { Evidence, LocalKind, Visibility } from '../core/index.js';
  * does. It must only ever run on a backend: the key is what the instance believes.
  */
 export interface SiteClientOptions {
-  /** The instance's origin, such as `https://verity.shirkadeh.org`. */
+  /** The instance's origin, such as `https://verily.shirkadeh.org`. */
   instance: string;
   /** This site's id in the instance's registry. */
   site: string;
@@ -130,7 +130,7 @@ export async function pseudonym(secret: string, value: string, purpose = 'id'): 
   const mac = await crypto.subtle.sign(
     'HMAC',
     await hmacKey(secret),
-    encoder.encode(`verity ${purpose}\n${value}`),
+    encoder.encode(`verily ${purpose}\n${value}`),
   );
 
   return encode(new Uint8Array(mac));
@@ -330,7 +330,7 @@ export function createSiteClient(options: SiteClientOptions) {
 
     /**
      * The endpoints a site needs, as one function from a `Request` to a `Response`. Mount
-     * it on every path under one prefix, such as `/api/verity/*`. The authorize and return
+     * it on every path under one prefix, such as `/api/verily/*`. The authorize and return
      * URLs registered with the instance are `<prefix>/authorize` and `<prefix>/return`,
      * and the connect pill's `handoff-url` is `<prefix>/handoff`.
      */

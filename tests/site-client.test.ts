@@ -300,10 +300,10 @@ test('the handler serves the authorize, return and handoff endpoints for the sig
     returnUrl: '/settings',
   });
 
-  const get = (path: string) => handle(new Request(`https://partner.test/api/verity/${path}`));
+  const get = (path: string) => handle(new Request(`https://partner.test/api/verily/${path}`));
 
   const post = (path: string, headers: Record<string, string> = {}) =>
-    handle(new Request(`https://partner.test/api/verity/${path}`, { method: 'POST', headers }));
+    handle(new Request(`https://partner.test/api/verily/${path}`, { method: 'POST', headers }));
 
   // Nobody signed in: sent to sign in, and given no token.
   assert.equal((await get('authorize?state=s1')).headers.get('location'), '/login');
