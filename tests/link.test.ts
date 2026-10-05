@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { linkProvider } from '../src/server/link.js';
+import { githubLinkProvider, linkProvider } from '../src/server/link.js';
 import { createServer, type AddressInfo } from 'node:net';
 import * as zlib from 'node:zlib';
 import { publicAddress } from '../src/server/addresses.js';
@@ -937,4 +937,53 @@ test('the preset reads GitHub and nothing else', async () => {
 
   await assert.rejects(instance.verify({ artifact: 'https://gitlab.com/bkazemi', expect }));
   assert.deepEqual(calls, []);
+});
+
+test('a GitHub profile is named by its username, however the holder writes it', async () => {
+  const calls: string[] = [];
+
+  const github = githubLinkProvider({
+    fetch: ((url: string) => {
+      calls.push(String(url));
+
+      return Promise.resolve(
+        new Response(`<a rel="me" href="${expect}">x</a>`, {
+          headers: { 'content-type': 'text/html' },
+        }),
+      );
+    }) as unknown as typeof fetch,
+  });
+
+  assert.equal(github.input, 'text');
+  assert.equal(github.resolve!('bkazemi'), 'https://github.com/bkazemi');
+  assert.equal(github.resolve!(' @bkazemi '), 'https://github.com/bkazemi');
+
+  // An address is left for the address check, and so is anything that is no username.
+  assert.equal(github.resolve!('https://github.com/bkazemi'), 'https://github.com/bkazemi');
+  assert.equal(github.resolve!('-bkazemi'), '-bkazemi');
+  assert.equal(github.resolve!('bkazemi/repo'), 'bkazemi/repo');
+
+  assert.deepEqual(await github.verify({ artifact: github.resolve!('bkazemi'), expect }), {
+    id: 'https://github.com/bkazemi',
+    kind: 'account',
+    handle: 'bkazemi',
+    profileUrl: 'https://github.com/bkazemi',
+  });
+
+  assert.deepEqual(calls, ['https://github.com/bkazemi']);
+});
+
+test('a record of a GitHub account says which profile to read', () => {
+  const github = githubLinkProvider();
+
+  // As a sign-in names it, with the number GitHub issued and not the address.
+  assert.equal(
+    github.known!({ id: '42', handle: 'bkazemi', profileUrl: 'https://github.com/bkazemi' }),
+    'bkazemi',
+  );
+
+  assert.equal(
+    github.known!({ id: 'k', kind: 'key', handle: 'ABCD1234', profileUrl: 'https://x.test/k' }),
+    undefined,
+  );
 });

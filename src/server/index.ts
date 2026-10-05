@@ -231,11 +231,23 @@ function methodAction(provider: Provider): string {
 
 /** What the holder hands back for an artifact method, named for what it is. */
 function artifactField(provider: ArtifactProvider): string {
+  if (provider.field) return provider.field;
+
   if (provider.artifact === 'document') return 'Your proof';
 
   return provider.method === 'backlink'
     ? 'Address of the page carrying your link'
     : 'Address of your published proof';
+}
+
+/**
+ * Said before the holder approves, where the method they used found another proof already
+ * standing: it goes on the record with this one, and they did not ask for it by name.
+ */
+function standingNote(flow: Flow, site: string): string | undefined {
+  return flow.standing?.some((a) => a.method === 'backlink')
+    ? `This account already links back to ${site}. Confirming records that too.`
+    : undefined;
 }
 
 /** Said beside every artifact method: what the holder publishes is public by design. */
@@ -678,6 +690,8 @@ export function createVerily(options: ServerOptions) {
         instructions: provider.instructions(flow.expect),
         artifact: provider.artifact,
         field: artifactField(provider),
+        input: provider.input ?? 'url',
+        ...(flow.suggested ? { suggested: flow.suggested } : {}),
         note: artifactNote(provider),
       });
 
@@ -686,11 +700,13 @@ export function createVerily(options: ServerOptions) {
 
     if (flow.phase === 'approval') {
       const joined = await service.joining(flow);
+      const found = standingNote(flow, service.siteOf(flow.local!));
 
       Object.assign(view, {
         local: subject(flow.local!),
         external: flow.external,
         ...(joined ? { joined: { visibility: joined.visibility } } : {}),
+        ...(found ? { standingNote: found } : {}),
         visibilities: visibilities(flow.local!),
         ...(signs ? { signedNote } : {}),
       });
@@ -886,7 +902,7 @@ export function createVerily(options: ServerOptions) {
             <label>${escape(artifactField(provider))} ${
               provider.artifact === 'document'
                 ? '<textarea name="artifact" rows="14" cols="72" required></textarea>'
-                : '<input name="artifact" type="url" required>'
+                : `<input name="artifact" type="${provider.input ?? 'url'}" value="${escape(flow.suggested ?? '')}" autocapitalize="none" spellcheck="false" required>`
             }</label>
             <button>Check my proof</button></form>
             <p class="fine">${escape(artifactNote(provider))}</p>
@@ -939,6 +955,7 @@ export function createVerily(options: ServerOptions) {
           // visibility was chosen when it was made and is not the holder's to rechoose here.
           const joined = await service.joining(flow);
           const kept = ['revoke', 'share-revoke', 'renew'].includes(flow.kind) || joined;
+          const found = standingNote(flow, service.siteOf(flow.local!));
 
           return html(
             page(
@@ -959,6 +976,7 @@ export function createVerily(options: ServerOptions) {
               flow.external!.kind === 'mailbox' ? undefined : flow.external!.id,
             )}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
+            ${found ? `<p>${escape(found)}</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/approve">
             ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!), signs)}

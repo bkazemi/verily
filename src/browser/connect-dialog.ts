@@ -29,6 +29,10 @@ export interface FlowView {
   instructions?: Instruction[];
   artifact?: 'location' | 'document';
   field?: string;
+  /** How a `location` is asked for. Absent, from an older backend, means an address. */
+  input?: 'url' | 'text';
+  /** What to offer in the field, where a record of the holder's already says. */
+  suggested?: string;
   note?: string;
   /**
    * A mailed code: what to ask the holder for, and once a code has gone, where it went,
@@ -44,6 +48,8 @@ export interface FlowView {
   local?: Subject;
   external?: ExternalAccount;
   joined?: { visibility: 'public' | 'unlisted' };
+  /** Said where the method used found another proof standing, which confirming records too. */
+  standingNote?: string;
   /** What the holder may choose. Absent, from an older backend, means either. */
   visibilities?: ('public' | 'unlisted')[];
   /** Said beside the public choice, where the backend signs its public records. */
@@ -479,10 +485,15 @@ export function openConnectDialog(
     const input =
       flow.artifact === 'document'
         ? node('textarea')
-        : Object.assign(node('input'), { type: 'url' });
+        : Object.assign(node('input'), {
+            type: flow.input ?? 'url',
+            autocapitalize: 'none',
+            spellcheck: false,
+          });
 
     input.name = 'artifact';
     input.required = true;
+    input.value = flow.suggested ?? '';
 
     if (input instanceof HTMLTextAreaElement) input.rows = 10;
 
@@ -665,6 +676,8 @@ export function openConnectDialog(
 
       parts.push(choice);
     }
+
+    if (flow.standingNote) parts.push(node('p', flow.standingNote));
 
     if (methods)
       parts.push(
