@@ -180,13 +180,35 @@ test('a link to something else does not prove the subject', async () => {
     'https://site.test/u/bob',
     'https://site.test/',
     'https://evil.test/u/alice',
-    'http://site.test/u/alice',
+    'ftp://site.test/u/alice',
+    'http://site.test:8080/u/alice',
     'https://site.test.evil.test/u/alice',
   ])
     await assert.rejects(
       provider(`<a rel="me" href="${href}">x</a>`).instance.verify({ artifact: page, expect }),
       `accepted a link to ${href}`,
     );
+});
+
+test('an http link to an https subject is a link to the same site', async () => {
+  assert.deepEqual(
+    await provider('<a rel="me" href="http://site.test/u/alice">x</a>').instance.verify({
+      artifact: page,
+      expect,
+    }),
+    read,
+  );
+});
+
+test('a link with no scheme is read as a browser reads it', async () => {
+  const linked = (href: string) =>
+    provider(`<a rel="me" href="${href}">x</a>`).instance.verify({ artifact: page, expect });
+
+  // Two slashes name a host, and the scheme is the page's own, which is always https.
+  assert.deepEqual(await linked('//site.test/u/alice'), read);
+
+  // With no slashes it is a path on the page's own host, however much it looks like a domain.
+  await assert.rejects(linked('site.test/u/alice'), /no rel="me" link/);
 });
 
 test('subjects that differ only by a query parameter are not conflated', async () => {

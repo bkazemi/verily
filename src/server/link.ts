@@ -360,8 +360,13 @@ function points(href: string, base: URL, subject: URL): boolean {
 
   // A subject with a fragment is one of the views a hash-routed page serves, so the
   // fragment names it and must match. A fragment on the link alone is a spot on the page.
+  // A site reached over http is the same site as over https, and a profile field given a
+  // bare domain is often written as the former. Any other scheme is some other resource.
+  const scheme =
+    target.protocol === 'http:' && subject.protocol === 'https:' ? 'https:' : target.protocol;
+
   if (
-    target.protocol !== subject.protocol ||
+    scheme !== subject.protocol ||
     target.host.toLowerCase() !== subject.host.toLowerCase() ||
     trim(target.pathname) !== trim(subject.pathname) ||
     (subject.hash !== '' && target.hash !== subject.hash)
