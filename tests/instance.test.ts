@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createVerity, type Ended, type ServerOptions } from '../src/server/index.js';
+import { createVerily, type Ended, type ServerOptions } from '../src/server/index.js';
 import type { LocalAccount } from '../src/core/index.js';
 import { alice, fakeArtifactProvider, fakeProvider, MemoryStorage } from './helpers.js';
 
@@ -19,10 +19,10 @@ const origin = 'https://verifier.test';
 function fixture(options: Partial<ServerOptions> = {}) {
   const storage = new MemoryStorage();
 
-  const app = createVerity({
+  const app = createVerily({
     storage,
     providers: [fakeProvider(), fakeArtifactProvider()],
-    baseUrl: `${origin}/api/verity`,
+    baseUrl: `${origin}/api/verily`,
     siteName: 'Instance Site',
     verifierName: 'verifier.test',
     profileOrigins: ['https://site.test', 'https://partner.test'],
@@ -37,7 +37,7 @@ function fixture(options: Partial<ServerOptions> = {}) {
   });
 
   const request = (path: string, init: RequestInit = {}) =>
-    app.handle(new Request(`${origin}/api/verity${path}`, { redirect: 'manual', ...init }));
+    app.handle(new Request(`${origin}/api/verily${path}`, { redirect: 'manual', ...init }));
 
   const post = (path: string, body: string, cookie: string) =>
     request(path, { method: 'POST', headers: { origin, cookie }, body });
@@ -54,7 +54,7 @@ function fixture(options: Partial<ServerOptions> = {}) {
       headers: { cookie: flowCookie },
     });
 
-    const path = callback.headers.get('location')!.replace('/api/verity', '');
+    const path = callback.headers.get('location')!.replace('/api/verily', '');
 
     return { path, cookie: `${flowCookie}; local=${who}`, id: path.split('/').at(-1)! };
   }
@@ -89,12 +89,12 @@ test('a subject with its own site is described by that site, and the instance on
   const artifactCookie = artifact.headers.get('set-cookie')!.split(';')[0]!;
 
   const instructions = await f.request(
-    artifact.headers.get('location')!.replace('/api/verity', ''),
+    artifact.headers.get('location')!.replace('/api/verily', ''),
     { headers: { cookie: `${artifactCookie}; local=member` } },
   );
 
   pages.push(await instructions.text());
-  assert.match(pages.at(-1)!, /Verity proof for Partner: /);
+  assert.match(pages.at(-1)!, /Verily proof for Partner: /);
 
   const flow = await f.approval('member');
   const review = await f.request(flow.path, { headers: { cookie: flow.cookie } });
@@ -198,7 +198,7 @@ const returning =
 
     if (!ended.context) return undefined;
 
-    return `https://partner.test/verity/return?${new URLSearchParams({
+    return `https://partner.test/verily/return?${new URLSearchParams({
       txn: ended.context.txn!,
       id: ended.local!.id,
       kind: ended.result.kind,
@@ -336,7 +336,7 @@ test('a lost response is recovered with the same result, and a cancelled flow re
     headers: { cookie: declinedCookie },
   });
 
-  const page = await f.request(callback.headers.get('location')!.replace('/api/verity', ''), {
+  const page = await f.request(callback.headers.get('location')!.replace('/api/verily', ''), {
     headers: { cookie: declinedCookie },
   });
 
@@ -369,7 +369,7 @@ test('a subject is offered and held to the providers chosen for it', async () =>
   // Nothing asked for is the first one permitted, which here is not the first configured.
   const started = await f.post('/sessions', 'kind=connect', cookie);
 
-  assert.match(started.headers.get('location')!, /\/api\/verity\/flows\//);
+  assert.match(started.headers.get('location')!, /\/api\/verily\/flows\//);
 
   // A record made before its provider was taken away can no longer be renewed by it.
   const open = fixture();
@@ -378,7 +378,7 @@ test('a subject is offered and held to the providers chosen for it', async () =>
   await open.post(`${flow.path}/approve`, 'action=approve&visibility=public', flow.cookie);
   const [record] = await open.app.service.mine(member);
 
-  const narrowed = createVerity({
+  const narrowed = createVerily({
     ...open.app.service.options,
     reportUrl: 'mailto:reports@verifier.test',
     authenticate: async () => member,
@@ -386,7 +386,7 @@ test('a subject is offered and held to the providers chosen for it', async () =>
   });
 
   const renew = await narrowed.handle(
-    new Request(`${origin}/api/verity/sessions`, {
+    new Request(`${origin}/api/verily/sessions`, {
       method: 'POST',
       headers: { origin },
       body: `kind=renew&connectionId=${record!.id}`,
@@ -397,7 +397,7 @@ test('a subject is offered and held to the providers chosen for it', async () =>
 
   // Whoever holds the external account can still remove it, whatever the subject may use.
   const removal = await narrowed.handle(
-    new Request(`${origin}/api/verity/sessions`, {
+    new Request(`${origin}/api/verily/sessions`, {
       method: 'POST',
       headers: { origin },
       body: `kind=revoke&connectionId=${record!.id}`,
@@ -424,7 +424,7 @@ test('a subject is offered and held to the providers chosen for it', async () =>
 
   assert.match(
     (await reversed.post('/sessions', 'kind=connect', cookie)).headers.get('location')!,
-    /\/api\/verity\/flows\//,
+    /\/api\/verily\/flows\//,
   );
 
   // A subject nothing was chosen for keeps every method.
@@ -520,7 +520,7 @@ test('a visibility is held to the list even when the record it would have joined
   );
 
   const cookie = `${begun.headers.get('set-cookie')!.split(';')[0]!}; local=member`;
-  const path = begun.headers.get('location')!.replace('/api/verity', '');
+  const path = begun.headers.get('location')!.replace('/api/verily', '');
   const stored = await f.storage.transaction((tx) => tx.get('flows', path.split('/').at(-1)!));
 
   artifact.artifacts.set('https://notes.test/proof', stored!.expect!);

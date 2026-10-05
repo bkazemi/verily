@@ -14,7 +14,7 @@ export interface EmailMessage {
   /**
    * Images the HTML shows, which travel inside the message and are attached inline under
    * the id the HTML names each by, as `cid:<contentId>`. A sender that leaves them out
-   * still sends a whole message: the image's place reads "Verity" instead.
+   * still sends a whole message: the image's place reads "Verily" instead.
    */
   images: EmailImage[];
 }
@@ -29,8 +29,8 @@ export interface EmailImage {
 
 /** The logotype as the message carries it. */
 const logo: EmailImage = {
-  contentId: 'verity-logo',
-  filename: 'verity.png',
+  contentId: 'verily-logo',
+  filename: 'verily.png',
   contentType: 'image/png',
   content: emailLogo,
 };
@@ -134,7 +134,7 @@ function letter(parts: {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
-<title>Verity</title>
+<title>Verily</title>
 <style>
 @media (prefers-color-scheme: dark) {
   .page { background: #161a18 !important; }
@@ -153,7 +153,7 @@ function letter(parts: {
 <tr><td align="center" style="padding:40px 16px 48px;">
 <table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:440px;margin:0 auto;">
 <tr><td align="center" style="padding:0 0 28px;">
-<img src="cid:${logo.contentId}" width="97" height="40" alt="Verity" style="display:block;margin:0 auto;border:0;outline:none;font:700 20px/40px ${sans};color:#23312b;">
+<img src="cid:${logo.contentId}" width="94" height="40" alt="Verily" style="display:block;margin:0 auto;border:0;outline:none;font:700 20px/40px ${sans};color:#23312b;">
 </td></tr>
 <tr><td class="ink" align="center" style="padding:0 0 10px;font:650 22px/1.3 ${sans};color:#23312b;text-align:center;">Confirm your address</td></tr>
 <tr><td class="ink" align="center" style="padding:0 0 24px;font:16px/1.6 ${sans};color:#23312b;text-align:center;">${escape(parts.ask)}</td></tr>

@@ -1,6 +1,6 @@
-"""Verity logotype: the V mark as the 'V', 'erity' set in Rubik and outlined.
+"""Verily logotype: the V mark as the 'V', 'erily' set in Rubik and outlined.
 
-Regenerates verity-logo.svg / verity-logo-inverted.svg / verity-logo-plate.svg. The
+Regenerates verily-logo.svg / verily-logo-inverted.svg / verily-logo-plate.svg. The
 wordmark ships as outlines so the files carry no font dependency; Rubik is OFL, see
 docs/licenses/rubik.txt.
 
@@ -64,7 +64,7 @@ def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", 
     x = round(lsb + mark_w + rsb - tighten)
 
     blob = hb.Blob.from_file_path(path); f = hb.Font(hb.Face(blob))
-    buf = hb.Buffer(); buf.add_str("Verity"); buf.guess_segment_properties()
+    buf = hb.Buffer(); buf.add_str("Verily"); buf.guess_segment_properties()
     hb.shape(f, buf, {"kern": True, "liga": True})
     rec = RecordingPen()
     for info, pos in list(zip(buf.glyph_infos, buf.glyph_positions))[1:]:
@@ -85,8 +85,8 @@ def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", 
     back = (f'  <rect x="{-pad:g}" y="{y0 - pad:g}" width="{right + 2 * pad:g}" '
             f'height="{y1 - y0 + 2 * pad:g}" rx="{round(pad * 0.9):g}" fill="{plate}" />\n') if plate else ""
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" role="img" '
-           f'aria-labelledby="verity-logo-title">\n'
-           f'  <title id="verity-logo-title">Verity</title>\n'
+           f'aria-labelledby="verily-logo-title">\n'
+           f'  <title id="verily-logo-title">Verily</title>\n'
            f'{back}'
            f'  <path d="{poly(RED)}" fill="#D3444C" />\n'
            f'  <path d="{poly(GRN)}" fill="#149766" />\n'
@@ -95,6 +95,6 @@ def build(weight=400, overshoot=8.0, tighten=0.0, tracking=0.0, word="#202c29", 
     print(out, "| mark", round(mark_w), "vs V", v_w, "| stroke", round(32 * s), "| w", round(right))
 
 if __name__ == "__main__":
-    build(tighten=70, out="verity-logo.svg")
-    build(tighten=70, word="#ffffff", out="verity-logo-inverted.svg")
-    build(tighten=70, word="#ffffff", plate="#0d1117", out="verity-logo-plate.svg")
+    build(tighten=70, out="verily-logo.svg")
+    build(tighten=70, word="#ffffff", out="verily-logo-inverted.svg")
+    build(tighten=70, word="#ffffff", plate="#0d1117", out="verily-logo-plate.svg")

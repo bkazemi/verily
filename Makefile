@@ -27,7 +27,7 @@ clean-tree:
 bump:
 	npm version $(VERSION) --no-git-tag-version
 	sed -i "s/'v$(subst .,\.,$(CURRENT))'/'v$(VERSION)'/" src/version.ts
-	sed -i 's/verity@$(subst .,\.,$(CURRENT))/verity@$(VERSION)/g' README.md
+	sed -i 's/verily@$(subst .,\.,$(CURRENT))/verily@$(VERSION)/g' README.md
 
 # The example imports the package by name, so the type check needs the build's output.
 verify:

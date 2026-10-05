@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createVerity,
+  createVerily,
   emailProvider,
   resendSender,
   type EmailMessage,
 } from '../src/server/index.js';
-import { VerityService } from '../src/server/service.js';
+import { VerilyService } from '../src/server/service.js';
 import type { Provider } from '../src/core/index.js';
 import { alice, bob, fakeProvider, MemoryStorage } from './helpers.js';
 
@@ -28,10 +28,10 @@ function fixture(extra: Provider[] = [], sendLimits?: { day?: number; address?: 
 
   const storage = new MemoryStorage();
 
-  const service = new VerityService({
+  const service = new VerilyService({
     storage,
     providers: [email, ...extra],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'verifier.test',
     profileOrigins: ['https://site.test'],
@@ -265,10 +265,10 @@ test('a mailed code starts with nothing to publish or visit, and a sign-in takes
 function pages() {
   const outbox: EmailMessage[] = [];
 
-  const app = createVerity({
+  const app = createVerily({
     storage: new MemoryStorage(),
     providers: [emailProvider({ send: async (message) => void outbox.push(message) })],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Self-hosted Site',
     profileOrigins: ['https://site.test'],
@@ -282,7 +282,7 @@ function pages() {
   });
 
   const request = (path: string, options: RequestInit = {}) =>
-    app.handle(new Request(`https://site.test/api/verity${path}`, options));
+    app.handle(new Request(`https://site.test/api/verily${path}`, options));
 
   return { app, outbox, request };
 }
@@ -297,7 +297,7 @@ test('the flow pages ask for the address, then the code, and say when a code was
   });
 
   const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=alice`;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
   const post = { method: 'POST', headers: { origin: 'https://site.test', cookie } };
 
   // The form posts to this origin alone: there is no provider to be redirected to.
@@ -412,7 +412,7 @@ test('the Resend sender posts one message with the key, and rejects what Resend 
   const calls: { url: string; init: RequestInit }[] = [];
 
   const image = {
-    contentId: 'verity-logo',
+    contentId: 'verily-logo',
     filename: 'v.png',
     contentType: 'image/png',
     content: 'AAAA',
@@ -422,7 +422,7 @@ test('the Resend sender posts one message with the key, and rejects what Resend 
 
   const send = resendSender({
     apiKey: 're_test',
-    from: 'Verity <verify@site.test>',
+    from: 'Verily <verify@site.test>',
     fetch: async (url, init) => {
       calls.push({ url: String(url), init: init! });
 
@@ -443,13 +443,13 @@ test('the Resend sender posts one message with the key, and rejects what Resend 
   assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, 'Bearer re_test');
 
   assert.deepEqual(JSON.parse(calls[0]!.init.body as string), {
-    from: 'Verity <verify@site.test>',
+    from: 'Verily <verify@site.test>',
     to: ['alice@example.test'],
     subject: 'Your Site verification code',
     text: 'K7QM-2XPD',
     html: '<p>K7QM-2XPD</p>',
     attachments: [
-      { filename: 'v.png', content: 'AAAA', content_type: 'image/png', content_id: 'verity-logo' },
+      { filename: 'v.png', content: 'AAAA', content_type: 'image/png', content_id: 'verily-logo' },
     ],
   });
 
@@ -469,7 +469,7 @@ const linkIn = (message: EmailMessage) => {
   return {
     id: url.pathname.split('/').at(-1)!,
     token: url.searchParams.get('token')!,
-    path: `${url.pathname.replace('/api/verity', '')}${url.search}`,
+    path: `${url.pathname.replace('/api/verily', '')}${url.search}`,
   };
 };
 
@@ -502,19 +502,19 @@ test('the message is a button to press, with the code beneath it and nothing fet
   // Its one image is the logotype, which the message carries with it.
   assert.deepEqual(
     [...html.matchAll(/src="([^"]+)"/g)].map((m) => m[1]),
-    ['cid:verity-logo'],
+    ['cid:verily-logo'],
   );
 
   const [image] = f.outbox[0]!.images;
 
   assert.equal(f.outbox[0]!.images.length, 1);
-  assert.equal(image!.contentId, 'verity-logo');
+  assert.equal(image!.contentId, 'verily-logo');
   assert.equal(image!.contentType, 'image/png');
   // A PNG, of the size the HTML shows it at three times over.
   const bytes = Buffer.from(image!.content, 'base64');
 
   assert.equal(bytes.subarray(1, 4).toString(), 'PNG');
-  assert.deepEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20)], [291, 120]);
+  assert.deepEqual([bytes.readUInt32BE(16), bytes.readUInt32BE(20)], [281, 120]);
 
   assert.deepEqual(
     [...html.matchAll(/https?:\/\/[^"\s<]+/g)].map((m) => new URL(m[0]).origin),
@@ -601,7 +601,7 @@ test('opening the link confirms nothing, pressing its button does, and the first
   });
 
   const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=alice`;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
 
   await f.request(`${path}/submit`, {
     method: 'POST',
@@ -672,7 +672,7 @@ test('the browser that started the flow is offered the way on from the confirmat
   });
 
   const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=alice`;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
   const post = { method: 'POST', headers: { origin: 'https://site.test', cookie } };
 
   await f.request(`${path}/submit`, { ...post, body: 'artifact=alice%40example.test' });
@@ -682,7 +682,7 @@ test('the browser that started the flow is offered the way on from the confirmat
 
   assert.match(
     await pressed.text(),
-    new RegExp(`href="/api/verity${path}">Or carry on in this window`),
+    new RegExp(`href="/api/verily${path}">Or carry on in this window`),
   );
 });
 

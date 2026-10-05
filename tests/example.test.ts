@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import { Pool, PostgresStorage } from '../src/postgres/index.js';
-import { VerityService } from '../src/server/service.js';
+import { VerilyService } from '../src/server/service.js';
 import { fakeProvider } from './helpers.js';
 
 test(
@@ -31,10 +31,10 @@ test(
     await storage.migrate();
     const provider = fakeProvider();
 
-    const service = new VerityService({
+    const service = new VerilyService({
       storage,
       providers: [provider],
-      baseUrl: `${origin}/api/verity`,
+      baseUrl: `${origin}/api/verily`,
       siteName: 'Example',
       verifierName: 'Example',
       profileOrigins: [origin],
@@ -62,7 +62,7 @@ test(
         ...process.env,
         ORIGIN: origin,
         DATABASE_URL: process.env.TEST_DATABASE_URL,
-        VERITY_NAMESPACE: namespace,
+        VERILY_NAMESPACE: namespace,
         GITHUB_CLIENT_ID: 'test-client',
         GITHUB_CLIENT_SECRET: 'test-provider-secret',
         EXAMPLE_PASSWORD: 'test-local-password',
@@ -92,9 +92,9 @@ test(
 
       assert.ok(!profile.includes(privateId));
       assert.ok(!profile.includes('known-alice'));
-      const asset = await (await fetch(`${origin}/assets/verity.js`)).text();
+      const asset = await (await fetch(`${origin}/assets/verily.js`)).text();
 
-      assert.ok(asset.includes('verity-badge'));
+      assert.ok(asset.includes('verily-badge'));
       assert.ok(!asset.includes('test-provider-secret'));
 
       const login = await fetch(`${origin}/login`, {
@@ -109,14 +109,14 @@ test(
 
       assert.match(
         await (await fetch(origin, { headers: { cookie } })).text(),
-        /<verity-connect backend-url="\/api\/verity"><\/verity-connect>/,
+        /<verily-connect backend-url="\/api\/verily"><\/verily-connect>/,
       );
 
-      const mine = await (await fetch(`${origin}/api/verity/mine`, { headers: { cookie } })).json();
+      const mine = await (await fetch(`${origin}/api/verily/mine`, { headers: { cookie } })).json();
 
       assert.equal(mine[0].id, privateId);
 
-      const start = await fetch(`${origin}/api/verity/sessions`, {
+      const start = await fetch(`${origin}/api/verily/sessions`, {
         method: 'POST',
         headers: { origin, cookie },
         body: 'kind=connect',
@@ -126,7 +126,7 @@ test(
       assert.equal(start.status, 303);
       assert.equal(new URL(start.headers.get('location')!).hostname, 'github.com');
 
-      const disconnect = await fetch(`${origin}/api/verity/connections/${privateId}/disconnect`, {
+      const disconnect = await fetch(`${origin}/api/verily/connections/${privateId}/disconnect`, {
         method: 'POST',
         headers: { origin, cookie },
         body: '{}',
@@ -140,7 +140,7 @@ test(
         await once(child, 'exit');
       }
 
-      await pool.query('DELETE FROM verity_records WHERE namespace=$1', [namespace]);
+      await pool.query('DELETE FROM verily_records WHERE namespace=$1', [namespace]);
       await pool.end();
     }
   },

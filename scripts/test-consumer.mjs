@@ -6,10 +6,10 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
-const directory = mkdtempSync(join(tmpdir(), 'verity-consumer-'));
+const directory = mkdtempSync(join(tmpdir(), 'verily-consumer-'));
 
 const run = (args, cwd = directory) =>
-  execFileSync('npm', [...args, '--cache', '/tmp/verity-npm-cache'], { cwd, encoding: 'utf8' });
+  execFileSync('npm', [...args, '--cache', '/tmp/verily-npm-cache'], { cwd, encoding: 'utf8' });
 
 try {
   const pack = JSON.parse(run(['pack', '--json', '--pack-destination', directory], process.cwd()));
@@ -32,34 +32,34 @@ try {
     `
     import assert from 'node:assert/strict';
     import { createRequire } from 'node:module';
-    import { createVerity, githubProvider, discordProvider, youtubeProvider, emailProvider, resendSender, githubLinkProvider, linkProvider, PostgresStorage, status, init } from '@bkazemi/verity';
-    assert.equal(typeof createVerity, 'function'); assert.equal(typeof githubProvider, 'function');
+    import { createVerily, githubProvider, discordProvider, youtubeProvider, emailProvider, resendSender, githubLinkProvider, linkProvider, PostgresStorage, status, init } from '@bkazemi/verily';
+    assert.equal(typeof createVerily, 'function'); assert.equal(typeof githubProvider, 'function');
     assert.equal(typeof linkProvider, 'function'); assert.equal(typeof discordProvider, 'function'); assert.equal(typeof youtubeProvider, 'function');
     assert.equal(githubLinkProvider().id, 'github');
     assert.equal(emailProvider({ send: resendSender({ apiKey: 're_test', from: 'verify@example.test' }) }).id, 'email');
     assert.equal(typeof PostgresStorage, 'function'); assert.equal(typeof status, 'function'); assert.equal(typeof init, 'function');
-    const { createSiteClient, pseudonym } = await import('@bkazemi/verity/site');
+    const { createSiteClient, pseudonym } = await import('@bkazemi/verily/site');
     assert.equal(typeof pseudonym, 'function');
     assert.equal(
-      createSiteClient({ instance: 'https://verity.example', site: 'example', key: 'k'.repeat(43) }).beginUrl(),
-      'https://verity.example/begin?site=example&purpose=connect',
+      createSiteClient({ instance: 'https://verily.example', site: 'example', key: 'k'.repeat(43) }).beginUrl(),
+      'https://verily.example/begin?site=example&purpose=connect',
     );
-    console.log(createRequire(import.meta.url).resolve('@bkazemi/verity/verity.js'));
+    console.log(createRequire(import.meta.url).resolve('@bkazemi/verily/verily.js'));
   `,
   );
 
   writeFileSync(
     join(directory, 'consumer.ts'),
     `
-    import { createVerity, PostgresStorage, Pool, init, type ServerOptions, type Evidence, type Storage } from '@bkazemi/verity';
-    import { createSiteClient, type SiteClient, type SiteResult } from '@bkazemi/verity/site';
-    const site: SiteClient = createSiteClient({ instance: 'https://verity.example', site: 'example', key: 'k'.repeat(43) });
+    import { createVerily, PostgresStorage, Pool, init, type ServerOptions, type Evidence, type Storage } from '@bkazemi/verily';
+    import { createSiteClient, type SiteClient, type SiteResult } from '@bkazemi/verily/site';
+    const site: SiteClient = createSiteClient({ instance: 'https://verily.example', site: 'example', key: 'k'.repeat(43) });
     const read: Promise<Record<string, Evidence[]>> = site.connections(['a']);
     const returned: Promise<SiteResult | undefined> = site.result('token');
     void [read, returned];
     const storage: Storage = new PostgresStorage(new Pool());
-    const create: (options: ServerOptions) => ReturnType<typeof createVerity> = createVerity;
-    const client = init({ backendUrl: '/api/verity' });
+    const create: (options: ServerOptions) => ReturnType<typeof createVerily> = createVerily;
+    const client = init({ backendUrl: '/api/verily' });
     const evidence: Promise<Evidence> = client.getConnection('example');
     void [storage, create, evidence];
   `,
@@ -85,12 +85,12 @@ try {
   writeFileSync(
     join(directory, 'browser.ts'),
     `
-    import { init, type Evidence } from '@bkazemi/verity';
-    const client = init({ backendUrl: '/api/verity' });
+    import { init, type Evidence } from '@bkazemi/verily';
+    const client = init({ backendUrl: '/api/verily' });
     const evidence: Promise<Evidence> = client.getConnection('example');
     void evidence;
     // @ts-expect-error Server APIs must not be offered by the browser entry point.
-    import { createVerity } from '@bkazemi/verity';
+    import { createVerily } from '@bkazemi/verily';
   `,
   );
 
@@ -113,7 +113,7 @@ try {
     { cwd: directory, stdio: 'pipe' },
   );
 
-  writeFileSync(join(directory, 'browser.mjs'), `export { init } from '@bkazemi/verity';`);
+  writeFileSync(join(directory, 'browser.mjs'), `export { init } from '@bkazemi/verily';`);
 
   const browserBundle = await build({
     absWorkingDir: directory,
@@ -154,8 +154,8 @@ try {
   });
 
   vm.runInContext(asset, context);
-  assert.equal(typeof context.Verity.init, 'function');
-  assert.ok(elements.has('verity-badge'));
+  assert.equal(typeof context.Verily.init, 'function');
+  assert.ok(elements.has('verily-badge'));
   console.log('Separate consumer imports and browser asset passed.');
 } finally {
   rmSync(directory, { recursive: true, force: true });

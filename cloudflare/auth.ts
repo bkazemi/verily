@@ -6,7 +6,7 @@ const sessionMs = 8 * 3600000;
 // Use a normal host-only cookie name. Secure, HttpOnly, SameSite and Path=/
 // provide the relevant protections while avoiding __Host-prefix rejection by
 // browsers or privacy extensions on workers.dev.
-const cookieName = 'verity_owner';
+const cookieName = 'verily_owner';
 
 interface Session {
   expiresAt: number;

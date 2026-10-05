@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ArtifactProvider, LocalAccount } from '../src/core/index.js';
-import { VerityService } from '../src/server/service.js';
+import { VerilyService } from '../src/server/service.js';
 import { alice, fakeArtifactProvider, fakeProvider, MemoryStorage } from './helpers.js';
 
 /** Alice after the site moved her profile: the same subject at a new address. */
@@ -40,10 +40,10 @@ function fixture(extra: ArtifactProvider[] = []) {
   const oauth = fakeProvider();
   const backlink = fakeBacklink();
 
-  const service = new VerityService({
+  const service = new VerilyService({
     storage: new MemoryStorage(),
     providers: [oauth, backlink, ...extra],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Site',
     profileOrigins: ['https://site.test'],
@@ -291,10 +291,10 @@ test('a standing proof is not offered for removal from the external side', async
 test('a flow stays in the namespace of the record it acts on', async () => {
   const notes = fakeArtifactProvider();
 
-  const service = new VerityService({
+  const service = new VerilyService({
     storage: new MemoryStorage(),
     providers: [fakeProvider(), notes],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Site',
     profileOrigins: ['https://site.test'],
@@ -312,10 +312,10 @@ test('a flow stays in the namespace of the record it acts on', async () => {
 test('each method is configured once', () => {
   assert.throws(
     () =>
-      new VerityService({
+      new VerilyService({
         storage: new MemoryStorage(),
         providers: [fakeProvider(), fakeProvider()],
-        baseUrl: 'https://site.test/api/verity',
+        baseUrl: 'https://site.test/api/verily',
         siteName: 'Site',
         verifierName: 'Site',
         profileOrigins: ['https://site.test'],

@@ -1,10 +1,10 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import type { Evidence } from '@bkazemi/verity';
+import type { Evidence } from '@bkazemi/verily';
 
 const require = createRequire(import.meta.url);
-const asset = await readFile(require.resolve('@bkazemi/verity/verity.js'));
+const asset = await readFile(require.resolve('@bkazemi/verily/verily.js'));
 const page = await readFile(new URL('./preview.html', import.meta.url));
 const port = Number(process.env.PREVIEW_PORT ?? 3001);
 const origin = `http://localhost:${port}`;
@@ -25,7 +25,7 @@ const server = createServer((request, response) => {
   response.setHeader('Cache-Control', 'no-store');
   response.setHeader('Referrer-Policy', 'same-origin');
 
-  if (url.pathname === '/assets/verity.js') {
+  if (url.pathname === '/assets/verily.js') {
     response.setHeader('Content-Type', 'text/javascript');
     response.end(asset);
 
@@ -33,17 +33,17 @@ const server = createServer((request, response) => {
   }
 
   // The proof a key-signed connection points at, served as the text a reader would check.
-  if (url.pathname === '/api/verity/connections/signed/proof') {
+  if (url.pathname === '/api/verily/connections/signed/proof') {
     response.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
     response.end(
-      `-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nVerity proof for JoeSite: 9Qv2bXkP\n-----BEGIN PGP SIGNATURE-----\n\n(demo: not a real signature)\n-----END PGP SIGNATURE-----\n`,
+      `-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nVerily proof for JoeSite: 9Qv2bXkP\n-----BEGIN PGP SIGNATURE-----\n\n(demo: not a real signature)\n-----END PGP SIGNATURE-----\n`,
     );
 
     return;
   }
 
-  if (url.pathname.startsWith('/api/verity/connections/')) {
+  if (url.pathname.startsWith('/api/verily/connections/')) {
     const id = url.pathname.split('/').at(-1)!;
 
     if (
@@ -64,7 +64,7 @@ const server = createServer((request, response) => {
       by: 'provider' as const,
       method: 'gist' as const,
       artifactUrl: 'https://gist.github.com/joe/3f8a1c9e2b7d4506a1f2',
-      expect: 'Verity proof for JoeSite: 9Qv2bXkP',
+      expect: 'Verily proof for JoeSite: 9Qv2bXkP',
       confirmedAt: Date.now() - (id === 'unconfirmed' ? 9 * 86400000 : 3600000),
     };
 
@@ -73,8 +73,8 @@ const server = createServer((request, response) => {
     const signature = {
       by: 'provider' as const,
       method: 'signature' as const,
-      artifactUrl: `${origin}/api/verity/connections/${id}/proof`,
-      expect: 'Verity proof for JoeSite: 9Qv2bXkP',
+      artifactUrl: `${origin}/api/verily/connections/${id}/proof`,
+      expect: 'Verily proof for JoeSite: 9Qv2bXkP',
       hosted: true,
       confirmedAt: Date.now() - 3600000,
     };
@@ -85,7 +85,7 @@ const server = createServer((request, response) => {
       external:
         id === 'signed'
           ? {
-              id: '7FDEB37E4F6EAD8E2FEFD8511347D93FEB1342AF',
+              id: '05975AC2F819C57438C06248E7E21D206C283B44',
               kind: 'key',
               handle: 'joe@joesite.example',
               profileUrl: `${origin}/demo`,
@@ -180,7 +180,7 @@ const server = createServer((request, response) => {
   response.end(page);
 });
 
-server.listen(port, '127.0.0.1', () => console.log(`Verity component preview: ${origin}`));
+server.listen(port, '127.0.0.1', () => console.log(`Verily component preview: ${origin}`));
 
 process.on('SIGTERM', () => server.close());
 process.on('SIGINT', () => server.close());

@@ -1,4 +1,4 @@
-const client = Verity.init({ backendUrl: '/api/verity' });
+const client = Verily.init({ backendUrl: '/api/verily' });
 const message = document.getElementById('message');
 
 async function action(work) {
@@ -10,14 +10,14 @@ async function action(work) {
   }
 }
 
-document.querySelector('verity-connect').addEventListener('verity-result', () =>
+document.querySelector('verily-connect').addEventListener('verily-result', () =>
   action(async () => {
     message.textContent = 'Verification complete.';
   }),
 );
 
 async function render() {
-  const response = await fetch('/api/verity/mine', { cache: 'no-store' });
+  const response = await fetch('/api/verily/mine', { cache: 'no-store' });
 
   if (!response.ok) throw new Error('Sign in required');
 
@@ -53,7 +53,7 @@ async function render() {
       button('Disconnect', () => client.disconnect(connection.id));
       const visibility = document.createElement('a');
 
-      visibility.href = `/api/verity/visibility/${connection.id}`;
+      visibility.href = `/api/verily/visibility/${connection.id}`;
       visibility.textContent = 'Change visibility (authenticate with GitHub)';
       section.append(visibility);
 

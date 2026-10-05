@@ -25,13 +25,13 @@ import {
   type SignedDocument,
   type Visibility,
 } from '../core/index.js';
-import { codeAttempts, VerityService, Unavailable, type ServiceOptions } from './service.js';
+import { codeAttempts, VerilyService, Unavailable, type ServiceOptions } from './service.js';
 import { copyScript } from './copy.js';
 import { escape } from './escape.js';
 import { logo } from '../logo.js';
 import { stylesheet, styleVersion } from './style.js';
 
-export { VerityService, Unavailable } from './service.js';
+export { VerilyService, Unavailable } from './service.js';
 
 export { githubProvider } from './github.js';
 
@@ -111,7 +111,7 @@ export interface Ended {
 const maxBodyBytes = 65536;
 
 const page = (prefix: string, title: string, body: string) =>
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verity</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main>${logo}<h1>${escape(title)}</h1>${body}</main></body></html>`;
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verily</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main>${logo}<h1>${escape(title)}</h1>${body}</main></body></html>`;
 
 const headers = {
   'Cache-Control': 'no-store',
@@ -455,8 +455,8 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
   );
 }
 
-export function createVerity(options: ServerOptions) {
-  const service = new VerityService(options);
+export function createVerily(options: ServerOptions) {
+  const service = new VerilyService(options);
   const signs = options.signingKey !== undefined;
 
   const base = new URL(service.baseUrl),
@@ -472,7 +472,7 @@ export function createVerity(options: ServerOptions) {
       throw new Error('A form target must be an origin');
   }
 
-  const cookieName = `verity_flow_${Buffer.from(prefix).toString('hex')}`;
+  const cookieName = `verily_flow_${Buffer.from(prefix).toString('hex')}`;
 
   function binding(request: Request) {
     return (
@@ -606,7 +606,7 @@ export function createVerity(options: ServerOptions) {
       page(
         prefix,
         'Verification result',
-        `<p>${escape(outcome)}</p>${reason ? `<p>${escape(reason)}.</p>` : ''}<div id="verity-result" data-outcome="${escape(outcome)}" data-id="${escape(id)}"></div><script src="${escape(prefix)}/result.js" defer></script><p>You can close this window and return to account settings.</p>`,
+        `<p>${escape(outcome)}</p>${reason ? `<p>${escape(reason)}.</p>` : ''}<div id="verily-result" data-outcome="${escape(outcome)}" data-id="${escape(id)}"></div><script src="${escape(prefix)}/result.js" defer></script><p>You can close this window and return to account settings.</p>`,
       ),
     );
   }
@@ -754,7 +754,7 @@ export function createVerity(options: ServerOptions) {
 
         if (path === '/result.js')
           return new Response(
-            `const e=document.getElementById('verity-result');if(window.opener&&e){window.opener.postMessage({type:'verity-result',outcome:e.dataset.outcome,connectionId:e.dataset.id},location.origin);window.close()}`,
+            `const e=document.getElementById('verily-result');if(window.opener&&e){window.opener.postMessage({type:'verily-result',outcome:e.dataset.outcome,connectionId:e.dataset.id},location.origin);window.close()}`,
             { headers: { ...headers, 'Content-Type': 'text/javascript' } },
           );
 
@@ -1052,7 +1052,7 @@ export function createVerity(options: ServerOptions) {
             const response = plain(await service.signed(id));
 
             // Kept as a file, which is what `gpg --verify` is given.
-            response.headers.set('Content-Disposition', `attachment; filename="verity-${id}.asc"`);
+            response.headers.set('Content-Disposition', `attachment; filename="verily-${id}.asc"`);
 
             return response;
           }

@@ -7,7 +7,7 @@ export { Pool } from 'pg';
 export class PostgresStorage implements Storage {
   constructor(
     readonly pool: Pool,
-    readonly namespace = 'verity',
+    readonly namespace = 'verily',
   ) {
     if (!namespace) throw new Error('Storage namespace required');
   }
@@ -20,9 +20,9 @@ export class PostgresStorage implements Storage {
       // IF NOT EXISTS does not make CREATE TABLE safe to race: two workers starting on a new
       // database both create the table's row type, and one fails. The table is shared by
       // every namespace, so the lock is one of its own rather than the namespace's.
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('verity migrate', 0))");
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('verily migrate', 0))");
 
-      await client.query(`CREATE TABLE IF NOT EXISTS verity_records (
+      await client.query(`CREATE TABLE IF NOT EXISTS verily_records (
         namespace text NOT NULL, kind text NOT NULL, id text NOT NULL, value jsonb NOT NULL,
         PRIMARY KEY (namespace, kind, id)
       )`);
@@ -64,7 +64,7 @@ export class PostgresStorage implements Storage {
     return {
       async get<K extends keyof Records>(kind: K, id: string) {
         const result = await client.query(
-          'SELECT value FROM verity_records WHERE namespace=$1 AND kind=$2 AND id=$3',
+          'SELECT value FROM verily_records WHERE namespace=$1 AND kind=$2 AND id=$3',
           [namespace, kind, id],
         );
 
@@ -72,13 +72,13 @@ export class PostgresStorage implements Storage {
       },
       async put(kind, id, value) {
         await client.query(
-          `INSERT INTO verity_records(namespace,kind,id,value) VALUES($1,$2,$3,$4)
+          `INSERT INTO verily_records(namespace,kind,id,value) VALUES($1,$2,$3,$4)
           ON CONFLICT(namespace,kind,id) DO UPDATE SET value=EXCLUDED.value`,
           [namespace, kind, id, JSON.stringify(value)],
         );
       },
       async delete(kind, id) {
-        await client.query('DELETE FROM verity_records WHERE namespace=$1 AND kind=$2 AND id=$3', [
+        await client.query('DELETE FROM verily_records WHERE namespace=$1 AND kind=$2 AND id=$3', [
           namespace,
           kind,
           id,
@@ -86,7 +86,7 @@ export class PostgresStorage implements Storage {
       },
       async list<K extends keyof Records>(kind: K) {
         const result = await client.query(
-          'SELECT value FROM verity_records WHERE namespace=$1 AND kind=$2',
+          'SELECT value FROM verily_records WHERE namespace=$1 AND kind=$2',
           [namespace, kind],
         );
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Pool, PostgresStorage } from '../src/postgres/index.js';
-import { VerityService } from '../src/server/service.js';
+import { VerilyService } from '../src/server/service.js';
 import { alice, fakeProvider } from './helpers.js';
 
 test(
@@ -36,13 +36,13 @@ test(
       const options = {
         storage,
         providers: [fakeProvider()],
-        baseUrl: 'https://site.test/api/verity',
+        baseUrl: 'https://site.test/api/verily',
         siteName: 'Site',
         verifierName: 'Site',
         profileOrigins: ['https://site.test'],
       };
 
-      const service = new VerityService(options),
+      const service = new VerilyService(options),
         flow = await service.start(alice);
 
       await service.callback(
@@ -60,7 +60,7 @@ test(
 
       assert.equal(await other.transaction((tx) => tx.get('connections', id)), undefined);
 
-      const restarted = new VerityService({
+      const restarted = new VerilyService({
         ...options,
         storage: new PostgresStorage(pool, namespace),
       });
@@ -78,7 +78,7 @@ test(
       for (const share of shares)
         await assert.rejects(restarted.shared(share!.url.split('/').at(-1)!));
     } finally {
-      await pool.query('DELETE FROM verity_records WHERE namespace=$1 OR namespace=$2', [
+      await pool.query('DELETE FROM verily_records WHERE namespace=$1 OR namespace=$2', [
         namespace,
         `${namespace}-other`,
       ]);

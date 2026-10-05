@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createVerity } from '../src/server/index.js';
+import { createVerily } from '../src/server/index.js';
 import type { Provider } from '../src/core/index.js';
 import {
   alice,
@@ -12,10 +12,10 @@ import {
 } from './helpers.js';
 
 function fixture(providers: Provider[] = [fakeProvider()]) {
-  const app = createVerity({
+  const app = createVerily({
     storage: new MemoryStorage(),
     providers,
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Self-hosted Site',
     profileOrigins: ['https://site.test'],
@@ -29,7 +29,7 @@ function fixture(providers: Provider[] = [fakeProvider()]) {
   });
 
   const request = (path: string, options: RequestInit = {}) =>
-    app.handle(new Request(`https://site.test/api/verity${path}`, options));
+    app.handle(new Request(`https://site.test/api/verily${path}`, options));
 
   async function connect(visibility = 'unlisted') {
     const start = await request('/sessions', {
@@ -42,7 +42,7 @@ function fixture(providers: Provider[] = [fakeProvider()]) {
     const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
     const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
     const callback = await request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
-    const path = callback.headers.get('location')!.replace('/api/verity', '');
+    const path = callback.headers.get('location')!.replace('/api/verily', '');
     const review = await request(path, { headers: { cookie: `${cookie}; local=alice` } });
 
     assert.match(await review.text(), /value="unlisted" checked/);
@@ -83,7 +83,7 @@ test('HTTP full flow and visibility across HTML/JSON, generic secret failures an
   }
 
   const share = (await f.app.service.share(id, alice))!;
-  const response = await f.request(share.url.replace('https://site.test/api/verity', ''));
+  const response = await f.request(share.url.replace('https://site.test/api/verily', ''));
 
   assert.equal(response.status, 200);
   assert.match(await response.text(), /Anyone with this link/);
@@ -268,15 +268,15 @@ test('a holder-paced proof is published here, submitted here, and approved here'
   assert.equal(start.status, 303);
   const location = start.headers.get('location')!;
 
-  assert.match(location, /^\/api\/verity\/flows\//);
+  assert.match(location, /^\/api\/verily\/flows\//);
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
-  const path = location.replace('/api/verity', '');
+  const path = location.replace('/api/verily', '');
 
   const waiting = await f.request(path, { headers: { cookie: `${cookie}; local=alice` } });
   const body = await waiting.text();
 
   assert.match(body, /Publish this line/);
-  assert.match(body, /Verity proof for Site: /);
+  assert.match(body, /Verily proof for Site: /);
   assert.match(body, /name="artifact"/);
 
   // Another local account cannot watch someone else's flow.
@@ -332,7 +332,7 @@ test('a refused proof says why on the result page, and any other failure does no
   async function submit(artifact: string) {
     const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
     const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=alice`;
-    const path = start.headers.get('location')!.replace('/api/verity', '');
+    const path = start.headers.get('location')!.replace('/api/verily', '');
 
     await f.request(`${path}/submit`, {
       method: 'POST',
@@ -378,7 +378,7 @@ test('several methods are offered one by one, and a second one joins the record'
   });
 
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
 
   const waiting = await (
     await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })
@@ -428,7 +428,7 @@ test('a proof handed over is taken as text, published here, and served as text',
 
   const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
 
   const body = await (
     await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })
@@ -479,7 +479,7 @@ test('a proof handed over is taken as text, published here, and served as text',
   const evidence = (await f.app.service.mine(alice))[0]!;
   const at = `/connections/${evidence.id}/proof`;
 
-  assert.equal(evidence.attestations!.external[0].artifactUrl, `https://site.test/api/verity${at}`);
+  assert.equal(evidence.attestations!.external[0].artifactUrl, `https://site.test/api/verily${at}`);
   assert.equal(evidence.attestations!.external[0].hosted, true);
 
   const served = await f.request(at);
@@ -632,7 +632,7 @@ test('a link in the instructions is a link on the page, and only if it is http(s
   const f = fixture([provider]);
   const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
-  const path = start.headers.get('location')!.replace('/api/verity', '');
+  const path = start.headers.get('location')!.replace('/api/verily', '');
 
   const body = await (
     await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })

@@ -2,7 +2,7 @@ import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
 import { externalLink, externalName } from '../core/index.js';
 import { accountCard, linkMark, node, outward, styles } from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
-import { verityLogo } from './logo.js';
+import { verilyLogo } from './logo.js';
 import { version } from '../version.js';
 import type { Result } from './index.js';
 
@@ -189,12 +189,12 @@ export function openConnectDialog(
   const stamp = node('footer');
   const content = node('div', 'Loading…', 'steps');
 
-  heading.id = 'verity-connect-title';
+  heading.id = 'verily-connect-title';
   dialog.setAttribute('aria-labelledby', heading.id);
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
   content.setAttribute('aria-live', 'polite');
-  stamp.append(verityLogo(), node('span', version));
+  stamp.append(verilyLogo(), node('span', version));
   header.append(heading, close);
   dialog.append(header, content, stamp);
   root.append(dialog);

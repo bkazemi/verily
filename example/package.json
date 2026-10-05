@@ -1,8 +1,8 @@
 {
-  "name": "verity-generic-example",
+  "name": "verily-generic-example",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@bkazemi/verity": "file:.."
+    "@bkazemi/verily": "file:.."
   }
 }

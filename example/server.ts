@@ -3,7 +3,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import {
-  createVerity,
+  createVerily,
   discordProvider,
   emailProvider,
   youtubeProvider,
@@ -12,7 +12,7 @@ import {
   Pool,
   PostgresStorage,
   type LocalAccount,
-} from '@bkazemi/verity';
+} from '@bkazemi/verily';
 
 const origin = process.env.ORIGIN ?? 'http://localhost:3000';
 const password = process.env.EXAMPLE_PASSWORD;
@@ -67,7 +67,7 @@ if (!providers.length)
   );
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const storage = new PostgresStorage(pool, process.env.VERITY_NAMESPACE ?? 'verity');
+const storage = new PostgresStorage(pool, process.env.VERILY_NAMESPACE ?? 'verily');
 
 await storage.migrate();
 
@@ -94,12 +94,12 @@ async function authenticate(request: Request) {
   return undefined;
 }
 
-const verity = createVerity({
+const verily = createVerily({
   storage,
   providers,
-  baseUrl: `${origin}/api/verity`,
+  baseUrl: `${origin}/api/verily`,
   siteName: 'Example Community',
-  verifierName: 'verity.example.com',
+  verifierName: 'verily.example.com',
   profileOrigins: [origin],
   authenticate,
   reportUrl: `${origin}/report`,
@@ -107,15 +107,15 @@ const verity = createVerity({
   ...(process.env.SIGNING_KEY ? { signingKey: process.env.SIGNING_KEY } : {}),
 });
 
-await verity.service.prune();
+await verily.service.prune();
 
 const maintenance = setInterval(() => {
-  void verity.service.prune().catch(() => console.error('Verity maintenance failed'));
+  void verily.service.prune().catch(() => console.error('Verily maintenance failed'));
 }, 3600000);
 
 maintenance.unref();
 const require = createRequire(import.meta.url);
-const asset = await readFile(require.resolve('@bkazemi/verity/verity.js'));
+const asset = await readFile(require.resolve('@bkazemi/verily/verily.js'));
 const ui = await readFile(new URL('./ui.js', import.meta.url));
 
 const esc = (s: string) =>
@@ -125,7 +125,7 @@ const esc = (s: string) =>
   );
 
 const page = (body: string) =>
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verity example</title><body><h1>Example Community</h1><nav><a href="/">Settings</a> · <a href="/profile">Public profile</a></nav><main>${body}</main></body></html>`;
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Verily example</title><body><h1>Example Community</h1><nav><a href="/">Settings</a> · <a href="/profile">Public profile</a></nav><main>${body}</main></body></html>`;
 
 const safeHeaders = {
   'Cache-Control': 'no-store',
@@ -146,7 +146,7 @@ const loginAttempts = new Map<string, { count: number; until: number }>();
 async function handle(request: Request) {
   const url = new URL(request.url);
 
-  if (url.pathname.startsWith('/api/verity/')) return verity.handle(request);
+  if (url.pathname.startsWith('/api/verily/')) return verily.handle(request);
 
   if (request.method === 'POST') {
     if (request.headers.get('origin') !== origin) return html('Unavailable', 403);
@@ -190,7 +190,7 @@ async function handle(request: Request) {
     return html('Unavailable', 404);
   }
 
-  if (url.pathname === '/assets/verity.js')
+  if (url.pathname === '/assets/verily.js')
     return new Response(asset, { headers: { ...safeHeaders, 'Content-Type': 'text/javascript' } });
 
   if (url.pathname === '/assets/ui.js')
@@ -202,12 +202,12 @@ async function handle(request: Request) {
     );
 
   if (url.pathname === '/profile') {
-    const connections = (await verity.service.mine(localAccount)).filter(
+    const connections = (await verily.service.mine(localAccount)).filter(
       (c) => c.visibility === 'public',
     );
 
     return html(
-      `<h2>Alex Example</h2><p>Account reference: example-member-1</p>${connections.map((c) => `<verity-badge backend-url="/api/verity" connection-id="${esc(c.id)}"></verity-badge><p><a href="${esc(c.evidenceUrl)}">Inspect account-pair evidence (${esc(c.status)})</a></p>`).join('')}<script src="/assets/verity.js" defer></script>`,
+      `<h2>Alex Example</h2><p>Account reference: example-member-1</p>${connections.map((c) => `<verily-badge backend-url="/api/verily" connection-id="${esc(c.id)}"></verily-badge><p><a href="${esc(c.evidenceUrl)}">Inspect account-pair evidence (${esc(c.status)})</a></p>`).join('')}<script src="/assets/verily.js" defer></script>`,
     );
   }
 
@@ -219,14 +219,14 @@ async function handle(request: Request) {
     );
 
   return html(`<h2>Account settings: Alex Example</h2><p>Confirm the connection between this account and your GitHub account.</p>
-    <verity-connect backend-url="/api/verity"></verity-connect><p><a href="/api/verity/verify">Verify using the full-page flow</a></p><p id="message" role="status"></p><section id="connections"></section>
-    <script src="/assets/verity.js" defer></script><script src="/assets/ui.js" defer></script>`);
+    <verily-connect backend-url="/api/verily"></verily-connect><p><a href="/api/verily/verify">Verify using the full-page flow</a></p><p id="message" role="status"></p><section id="connections"></section>
+    <script src="/assets/verily.js" defer></script><script src="/assets/ui.js" defer></script>`);
 }
 
 const server = createServer(nodeHandler(handle, origin));
 
 server.listen(Number(new URL(origin).port || 3000), '127.0.0.1', () =>
-  console.log(`Verity example: ${origin}`),
+  console.log(`Verily example: ${origin}`),
 );
 
 async function close() {

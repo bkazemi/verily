@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { githubGistProvider } from '../src/server/github-gist.js';
 import { written } from './helpers.js';
 
-const expect = 'Verity proof for site.test: token';
+const expect = 'Verily proof for site.test: token';
 
 function provider(gist: unknown, ok = true) {
   const calls: string[] = [];
@@ -102,7 +102,7 @@ test('a gist proving one flow does not prove another', async () => {
   await assert.rejects(
     instance.verify({
       artifact: 'https://gist.github.com/alice/0123456789abcdef01234567',
-      expect: 'Verity proof for site.test: a different token',
+      expect: 'Verily proof for site.test: a different token',
     }),
   );
 });

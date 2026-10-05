@@ -6,7 +6,7 @@
 //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, OWNER_KEY
 // and, to offer Discord or YouTube sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
 // or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Each app needs
-// <PUBLIC_ORIGIN>/api/verity/callback as a redirect.
+// <PUBLIC_ORIGIN>/api/verily/callback as a redirect.
 // To offer email, RESEND_API_KEY, with EMAIL_FROM set in vars below.
 // Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
 //
@@ -18,7 +18,7 @@
 // already established under one method keeps whichever method proved it.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "verity",
+  "name": "verily",
   "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-07-01",
@@ -31,21 +31,21 @@
   // false: the Worker rejects every origin except PUBLIC_ORIGIN, so only one
   // of the two can serve at a time.
   "workers_dev": true,
-  // "routes": [{ "pattern": "verity.example.org", "custom_domain": true }],
+  // "routes": [{ "pattern": "verily.example.org", "custom_domain": true }],
   "preview_urls": false,
   "observability": { "enabled": false },
 
   // Keep the object name, binding and class identity stable across deploys:
   // changing them abandons the stored connections.
   "durable_objects": {
-    "bindings": [{ "name": "VERITY", "class_name": "VerityStore" }],
+    "bindings": [{ "name": "VERILY", "class_name": "VerilyStore" }],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VerityStore"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VerilyStore"] }],
 
   "vars": {
     // Drives baseUrl, every evidenceUrl and the verifier name. HTTPS, no
     // trailing slash, and it must match the origin actually serving requests.
-    "PUBLIC_ORIGIN": "https://verity.example.org",
+    "PUBLIC_ORIGIN": "https://verily.example.org",
     // The site whose local subject is being linked. This is a claim the
     // evidence attributes to the site, not something the backend demonstrates.
     "SITE_NAME": "example.org",
@@ -57,20 +57,20 @@
     "REPORT_URL": "mailto:you@example.org",
     // The sender of emailed codes, on a domain verified with Resend. Email is offered
     // only when this and the RESEND_API_KEY secret are both set.
-    // "EMAIL_FROM": "Verity <verify@example.org>",
+    // "EMAIL_FROM": "Verily <verify@example.org>",
     // Messages mailed in a day, across everyone. Omit for 100, Resend's free allowance.
     // "EMAIL_DAILY_LIMIT": 100,
     // Public records are signed with a key this installation makes and keeps. Set "off"
     // to sign nothing, or set the SIGNING_KEY secret to supply the key yourself.
     // "SIGNING": "off",
-    // Sites that send their users here instead of hosting Verity; see docs/cloudflare.md.
+    // Sites that send their users here instead of hosting Verily; see docs/cloudflare.md.
     // "SITES": [
     //   {
     //     "id": "partner",
     //     "name": "partner.example",
     //     "origin": "https://partner.example",
-    //     "authorizeUrl": "https://partner.example/verity/authorize",
-    //     "returnUrl": "https://partner.example/verity/return",
+    //     "authorizeUrl": "https://partner.example/verily/authorize",
+    //     "returnUrl": "https://partner.example/verily/return",
     //     // Optional: the provider ids its holders may use. Omit for all of them.
     //     "providers": ["discord", "youtube"],
     //     // Optional: the visibilities its holders may choose. Omit for both.

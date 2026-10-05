@@ -58,7 +58,7 @@ test(
   'in Chromium, a holder goes from the site to the instance and back with a signed result',
   { skip: !executablePath || !hasOpenssl() ? 'no Chromium or openssl found' : false },
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'verity-chromium-'));
+    const directory = await mkdtemp(join(tmpdir(), 'verily-chromium-'));
     const scriptPath = join(directory, 'worker.mjs');
     const key = 'r'.repeat(43);
 
@@ -91,14 +91,14 @@ test(
 
     const mf = new Miniflare({
       ...convertV4MiniflareOptions({
-        name: 'verity-chromium-test',
+        name: 'verily-chromium-test',
         rootPath: directory,
         modules: true,
         scriptPath,
         compatibilityDate: '2026-07-01',
         compatibilityFlags: ['nodejs_compat'],
         durableObjects: {
-          VERITY: { className: 'VerityStore', useSQLite: true },
+          VERILY: { className: 'VerilyStore', useSQLite: true },
           PROBE: { className: 'StorageProbe', useSQLite: true },
         },
         bindings: {
@@ -116,8 +116,8 @@ test(
               id: 'partner',
               name: 'Partner',
               origin: site,
-              authorizeUrl: `${site}/verity/authorize`,
-              returnUrl: `${site}/verity/return`,
+              authorizeUrl: `${site}/verily/authorize`,
+              returnUrl: `${site}/verily/return`,
             },
           ]),
           SITE_PARTNER_KEY: key,
@@ -204,9 +204,9 @@ test(
 
       // The site's button, the handoff, the provider, and the approval page.
       await page.click('text=Verify an account');
-      await page.waitForURL(`${verifier}/api/verity/verify`);
+      await page.waitForURL(`${verifier}/api/verily/verify`);
       await page.click('text=Sign in with GitHub');
-      await page.waitForURL(/\/api\/verity\/flows\//);
+      await page.waitForURL(/\/api\/verily\/flows\//);
       assert.match(await page.content(), /Partner receives the result/);
 
       // The approval form's POST is redirected on to the site, which form-action allows.
@@ -218,7 +218,7 @@ test(
       const [[connection, visibility]] = [...alice.links] as [[string, string]];
 
       assert.equal(visibility, 'public');
-      assert.equal(await page.locator(`verity-badge[connection-id="${connection}"]`).count(), 1);
+      assert.equal(await page.locator(`verily-badge[connection-id="${connection}"]`).count(), 1);
 
       // Disconnecting from the settings page is a form too, and returns the same way.
       await page.click('text=Manage linked accounts');

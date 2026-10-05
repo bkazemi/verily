@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { createSiteClient } from '@bkazemi/verity/site';
+import { createSiteClient } from '@bkazemi/verily/site';
 
 /**
- * A site that uses a public Verity instance instead of hosting its own: everything such a
+ * A site that uses a public Verily instance instead of hosting its own: everything such a
  * site's backend does, and nothing more. It vouches for its signed-in user, sends them to
  * the instance, and takes a signed result back, all through the site client. It registers
- * nothing with any sign-in provider and runs no Verity backend of its own.
+ * nothing with any sign-in provider and runs no Verily backend of its own.
  *
  * This site shows public links as badges, so it keeps each result. A site that shows its
  * users' links itself can skip that and ask the instance with `client.connections()`.
@@ -13,14 +13,14 @@ import { createSiteClient } from '@bkazemi/verity/site';
 export interface TenantOptions {
   /** This site's own origin, as registered with the instance. */
   origin: string;
-  /** The instance's origin, such as `https://verity.shirkadeh.org`. */
+  /** The instance's origin, such as `https://verily.shirkadeh.org`. */
   instance: string;
   /** This site's id in the instance's registry. */
   site: string;
   /** The key the instance holds as `SITE_<ID>_KEY`, shared with nobody else. */
   key: string;
   name: string;
-  /** The badge script, `dist/verity.js`, served from this site as a site embedding it would. */
+  /** The badge script, `dist/verily.js`, served from this site as a site embedding it would. */
   script?: string;
 }
 
@@ -144,7 +144,7 @@ export function createTenant(options: TenantOptions) {
     return page(
       user.name,
       `<p>@${escape(user.handle)}</p>
-      ${shown.map(([id]) => `<p><verity-badge backend-url="${escape(options.instance)}/api/verity" connection-id="${escape(id)}"></verity-badge></p>`).join('')}
+      ${shown.map(([id]) => `<p><verily-badge backend-url="${escape(options.instance)}/api/verily" connection-id="${escape(id)}"></verily-badge></p>`).join('')}
       ${
         own
           ? `${hidden.map(() => `<p>An account is linked but hidden. <a href="${escape(begin('manage'))}">Make public</a></p>`).join('')}
@@ -153,7 +153,7 @@ export function createTenant(options: TenantOptions) {
       <form method="post" action="/logout"><button>Sign out</button></form>`
           : ''
       }
-      ${options.script ? '<script src="/verity.js" defer></script>' : ''}`,
+      ${options.script ? '<script src="/verily.js" defer></script>' : ''}`,
     );
   }
 
@@ -196,12 +196,12 @@ export function createTenant(options: TenantOptions) {
 
     if (request.method !== 'GET') return page('Unavailable', '', 405);
 
-    if (url.pathname === '/verity.js' && options.script)
+    if (url.pathname === '/verily.js' && options.script)
       return new Response(options.script, {
         headers: { ...headers, 'Content-Type': 'text/javascript' },
       });
 
-    if (url.pathname === '/verity/authorize') {
+    if (url.pathname === '/verily/authorize') {
       const state = url.searchParams.get('state');
 
       if (!user || !state) return see('/');
@@ -209,7 +209,7 @@ export function createTenant(options: TenantOptions) {
       return see(await authorize(user, state));
     }
 
-    if (url.pathname === '/verity/return') {
+    if (url.pathname === '/verily/return') {
       if (!user || !(await receive(user, url.searchParams.get('result') ?? '')))
         return page('Result not accepted', '<p>That result is stale or not yours.</p>', 400);
 

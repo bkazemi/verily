@@ -69,9 +69,9 @@ export const bob = { id: 'private-local-2', label: 'Bob', reference: 'member-2' 
 export const projectPage = {
   id: 'private-local-3',
   kind: 'page' as const,
-  label: 'Verity project page',
-  reference: 'site.test/projects/verity',
-  profileUrl: 'https://site.test/projects/verity',
+  label: 'Verily project page',
+  reference: 'site.test/projects/verily',
+  profileUrl: 'https://site.test/projects/verily',
 };
 
 export function fakeProvider(): RedirectProvider & { calls: number; externalId: string } {

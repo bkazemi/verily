@@ -64,7 +64,7 @@ export async function signer(signingKey: string): Promise<Signer> {
 
   // A key that has run out or been revoked, or one that signs with a subkey, would sign
   // records that do not check. That is found out now and not by whoever saved one.
-  const probe = { type: 'verity-evidence', version: 1, issuedAt: 0 } as SignedDocument;
+  const probe = { type: 'verily-evidence', version: 1, issuedAt: 0 } as SignedDocument;
 
   const checks = await made.sign(probe).then(
     (signed) => verifySigned(signed, [key]),

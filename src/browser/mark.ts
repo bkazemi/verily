@@ -17,9 +17,9 @@ const tones: Record<MarkTone, [string, string]> = {
  */
 export const markStyles = `
   @media (prefers-reduced-motion: no-preference) {
-    .mark.current path:last-child { animation: verity-draw .8s cubic-bezier(.65, 0, .35, 1) .1s backwards; }
+    .mark.current path:last-child { animation: verily-draw .8s cubic-bezier(.65, 0, .35, 1) .1s backwards; }
   }
-  @keyframes verity-draw { from { stroke-dasharray: 0 176; } to { stroke-dasharray: 108 176; } }
+  @keyframes verily-draw { from { stroke-dasharray: 0 176; } to { stroke-dasharray: 108 176; } }
 `;
 
 /** Repaints a mark in place, so answering a check never replaces the drawing. */

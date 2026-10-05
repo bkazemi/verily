@@ -15,7 +15,7 @@ const githubOptions = () => ({
   profile: /^\/([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})$/,
 });
 
-import { VerityService } from '../src/server/service.js';
+import { VerilyService } from '../src/server/service.js';
 import { attestationLabel, externalName } from '../src/core/index.js';
 import { alice, bob, MemoryStorage, written } from './helpers.js';
 
@@ -804,7 +804,7 @@ test('the subject is what the holder is told to publish', () => {
 function backlink(body: string) {
   const storage = new MemoryStorage();
 
-  const service = new VerityService({
+  const service = new VerilyService({
     storage,
     providers: [
       linkProvider({
@@ -815,7 +815,7 @@ function backlink(body: string) {
           )) as unknown as typeof fetch,
       }),
     ],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Site',
     profileOrigins: ['https://site.test'],
@@ -899,7 +899,7 @@ test('a profile on a named host is the account a reader knows', async () => {
 
 test('only a path shaped like a profile is one', async () => {
   for (const artifact of [
-    'https://github.com/bkazemi/verity',
+    'https://github.com/bkazemi/verily',
     'https://github.com/-bkazemi',
     'https://github.com/bkazemi-',
     'https://github.com/bkaze--mi',

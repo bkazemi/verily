@@ -1,6 +1,6 @@
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { CloudflareStorage } from '../../cloudflare/storage.js';
-import { VerityStore as Store, type Env } from '../../cloudflare/worker.js';
+import { VerilyStore as Store, type Env } from '../../cloudflare/worker.js';
 import type { LocalAccount } from '../../src/core/index.js';
 
 /** Test-only entry point; never included in the deployment bundle. */
@@ -10,7 +10,7 @@ export { default } from '../../cloudflare/worker.js';
  * The worker's object with a door only tests reach, since nothing routes the host `probe`
  * to it: raw storage, the alarm on demand, and a failure injected around one revocation.
  */
-export class VerityStore extends Store {
+export class VerilyStore extends Store {
   constructor(
     private readonly probe: DurableObjectState,
     env: Env,

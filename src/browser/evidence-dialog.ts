@@ -11,7 +11,7 @@ import {
 import { markStyles, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
 import { onSignatureResult, signature, standing, type Signature } from './signed.js';
-import { verityLogo } from './logo.js';
+import { verilyLogo } from './logo.js';
 import { version } from '../version.js';
 
 const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
@@ -582,12 +582,12 @@ export function openEvidenceDialog(
   const stamp = node('footer');
   const content = node('div', 'Checking verification…');
 
-  heading.id = 'verity-dialog-title';
+  heading.id = 'verily-dialog-title';
   dialog.setAttribute('aria-labelledby', heading.id);
   close.type = 'button';
   close.setAttribute('aria-label', 'Close verification details');
   content.setAttribute('aria-live', 'polite');
-  stamp.append(verityLogo(), node('span', version));
+  stamp.append(verilyLogo(), node('span', version));
   header.append(heading, close);
   dialog.append(header, content, stamp);
 

@@ -85,7 +85,7 @@ export interface ServiceOptions {
   now?: () => number;
 }
 
-export class VerityService {
+export class VerilyService {
   readonly now: () => number;
   readonly baseUrl: string;
   readonly providers: Provider[];
@@ -180,7 +180,7 @@ export class VerityService {
 
     if (status !== 'verified') throw new Unavailable();
 
-    return current.sign({ type: 'verity-evidence', version: 1, issuedAt: this.now(), ...record });
+    return current.sign({ type: 'verily-evidence', version: 1, issuedAt: this.now(), ...record });
   }
 
   /** What a signed record says, if this instance signed it. */
@@ -335,7 +335,7 @@ export class VerityService {
       if (artifact)
         flow.expect = artifact.expect
           ? artifact.expect(subject!)
-          : `Verity proof for ${this.siteOf(subject!)}: ${secret()}`;
+          : `Verily proof for ${this.siteOf(subject!)}: ${secret()}`;
 
       await tx.put('flows', flow.id, flow);
 

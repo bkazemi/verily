@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VerityService, type ServiceOptions } from '../src/server/service.js';
+import { VerilyService, type ServiceOptions } from '../src/server/service.js';
 
 /** Either shape of provider drives the same service, so the fixture takes both. */
 type FakeProvider =
@@ -24,10 +24,10 @@ function fixture(provider: FakeProvider = fakeProvider(), extra: Partial<Service
 
   const storage = new MemoryStorage();
 
-  const service = new VerityService({
+  const service = new VerilyService({
     storage,
     providers: [provider],
-    baseUrl: 'https://site.test/api/verity',
+    baseUrl: 'https://site.test/api/verily',
     siteName: 'Site',
     verifierName: 'Site',
     profileOrigins: ['https://site.test'],
@@ -471,7 +471,7 @@ test('a holder-paced proof is published, read back, and kept open for the reader
 
   // Nothing to redirect to: the holder publishes first, at their own pace.
   assert.equal(flow.authorizationUrl, undefined);
-  assert.match(flow.expect!, /^Verity proof for Site: /);
+  assert.match(flow.expect!, /^Verily proof for Site: /);
   assert.match(written(flow.instructions!), /Publish this line/);
 
   // Naming the site in the line means the holder sees what they are agreeing to.
@@ -722,14 +722,14 @@ test('a proof handed over is published here and addressed by the connection it p
   assert.deepEqual(evidence.attestations!.external[0], {
     by: 'provider',
     method: 'signature',
-    artifactUrl: `https://site.test/api/verity/connections/${f.id}/proof`,
+    artifactUrl: `https://site.test/api/verily/connections/${f.id}/proof`,
     expect: evidence.attestations!.external[0].expect,
     hosted: true,
     confirmedAt: 1000000,
   });
 
   // The proof itself is readable, which is the whole point of holding it.
-  assert.match(await f.service.proof(f.id), /^signed: Verity proof for Site: /);
+  assert.match(await f.service.proof(f.id), /^signed: Verily proof for Site: /);
 
   // An unlisted record's proof is the holder's to hand out, exactly like its evidence.
   const unlisted = await held();
