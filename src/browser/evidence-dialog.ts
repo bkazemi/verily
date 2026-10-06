@@ -56,8 +56,14 @@ export const styles = `
   /* The account's own name carries that weight; a link inside a line of prose does not. */
   .summary a, .method a, .additional a { font: inherit; }
   .reference { margin-top: 2px; }
-  .method, .listing { margin-top: 8px; }
-  .listing.preferred { color: #23312b; font-weight: 600; }
+  .method { margin-top: 8px; }
+  /* In the corner the heading leaves empty, apart from everything that was checked. */
+  .listing { position: absolute; top: 12px; right: 14px; padding: 1px 8px; border: 1px solid #e0e6df; border-radius: 999px; color: #6b786f; font-size: 11px; font-weight: 550; }
+  .listing.preferred { border-color: #245f43; color: #245f43; }
+  /* Quiet, as its pill is: the surface and the name step back, and the controls do not. */
+  .account.retired { background: #f6f8f5; }
+  .account.retired > a, .account.retired > strong { color: #6b786f; }
+  .account.retired .mark { opacity: .45; }
   .group { margin: 20px 0 0; color: #6b786f; font-size: 11px; font-weight: 550; }
   .additional { margin-top: 2px; padding-left: 12px; }
   .joiner { display: block; width: 20px; height: 20px; margin: 8px auto -4px; color: #90a096; }
@@ -568,11 +574,15 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
       : evidence.mark === 'preferred'
         ? [node('div', 'Preferred', 'listing preferred')]
         : evidence.mark === 'unused'
-          ? [node('div', 'No longer used', 'muted listing')]
+          ? [node('div', 'No longer used', 'listing')]
           : []),
     dates,
     ...(manage && removable(evidence).length ? [manageRow(evidence, manage)] : []),
   );
+
+  const surface = retired ? 'account retired' : 'account';
+
+  card.className = surface;
 
   // A signed record is not read, or acted on, before its signature has been checked: until
   // the check comes back the whole card is veiled and out of reach, with a word over it
@@ -583,14 +593,14 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
 
     checking.setAttribute('role', 'status');
     checking.append(node('span', '', 'spinner'), document.createTextNode('Checking signature…'));
-    card.className = 'account veiled';
+    card.className = `${surface} veiled`;
 
     for (const part of veiled) part.inert = true;
 
     card.append(checking);
 
     void signatures(evidence).then(() => {
-      card.className = 'account';
+      card.className = surface;
 
       for (const part of veiled) part.inert = false;
 
