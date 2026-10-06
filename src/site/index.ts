@@ -65,7 +65,8 @@ export interface SiteSubject {
 export interface SiteResult {
   site: string;
   id: string;
-  operation: 'connect' | 'renew' | 'visibility' | 'disconnect';
+  /** `mark` is an account listed another way or retired: read its records again to see how. */
+  operation: 'connect' | 'renew' | 'visibility' | 'disconnect' | 'mark';
   outcome: 'complete' | 'cancelled' | 'failed';
   /** Present when the outcome is complete. */
   connection?: string;

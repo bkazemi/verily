@@ -46,11 +46,19 @@ interface State {
   expiresAt: number;
 }
 
-/** What the worker holds for a disconnect, which has no flow of its own to hold it. */
+/** How a holder may have an account listed, as the library's mark route takes it. */
+export type Listing = 'preferred' | 'current' | 'unused' | 'retired';
+
+/**
+ * What the worker holds for a disconnect or a mark, which have no flow of their own to
+ * hold it.
+ */
 interface Operation {
   connection: string;
   visibility?: Visibility;
-  /** Set once the revocation has committed. Until then the operation is pending. */
+  /** How the account is to be listed, for a mark. Absent, the operation is a disconnect. */
+  mark?: Listing;
+  /** Set once the change has committed. Until then the operation is pending. */
   finishedAt?: number;
 }
 
@@ -564,13 +572,14 @@ export class Sites {
   }
 
   /**
-   * Records a disconnect as pending on the session before anything is revoked, so a retry
-   * knows what it is finishing. A session already carrying one only resumes that one.
+   * Records a disconnect or a mark as pending on the session before anything is changed, so
+   * a retry knows what it is finishing. A session already carrying one only resumes that one.
    */
   async pending(
     key: string,
     connection: string,
     visibility: Visibility,
+    mark?: Listing,
   ): Promise<SiteSession | undefined> {
     return this.storage.transaction(async (tx) => {
       const session = await tx.get<SiteSession>(key);
@@ -578,18 +587,20 @@ export class Sites {
       if (!session || session.expiresAt <= Date.now()) return undefined;
 
       if (session.operation)
-        return session.operation.connection === connection ? session : undefined;
+        return session.operation.connection === connection && session.operation.mark === mark
+          ? session
+          : undefined;
 
       if (session.closed) return undefined;
 
-      session.operation = { connection, visibility };
+      session.operation = { connection, visibility, ...(mark ? { mark } : {}) };
       await tx.put(key, session);
 
       return session;
     });
   }
 
-  /** Marks a disconnect done once its revocation has committed, and closes the session. */
+  /** Records an operation as done once its change has committed, and closes the session. */
   async completed(key: string): Promise<SiteSession> {
     return this.storage.transaction(async (tx) => {
       const session = (await tx.get<SiteSession>(key))!;

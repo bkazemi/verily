@@ -475,6 +475,61 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     assert.equal(await status(), 'verified');
 
+    // Listing an account another way goes through this worker too, and returns as a mark.
+    await open('manage', 'txn-mark');
+
+    const listing = await (await a.fetch('/')).text();
+
+    assert.match(listing, /<form action="\/mark" method="post">/);
+    assert.match(listing, /Mark as preferred/);
+    assert.match(listing, /Retiring keeps this record as history/);
+
+    // The library's own route would change the record and tell the site nothing.
+    assert.equal(
+      (await a.post(`/api/verily/connections/${connected.connection}/mark`, 'as=unused')).status,
+      404,
+    );
+
+    for (const body of [
+      `connection=${connected.connection}&as=favourite`,
+      `connection=${connected.connection}`,
+      'connection=no-such-connection&as=unused',
+    ])
+      assert.equal((await a.post('/mark', body)).status, 404, body);
+
+    const asked = await a.post('/mark', `connection=${connected.connection}&as=unused`);
+    const marked = result(asked.headers.get('location')!);
+
+    assert.deepEqual(
+      { ...marked, exp: undefined },
+      {
+        at: 'https://partner.test/verily/return',
+        site: 'partner',
+        id: '123',
+        operation: 'mark',
+        outcome: 'complete',
+        connection: connected.connection,
+        visibility: 'public',
+        txn: 'txn-mark',
+        exp: undefined,
+      },
+    );
+
+    assert.equal(((await (await a.fetch(evidence)).json()) as { mark?: string }).mark, 'unused');
+
+    // Asked again, it is the one result again, and the session it closed starts nothing else.
+    assert.equal(
+      (await a.post('/mark', `connection=${connected.connection}&as=unused`)).headers.get(
+        'location',
+      ),
+      asked.headers.get('location'),
+    );
+
+    assert.equal(
+      (await a.post('/mark', `connection=${connected.connection}&as=preferred`)).status,
+      404,
+    );
+
     // A failure before the revocation commits reports nothing, and a retry finishes it.
     await open('manage', 'txn-3');
 
@@ -1428,6 +1483,19 @@ test('the dialog on a site page connects with a session and a binding carried in
     // Not the dialog's, so held to this origin like any other request, which the page is not on.
     assert.equal((await remove(outcome.connectionId, 'share')).status, 403);
     assert.equal((await remove(outcome.connectionId, 'visibility')).status, 403);
+
+    // How the holder lists the account is theirs to say from the dialog as well.
+    const listed = await page(`/api/verily/connections/${outcome.connectionId}/mark`, {
+      session,
+      body: { as: 'unused' },
+    });
+
+    assert.equal(listed.status, 200);
+    assert.equal(listed.headers.get('access-control-allow-origin'), site);
+
+    const { '123': marked } = await client.connections(['123']);
+
+    assert.equal(marked!.find((link) => link.id === outcome.connectionId)!.mark, 'unused');
 
     const removed = await remove(outcome.connectionId);
 

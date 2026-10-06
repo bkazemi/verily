@@ -14,15 +14,25 @@ export interface VerifierKey {
 }
 
 /**
- * What a signature covers: the record as it stood at `issuedAt`. Whether it still stands
- * is a live fact no signature holds, so its status is left out and `evidenceUrl` is where
- * to ask.
+ * What either version says of a record. The holder's mark is left out: it is about how
+ * their accounts are listed, and no part of what was verified.
  */
-export type SignedDocument = Omit<Evidence, 'status' | 'revokedAt' | 'signedUrl'> & {
+type Signable = Omit<Evidence, 'status' | 'revokedAt' | 'signedUrl' | 'mark' | 'retiredAt'> & {
   type: 'verily-evidence';
-  version: 1;
   issuedAt: number;
 };
+
+/**
+ * What a signature covers: the record as it stood at `issuedAt`. Whether it still stands
+ * is a live fact no signature holds, so version 1 leaves its status out, means the record
+ * stood when it was signed, and gives `evidenceUrl` as where to ask.
+ *
+ * Version 2 is a retired record, which did not stand when it was signed and says so. It is
+ * a version of its own because a reader of version 1 ignores fields it does not know, and
+ * would read a retired record signed as version 1 as one that stood.
+ */
+export type SignedDocument =
+  (Signable & { version: 1 }) | (Signable & { version: 2; status: 'retired'; retiredAt: number });
 
 /**
  * A record that can be checked away from the verifier that served it: the document as
@@ -165,8 +175,11 @@ export async function verifySigned(
       const document = JSON.parse(data) as SignedDocument;
 
       return document?.type === 'verily-evidence' &&
-        document.version === 1 &&
-        typeof document.issuedAt === 'number'
+        typeof document.issuedAt === 'number' &&
+        (document.version === 1 ||
+          (document.version === 2 &&
+            document.status === 'retired' &&
+            typeof document.retiredAt === 'number'))
         ? document
         : undefined;
     } catch {
