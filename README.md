@@ -366,7 +366,7 @@ Once a user has a link, show their badge in place of the pill, and give it the s
 ></verily-badge>
 ```
 
-The badge's dialog then has Renew and Remove under each account, the controls that mark it as preferred or unused or retire it, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verily-result` on each change. `verily.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
+The badge's dialog then has Renew and Remove under each account, the controls that mark it as preferred or unused or retire it, and Add account below them, which opens the verify flow in the dialog's place with a way back. Renew shows the same account again and extends that record under its id, so an embed that names it keeps working. A retired account is renewed by the method it was first shown by. It fires `verily-result` on each change. `verily.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
 
 **3. Read connections where you show them.**
 

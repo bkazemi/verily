@@ -594,3 +594,46 @@ test('an unlisted retired record can still be shared by link', async () => {
   assert.equal((await f.service.shared(token)).status, 'retired');
   await assert.rejects(f.service.read(id));
 });
+
+test('the dialog renews a record in JSON, which revives a retired one under its id', async () => {
+  const f = fixture();
+  const id = await f.signIn();
+
+  await f.service.mark(id, alice, 'retired');
+  f.advance(day);
+
+  const renew = (body: Record<string, string>, cookie = 'local=alice') =>
+    f.post('/sessions', { kind: 'renew', connectionId: id, provider: 'github', ...body }, cookie);
+
+  // Only its holder, and only by the method it was first shown by.
+  assert.equal((await renew({ method: 'oauth' }, 'local=bob')).status, 404);
+  assert.equal((await renew({ method: 'backlink' })).status, 404);
+
+  const started = await renew({ method: 'oauth' });
+  const view = await started.json();
+  const cookie = `local=alice; ${started.headers.get('set-cookie')!.split(';')[0]!}`;
+
+  assert.equal(view.phase, 'pending');
+
+  const state = new URL(view.authorizationUrl).searchParams.get('state')!;
+
+  await f.request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
+
+  // The holder asked for exactly this from their own page, so nothing is left to approve.
+  const read = (who: string) =>
+    f.request(`/flows/${view.id}?format=json`, { headers: { cookie: who } });
+
+  assert.deepEqual(
+    (({ phase, connectionId }) => ({ phase, connectionId }))(await (await read(cookie)).json()),
+    { phase: 'complete', connectionId: id },
+  );
+
+  assert.equal((await read(cookie.replace('alice', 'bob'))).status, 404);
+
+  const revived = await f.service.read(id);
+
+  assert.equal(revived.status, 'verified');
+  assert.equal(revived.retiredAt, undefined);
+  assert.equal(revived.authenticatedAt, f.now());
+  assert.equal((await f.service.mine(alice)).length, 1);
+});

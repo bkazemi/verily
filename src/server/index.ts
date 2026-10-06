@@ -730,8 +730,8 @@ export function createVerily(options: ServerOptions) {
   });
 
   /**
-   * A connect flow as the in-page dialog draws it: the same steps the flow pages walk
-   * through, as data, so the holder never has to leave the page they started on.
+   * A connect or renew flow as the in-page dialog draws it: the same steps the flow pages
+   * walk through, as data, so the holder never has to leave the page they started on.
    */
   async function flowView(flow: Flow, authorizationUrl?: string) {
     const provider = service.providerOf(flow);
@@ -781,11 +781,11 @@ export function createVerily(options: ServerOptions) {
     return view;
   }
 
-  /** A flow the dialog may read: one this holder started, to connect an account. */
+  /** A flow the dialog may read: one this holder started, to connect an account or renew one. */
   async function ownFlow(request: Request, id: string) {
     const flow = await service.flow(id, binding(request));
 
-    if (flow.kind !== 'connect' || (await local(request)).id !== flow.local?.id)
+    if (!['connect', 'renew'].includes(flow.kind) || (await local(request)).id !== flow.local?.id)
       throw new Unavailable();
 
     return flow;
@@ -1247,7 +1247,7 @@ export function createVerily(options: ServerOptions) {
             true,
           );
 
-          if (asJson && kind === 'connect')
+          if (asJson && ['connect', 'renew'].includes(kind))
             return json(
               await flowView(await service.flow(flow.flowId, flow.binding), flow.authorizationUrl),
               flowCookie(flow.binding),
