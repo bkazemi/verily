@@ -207,18 +207,18 @@ import {
 } from '@bkazemi/verily';
 ```
 
-| Provider               | The user proves it by                                                                 | Setup                                   |
-| ---------------------- | ------------------------------------------------------------------------------------- | --------------------------------------- |
-| `githubProvider()`     | signing in with GitHub.                                                               | A GitHub OAuth app.                     |
-| `discordProvider()`    | signing in with Discord.                                                              | A Discord application.                  |
-| `youtubeProvider()`    | signing in with Google and choosing their YouTube channel.                            | A Google OAuth client.                  |
-| `githubGistProvider()` | publishing a public gist containing a line Verily gives them.                         | None.                                   |
-| `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                     | The local account needs a `profileUrl`. |
-| `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile.               | The local account needs a `profileUrl`. |
-| `pgpProvider()`        | signing a line Verily gives them with their OpenPGP key, then pasting it and the key. | None.                                   |
-| `emailProvider()`      | entering a code Verily mails to their address.                                        | A function that sends one message.      |
+| Provider               | The user proves it by                                                                                        | Setup                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| `githubProvider()`     | signing in with GitHub.                                                                                      | A GitHub OAuth app.                     |
+| `discordProvider()`    | signing in with Discord.                                                                                     | A Discord application.                  |
+| `youtubeProvider()`    | signing in with Google and choosing their YouTube channel.                                                   | A Google OAuth client.                  |
+| `githubGistProvider()` | publishing a public gist containing a line Verily gives them.                                                | None.                                   |
+| `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                                            | The local account needs a `profileUrl`. |
+| `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile, then entering their GitHub username. | The local account needs a `profileUrl`. |
+| `pgpProvider()`        | signing a line Verily gives them with their OpenPGP key, then pasting it and the key.                        | None.                                   |
+| `emailProvider()`      | entering a code Verily mails to their address.                                                               | A function that sends one message.      |
 
-All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. Gists and link-backs can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
+All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. A proof that does not check out can be put right and handed back on the same step, up to five times, so a mistyped address never means publishing or signing again. Gists and link-backs can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
 
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
@@ -228,7 +228,15 @@ providers: [githubProvider({ clientId, clientSecret }), githubLinkProvider()],
 
 Proving the same account a second way adds that proof to the existing record instead of creating another.
 
+**Approval only where there is something to decide.** A new connection always ends with the user choosing who can read it and confirming. Renewing a connection, or proving an account already linked a second way, does not: the account has been checked against the record and the record keeps its visibility, so it is recorded as soon as the proof checks out. This applies to flows started from your own pages, which is every flow the dialog and Verily's forms start. A flow entered by following a link to `GET <baseUrl>/sessions` still ends on an approval, because any site can send a browser down a link.
+
+**A link-back found at sign-in.** With `githubProvider()` and `githubLinkProvider()` both listed, signing in with GitHub also reads the profile that signed in. If its website field already links to the user's `profileUrl`, the approval step says so, and confirming records the link-back beside the sign-in. The user never picks the second method or types a username. A link with `http://` in place of `https://` counts; a different host, port or path does not.
+
 **Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verily checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
+
+**Your own method.** A provider is an object, and [`src/core/index.ts`](src/core/index.ts) documents each shape. An artifact provider may also set `field` and `input` to name what it asks for, `resolve` to turn something short such as a username into the address to read, and `known` to say where to look for an account already on record, which is what lets a proof be found without asking. A sign-in provider's `authorizationUrl` is passed `account` on a renewal or visibility change, so it can ask for that account by name.
+
+If you start flows by calling `service.start()` yourself, pass `true` as its last argument only where you have shown the request came from the user's own page, as a same-origin POST does. Without it the flow reads nothing at its start and always ends on an approval.
 
 **OpenPGP.** The key's fingerprint is the identity. An email address is shown only when the key signed it **and** either keys.openpgp.org has confirmed it or the address's domain publishes the key in its [web key directory](https://datatracker.ietf.org/doc/draft-koch-openpgp-webkey-service/). The key must be valid when the proof is checked (not expired or revoked), SHA-1 signatures are refused, and a signing subkey must be properly bound to its key.
 
@@ -256,7 +264,7 @@ emailProvider({
 
 The HTML loads nothing from anywhere, so nothing in it is blocked and it tells nobody it was opened. Its one image, the Verily logo, is attached to the message; a sender that drops `images` still sends a whole message, with the word in the logo's place.
 
-The user types an address and Verily mails it a button to press, with an eight-character code beneath it as the other way in. The button opens a page on your backend, in whatever browser the mail is read in, and pressing **Confirm** there proves the mailbox; the page the user started on then carries on to the approval. Opening the link alone confirms nothing, so a mail scanner that follows links cannot answer for anyone. Both the link and the code last the flow's ten minutes, and the code gets five tries. The address is the account's name on the record, so a public link shows it to everyone; the user is told before the code is sent. It proves somebody could read that mailbox on the day, like a sign-in, and nothing is published or re-read later.
+The user types an address and Verily mails it a button to press, with an eight-character code beneath it as the other way in. The button opens a page on your backend, in whatever browser the mail is read in. In the browser that started the flow, opening it proves the mailbox, with nothing more to press. In any other browser the page asks for one press of **Confirm**, because there opening the link alone must confirm nothing: a mail scanner that follows links cannot then answer for anyone. Either way the page the user started on carries on by itself. Both the link and the code last the flow's ten minutes, and the code gets five tries. The address is the account's name on the record, so a public link shows it to everyone; the user is told before the code is sent. It proves somebody could read that mailbox on the day, like a sign-in, and nothing is published or re-read later.
 
 A visitor chooses where the message goes, so Verily counts what it sends: at most 100 messages in any twenty-four hours, and at most 5 to any one address. Past either, the flow fails and tells the user to try again tomorrow. Set `sendLimits: { day, address }` beside `providers` to change them, or `Infinity` to lift one. The day's count is shared, so one visitor can still spend it; rate limit `POST <baseUrl>/sessions` and `POST <baseUrl>/flows/*/submit` as well.
 
