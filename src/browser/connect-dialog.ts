@@ -1,8 +1,7 @@
 import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
 import { externalLink, externalName } from '../core/index.js';
-import { accountCard, linkMark, node, outward, styles } from './evidence-dialog.js';
+import { accountCard, linkMark, node, outward, stampLink, styles } from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
-import { verilyLogo } from './logo.js';
 import { version } from '../version.js';
 import type { Result } from './index.js';
 
@@ -202,7 +201,7 @@ export function openConnectDialog(
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
   content.setAttribute('aria-live', 'polite');
-  stamp.append(verilyLogo(), node('span', version));
+  stamp.append(stampLink(), node('span', version));
   header.append(heading, close);
   dialog.append(header, content, stamp);
   root.append(dialog);

@@ -1,5 +1,8 @@
 import { logoPaths, logoViewBox } from '../logo.js';
 
+/** Where the logotype under a dialog leads: the project, for a reader asking what drew this. */
+export const projectUrl = 'https://github.com/bkazemi/verily';
+
 /** The logotype, drawn as nodes: nothing in the badge sets innerHTML. */
 export function verilyLogo(): SVGSVGElement {
   const namespace = 'http://www.w3.org/2000/svg';

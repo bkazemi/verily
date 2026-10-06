@@ -1010,7 +1010,14 @@ test('a mailed code is asked for in two steps, and a wrong one says so', async (
   assert.deepEqual(sent, ['alice@example.test', 'AAAA-AAAA', 'K7QM-2XPD']);
   assert.match(dialog.textContent, /Confirm connection/);
   assert.ok(!dialog.textContent.includes('@alice'));
-  assert.deepEqual(dialog.links(), []);
+  // The footer's logotype is the dialog's own link, so only what the steps drew is counted.
+  assert.deepEqual(
+    dialog
+      .all()
+      .find((e) => e.className === 'steps')!
+      .links(),
+    [],
+  );
 });
 
 test('the dialog moves on when the button in the message is pressed, and not before', async () => {
@@ -1084,6 +1091,21 @@ test('the dialog shows the full version beside the logotype, as text', async () 
   const footer = dialog.all().find((e) => e.tagName === 'footer')!;
 
   assert.equal(footer.all().find((e) => e.tagName === 'span')!.textContent, version);
+});
+
+test('the logotype under a dialog links out to the project, and the version stays text', async () => {
+  const { dialog } = await connectHarness(async (path) =>
+    path === '/methods' ? connectMethods : approvalView,
+  );
+
+  const footer = dialog.all().find((e) => e.tagName === 'footer')!;
+  const link = footer.all().find((e) => e.tagName === 'a')!;
+
+  assert.equal(link.href, 'https://github.com/bkazemi/verily');
+  assert.equal(link.target, '_blank');
+  assert.equal(link.rel, 'noreferrer');
+  assert.ok(link.all().some((e) => e.tagName === 'svg'));
+  assert.ok(!link.all().some((e) => e.tagName === 'span'));
 });
 
 /**
@@ -1405,7 +1427,11 @@ test('a link in the instructions opens in a new tab, and only if it is http(s)',
 
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  const links = dialog.links();
+  // Within the steps: the footer's logotype is a link of the dialog's own.
+  const links = dialog
+    .all()
+    .find((e) => e.className === 'steps')!
+    .links();
 
   assert.equal(links.length, 1);
   assert.equal(links[0]!.href, 'https://gist.github.com/');

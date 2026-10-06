@@ -11,8 +11,17 @@ import {
 import { markStyles, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
 import { onSignatureResult, signature, standing, type Signature } from './signed.js';
-import { verilyLogo } from './logo.js';
+import { projectUrl, verilyLogo } from './logo.js';
 import { version } from '../version.js';
+
+/** The logotype as a link to the project, as both dialogs carry it in their footer. */
+export function stampLink(): HTMLAnchorElement {
+  const link = outward(node('a'), projectUrl);
+
+  link.append(verilyLogo());
+
+  return link;
+}
 
 const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
 
@@ -61,7 +70,8 @@ export const styles = `
   .row { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
   .account .row { align-items: center; justify-content: start; margin-top: 12px; }
   .account .action { padding: 5px 10px; font-size: 12px; }
-  footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin-top: 14px; color: #9aa9a0; font-size: 11px; }
+  footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin: 20px 0 -8px; color: #9aa9a0; font-size: 11px; }
+  footer a { display: flex; color: inherit; }
   .logo { display: block; height: 13px; }
   ${markStyles}
 `;
@@ -587,7 +597,7 @@ export function openEvidenceDialog(
   close.type = 'button';
   close.setAttribute('aria-label', 'Close verification details');
   content.setAttribute('aria-live', 'polite');
-  stamp.append(verilyLogo(), node('span', version));
+  stamp.append(stampLink(), node('span', version));
   header.append(heading, close);
   dialog.append(header, content, stamp);
 
