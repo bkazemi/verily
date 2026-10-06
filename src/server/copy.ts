@@ -40,3 +40,24 @@ export const copyScript = `for (const block of document.querySelectorAll('pre'))
   block.prepend(button);
 }
 `;
+
+/**
+ * Moves a page that is waiting on a mailed link along once the link has been pressed,
+ * wherever it was pressed. Nothing is redrawn until then, so a code half typed is left
+ * alone. Without this the page still has its own link to press.
+ */
+export const waitScript = `const timer = setInterval(async () => {
+  try {
+    const response = await fetch(location.pathname + '/phase', { credentials: 'same-origin' });
+
+    // Still exchanging means the link was pressed and is being recorded: the page that
+    // loaded now would show neither the step before nor the one after.
+    if (response.ok && !['pending', 'exchanging'].includes((await response.json()).phase)) {
+      clearInterval(timer);
+      location.reload();
+    }
+  } catch {
+    // A read that fails says nothing about the flow, which the next one may.
+  }
+}, 2000);
+`;

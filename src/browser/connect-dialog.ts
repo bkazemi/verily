@@ -33,6 +33,8 @@ export interface FlowView {
   input?: 'url' | 'text';
   /** What to offer in the field, where a record of the holder's already says. */
   suggested?: string;
+  /** Said where what was last handed back was refused and the flow still waits for it. */
+  refused?: string;
   note?: string;
   /**
    * A mailed code: what to ask the holder for, and once a code has gone, where it went,
@@ -523,6 +525,7 @@ export function openConnectDialog(
             ? paragraph(part)
             : codeBlock(part.code),
       ),
+      ...(flow.refused ? [node('p', flow.refused, 'error')] : []),
       label,
       row(back, check),
       ...(flow.note ? [node('p', flow.note, 'muted')] : []),
@@ -731,13 +734,10 @@ export function openConnectDialog(
     content.replaceChildren(...parts, row(cancel, confirm));
   }
 
+  /** The result is on the page behind the dialog, so there is nothing left to say here. */
   function done() {
     settle();
-    const finish = button('Done', true);
-
-    finish.onclick = () => dialog.close();
-    content.replaceChildren(node('p', 'The connection is recorded.', 'state'), row(finish));
-    finish.focus();
+    dialog.close();
   }
 
   close.addEventListener('click', () => dialog.close());

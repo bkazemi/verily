@@ -1332,6 +1332,43 @@ test('a link-back method is marked with the globe, and GitHub keeps its own mark
   assert.ok(!globeIn(choice('Link back from GitHub')));
 });
 
+test('a refused proof is shown on the step it was handed back at, still filled in', async () => {
+  const { dialog } = await connectHarness(async (path) => {
+    if (path === '/methods')
+      return {
+        ...connectMethods,
+        methods: [
+          { provider: 'github', method: 'gist', name: 'GitHub', action: 'Publish a proof' },
+        ],
+      };
+
+    return {
+      id: 'f1',
+      phase: 'pending',
+      provider: { id: 'github', name: 'GitHub', method: 'gist' },
+      artifact: 'location',
+      field: 'Address of your published proof',
+      instructions: [{ code: 'Verily proof' }],
+      suggested: 'https://gist.github.com/alice/1',
+      refused: 'That did not check out: Line not found. 4 tries are left.',
+    };
+  });
+
+  await dialog
+    .all()
+    .find((e) => e.tagName === 'button' && e.textContent.includes('Publish a proof'))!
+    .onclick?.({});
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.match(dialog.textContent, /That did not check out: Line not found\. 4 tries are left\./);
+
+  assert.equal(
+    (dialog.all().find((e) => e.tagName === 'input') as unknown as { value: string }).value,
+    'https://gist.github.com/alice/1',
+  );
+});
+
 test('a link in the instructions opens in a new tab, and only if it is http(s)', async () => {
   const { dialog } = await connectHarness(async (path) => {
     if (path === '/methods')

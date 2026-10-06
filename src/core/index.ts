@@ -137,8 +137,19 @@ export interface Flow {
    * unguessable and per-flow, so an artifact made for one flow cannot complete another.
    */
   expect?: string;
-  /** What the holder handed back: an address to read, or the proof itself. */
+  /**
+   * What the holder handed back: an address to read, or the proof itself. On a flow still
+   * waiting it is what they last handed back and had refused, kept so they can put it right.
+   */
   artifact?: string;
+  /** How many times what the holder handed back has been refused. */
+  tries?: number;
+  /**
+   * Whether the flow was started by a request shown to come from the holder's own page,
+   * and not by an address anyone could have sent their browser to. Only such a flow may
+   * be recorded without an approval, which is otherwise the one step a link cannot press.
+   */
+  attended?: boolean;
   /**
    * What the holder is offered to hand back, where a record of theirs already names the
    * account. Only an offer: what is verified is whatever they then submit.
@@ -244,7 +255,16 @@ export interface RedirectProvider {
   name: string;
   /** Absent means oauth, the shape this interface describes. */
   method?: 'oauth';
-  authorizationUrl(input: { state: string; challenge: string; redirectUri: string }): string;
+  authorizationUrl(input: {
+    state: string;
+    challenge: string;
+    redirectUri: string;
+    /**
+     * The account the flow must show, on a flow the holder of its record started. There is
+     * no account to choose then, so the provider need not be made to offer the choice.
+     */
+    account?: ExternalAccount;
+  }): string;
   authenticate(input: {
     code: string;
     verifier: string;

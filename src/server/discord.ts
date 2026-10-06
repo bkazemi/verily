@@ -18,7 +18,9 @@ export function discordProvider(options: {
       const url = new URL('https://discord.com/oauth2/authorize');
 
       // Discord has no account chooser. Forcing the consent screen at least shows the holder
-      // which account they are signed in as before it is linked.
+      // which account they are signed in as before it is linked. It is forced on a flow on
+      // a record too: the holder may have withdrawn the grant since, and asking silently
+      // for one that is gone fails with no way for them to give it again.
       url.search = new URLSearchParams({
         response_type: 'code',
         client_id: options.clientId,

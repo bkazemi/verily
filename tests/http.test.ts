@@ -325,7 +325,7 @@ test('a holder-paced proof is published here, submitted here, and approved here'
   assert.ok(page.includes(url));
 });
 
-test('a refused proof says why on the result page, and any other failure does not', async () => {
+test('a refused proof says why where it was handed back, and any other failure does not', async () => {
   const provider = fakeArtifactProvider();
   const f = fixture([provider]);
 
@@ -349,11 +349,14 @@ test('a refused proof says why on the result page, and any other failure does no
 
   const refused = await submit('https://notes.test/alice/1');
 
-  assert.match(refused, /<p>failed<\/p><p>Line not found\.<\/p>/);
+  // The same step, with what was handed back still in the field to be put right.
+  assert.match(refused, /<p>That did not check out: Line not found\. 4 tries are left\.<\/p>/);
+  assert.match(refused, /name="artifact" type="url" value="https:\/\/notes\.test\/alice\/1"/);
+  assert.match(refused, /Check my proof/);
 
   const broken = await submit('https://evil.test/alice');
 
-  assert.match(broken, /<p>failed<\/p><div/);
+  assert.match(broken, /<p>That could not be checked\. 4 tries are left\.<\/p>/);
   assert.doesNotMatch(broken, /Not a notes address/);
 });
 
@@ -402,6 +405,8 @@ test('several methods are offered one by one, and a second one joins the record'
     await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })
   ).text();
 
+  // Entered by a link, which any site can send a browser down, so it waits on an approval
+  // that only a form posted from here can give.
   assert.match(review, /Add to connection/);
   assert.match(review, /stays public/);
   assert.ok(!review.includes('value="unlisted" checked'));

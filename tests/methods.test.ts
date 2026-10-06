@@ -120,15 +120,78 @@ test('a second method on the same account joins the record beneath the first', a
   assert.equal(evidence.external.id, '42');
 });
 
-test('the approval page is told a flow joins a record rather than making one', async () => {
+test('a flow that joins a record is recorded without an approval', async () => {
   const f = fixture();
   const id = await f.signIn();
 
   f.backlink.pages.add('https://github.com/known-alice');
-  const flow = await f.service.start(alice, undefined, 'connect', { method: 'backlink' });
-  const pending = await f.service.flow(flow.flowId, flow.binding);
 
-  assert.equal((await f.service.joining(pending))?.id, id);
+  const flow = await f.service.start(
+    alice,
+    undefined,
+    'connect',
+    { method: 'backlink' },
+    undefined,
+    true,
+  );
+
+  const ended = await f.service.flow(flow.flowId, flow.binding);
+
+  // The account is the record's and its visibility stands, so there was nothing to ask.
+  assert.equal(ended.phase, 'complete');
+  assert.equal(ended.resultId, id);
+  assert.equal((await f.service.read(id)).attestations!.external.length, 2);
+});
+
+test('a flow the holder was sent into by a link is recorded only once they approve it', async () => {
+  const f = fixture();
+  const id = await f.signIn();
+
+  // Not shown to have come from the holder's own page: any site can send a browser here.
+  f.backlink.pages.add('https://github.com/known-alice');
+  const calls = f.backlink.calls;
+  const flow = await f.service.start(alice, undefined, 'connect', { method: 'backlink' });
+
+  // Nothing was read, and the record is as it was.
+  assert.equal(f.backlink.calls, calls);
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'pending');
+
+  await f.service.submit(flow.flowId, flow.binding, 'known-alice');
+
+  // Shown, and still waiting on the approval: the one step a link cannot press.
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'approval');
+  assert.equal((await f.service.read(id)).attestations!.external.length, 1);
+
+  const renew = await f.service.start(alice, id, 'renew', { method: 'oauth' });
+  const state = new URL(renew.authorizationUrl!).searchParams.get('state')!;
+
+  await f.service.callback(state, renew.binding, 'code');
+  assert.equal((await f.service.flow(renew.flowId, renew.binding)).phase, 'approval');
+});
+
+test('a renewal is recorded once the account is shown again', async () => {
+  const f = fixture();
+  const id = await f.signIn();
+
+  f.advance(10);
+  const flow = await f.service.start(alice, id, 'renew', { method: 'oauth' }, undefined, true);
+  const state = new URL(flow.authorizationUrl!).searchParams.get('state')!;
+
+  await f.service.callback(state, flow.binding, 'code');
+
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'complete');
+  assert.equal((await f.service.read(id)).approvedAt, 1000010);
+});
+
+test('a new link still waits for the holder to approve it', async () => {
+  const f = fixture();
+  const flow = await f.service.start(alice, undefined, 'connect', { method: 'oauth' });
+  const state = new URL(flow.authorizationUrl!).searchParams.get('state')!;
+
+  await f.service.callback(state, flow.binding, 'code');
+
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'approval');
+  assert.deepEqual(await f.service.mine(alice), []);
 });
 
 test('an account already on record is offered, so the holder need not name it', async () => {
@@ -251,11 +314,18 @@ test('a link already on the known account is read without asking for anything', 
   const id = await f.signIn();
 
   f.backlink.pages.add('https://github.com/known-alice');
-  const flow = await f.service.start(alice, undefined, 'connect', { method: 'backlink' });
+
+  const flow = await f.service.start(
+    alice,
+    undefined,
+    'connect',
+    { method: 'backlink' },
+    undefined,
+    true,
+  );
 
   // Nothing was handed back: the sign-in named the account, and its profile was read.
-  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'approval');
-  assert.equal(await f.service.approve(flow.flowId, flow.binding, alice, 'public'), id);
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'complete');
 
   // A reader is sent to the proof, and it is read again later: both need the address.
   assert.equal(
@@ -269,7 +339,14 @@ test('a link not there yet leaves the flow waiting, and it can still be handed b
 
   await f.signIn();
 
-  const flow = await f.service.start(alice, undefined, 'connect', { method: 'backlink' });
+  const flow = await f.service.start(
+    alice,
+    undefined,
+    'connect',
+    { method: 'backlink' },
+    undefined,
+    true,
+  );
 
   // Not a failure: the holder has not been told what to publish until now.
   assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'pending');
@@ -279,7 +356,7 @@ test('a link not there yet leaves the flow waiting, and it can still be handed b
 
   const read = await f.service.flow(flow.flowId, flow.binding);
 
-  assert.equal(read.phase, 'approval');
+  assert.equal(read.phase, 'complete');
   // Kept as the address that was read, never as the username that named it.
   assert.equal(read.artifact, 'https://github.com/known-alice');
 });

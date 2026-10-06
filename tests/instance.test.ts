@@ -499,7 +499,7 @@ test('a subject held to one visibility is not offered the other, and cannot ask 
   );
 });
 
-test('a visibility is held to the list even when the record it would have joined goes away', async () => {
+test('a flow that joins a record is recorded with that record, and sets no visibility', async () => {
   const artifact = { ...fakeArtifactProvider(), id: 'github', name: 'GitHub' };
 
   const f = fixture({
@@ -526,49 +526,18 @@ test('a visibility is held to the list even when the record it would have joined
   artifact.artifacts.set('https://notes.test/proof', stored!.expect!);
   await f.post(`${path}/submit`, 'artifact=https://notes.test/proof', cookie);
 
-  // It would join the record, which is why its page offers no visibility at all.
-  assert.match(
-    await (await f.request(path, { headers: { cookie } })).text(),
-    /already linked here/,
-  );
+  // Whether it joins is decided in the transaction that records it, so no record can go
+  // away between the two and leave a visibility to be chosen by whoever approves.
+  assert.match(await (await f.request(path, { headers: { cookie } })).text(), /<p>complete<\/p>/);
 
-  // The record is revoked after the request has read the flow and before it approves, so
-  // the approval makes a new record where it had been going to join one.
-  const transaction = f.storage.transaction.bind(f.storage);
-  let seen = 0;
-
-  f.storage.transaction = (async (work: never) => {
-    if (++seen === 2) {
-      f.storage.transaction = transaction;
-      await f.app.service.revoke(record!.id, member);
-    }
-
-    return transaction(work);
-  }) as typeof f.storage.transaction;
-
-  assert.equal(
-    (await f.post(`${path}/approve`, 'action=approve&visibility=public', cookie)).status,
-    404,
-  );
-
-  assert.equal(seen, 2);
+  // An approval sent anyway finds the flow ended, and changes nothing.
+  await f.post(`${path}/approve`, 'action=approve&visibility=public', cookie);
 
   const after = await f.app.service.mine(member);
 
   assert.equal(after.length, 1);
-  assert.equal(after[0]!.status, 'revoked');
-  assert.ok(after.every((e) => e.visibility === 'unlisted'));
-
-  // The visibility it may have still works, and makes the new record.
-  assert.equal(
-    (await f.post(`${path}/approve`, 'action=approve&visibility=unlisted', cookie)).status,
-    200,
-  );
-
-  assert.deepEqual(
-    (await f.app.service.mine(member)).map((e) => e.visibility),
-    ['unlisted', 'unlisted'],
-  );
+  assert.equal(after[0]!.id, record!.id);
+  assert.equal(after[0]!.visibility, 'unlisted');
 });
 
 test('a form target must be an origin', () => {
