@@ -4,6 +4,7 @@
 # publish ahead of the bump ships the old number.
 #
 #   make release                 the next patch version
+#   make release minor           the next minor version, or major for the next major
 #   make release VERSION=0.1.0   a version you name
 #
 # Each step is also a target of its own, to pick up a release that stopped part way.
@@ -11,11 +12,25 @@
 VERSION_FILES := package.json package-lock.json src/version.ts README.md
 
 CURRENT := $(shell node -p "require('./package.json').version")
-VERSION ?= $(shell node -p "const v = '$(CURRENT)'.split('.'); v[2] = +v[2] + 1; v.join('.')")
+# Which part to bump is a word after the target. Make reads it as a goal of its own, so
+# each is also a target that does nothing.
+BUMPS := $(filter major minor patch,$(MAKECMDGOALS))
+
+ifneq ($(words $(BUMPS)),$(words $(firstword $(BUMPS))))
+$(error Name one of major, minor or patch, not '$(BUMPS)')
+endif
+
+BUMP := $(or $(BUMPS),patch)
+
+# The parts below the one bumped go back to zero, as 0.1.4 to 0.2.0.
+VERSION ?= $(shell node -p "const [a, b, c] = '$(CURRENT)'.split('.').map(Number); ({ major: [a + 1, 0, 0], minor: [a, b + 1, 0], patch: [a, b, c + 1] })['$(BUMP)'].join('.')")
 
 # The steps depend on running in the order they are listed.
 .NOTPARALLEL:
-.PHONY: release clean-tree bump verify commit deploy publish
+.PHONY: release clean-tree bump verify commit deploy publish major minor patch
+
+major minor patch:
+	@:
 
 release: clean-tree bump verify commit deploy publish
 
