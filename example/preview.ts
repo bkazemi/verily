@@ -13,10 +13,25 @@ const origin = `http://localhost:${port}`;
  * Extra accounts of the same subject, each a sign-in, so one tile has more of them than
  * a stacked badge has rows for.
  */
-const extra: Record<string, { provider: string; providerName: string; handle: string }> = {
+const extra: Record<
+  string,
+  {
+    provider: string;
+    providerName: string;
+    handle: string;
+    /** How the holder lists the account, or that they retired it. */
+    mark?: 'preferred' | 'unused';
+    retired?: true;
+  }
+> = {
   discord: { provider: 'discord', providerName: 'Discord', handle: 'joe' },
   youtube: { provider: 'youtube', providerName: 'YouTube', handle: 'joemarshall' },
   work: { provider: 'github', providerName: 'GitHub', handle: 'joe-at-work' },
+  // The last connected and the one its holder leads with, an account still held and no
+  // longer used, and one that is finished and kept as history.
+  preferred: { provider: 'github', providerName: 'GitHub', handle: 'joe-main', mark: 'preferred' },
+  unused: { provider: 'discord', providerName: 'Discord', handle: 'joe-old', mark: 'unused' },
+  retired: { provider: 'github', providerName: 'GitHub', handle: 'joe-2019', retired: true },
 };
 
 const server = createServer((request, response) => {
@@ -108,13 +123,15 @@ const server = createServer((request, response) => {
       siteName: 'JoeSite',
       verifierName: 'JoeSite',
       visibility: 'public',
-      status: ['current', 'signed-in', 'signed', 'mailed', ...Object.keys(extra)].includes(id)
-        ? 'verified'
-        : id === 'revoked'
-          ? 'revoked'
-          : id === 'unconfirmed'
-            ? 'unconfirmed'
-            : 'expired',
+      status: extra[id]?.retired
+        ? 'retired'
+        : ['current', 'signed-in', 'signed', 'mailed', ...Object.keys(extra)].includes(id)
+          ? 'verified'
+          : id === 'revoked'
+            ? 'revoked'
+            : id === 'unconfirmed'
+              ? 'unconfirmed'
+              : 'expired',
       // Each was first connected on a different day, though all were renewed yesterday:
       // the tile showing several as one pill orders them by this.
       connectedAt:
@@ -123,10 +140,16 @@ const server = createServer((request, response) => {
           ({ 'signed-in': 30, current: 20, signed: 10, mailed: 5, discord: 4, youtube: 3, work: 2 }[
             id
           ] ?? 40),
-      authenticatedAt: Date.now() - 86400000,
-      approvedAt: Date.now() - 86400000,
+      // The retired account was last proved long before its holder retired it.
+      authenticatedAt: Date.now() - 86400000 * (extra[id]?.retired ? 200 : 1),
+      approvedAt: Date.now() - 86400000 * (extra[id]?.retired ? 200 : 1),
       visibilityApprovedAt: Date.now() - 86400000,
-      expiresAt: ['expired', 'revoked'].includes(id) ? Date.now() - 1000 : Date.now() + 86400000,
+      expiresAt:
+        ['expired', 'revoked'].includes(id) || extra[id]?.retired
+          ? Date.now() - 1000
+          : Date.now() + 86400000,
+      ...(extra[id]?.mark ? { mark: extra[id].mark } : {}),
+      ...(extra[id]?.retired ? { retiredAt: Date.now() - 86400000 * 150 } : {}),
       evidenceUrl: `${origin}/demo`,
       // One record from a verifier that signs, so its card shows that it is signed.
       ...(id === 'current' ? { signedUrl: `${origin}/demo?format=signed` } : {}),
