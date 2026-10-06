@@ -3798,3 +3798,89 @@ test("Renew in a holder's own dialog renews the record its card is drawn from", 
     method: 'gist',
   });
 });
+
+test('a listing made in the dialog gives way to what the backend says next', async () => {
+  const { defined, cards, polls } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    mark: { ok: true },
+  });
+
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+  };
+
+  const settle = async () => {
+    for (let turn = 0; turn < 4; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+
+  const alice = (overrides: object = {}) =>
+    linked('a', 'alice', 100, { visibility: 'unlisted', ...overrides });
+
+  const bob = (overrides: object = {}) =>
+    linked('b', 'bob', 200, { visibility: 'unlisted', ...overrides });
+
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
+  badge.connections = [alice(), bob()];
+  badge.connectedCallback();
+  await settle();
+
+  const { dialog } = await cards(badge);
+  const accounts = () => dialog.all().filter((e) => e.className.includes('account'));
+  const card = (handle: string) => accounts().find((e) => e.textContent.includes(`@${handle}`))!;
+
+  const press = async (handle: string, text: string) => {
+    card(handle)
+      .find('button')
+      .find((b) => b.textContent === text)!.listeners['click']![0]!({});
+
+    await settle();
+  };
+
+  /** The page hands over records it read again, and the dialog reads at its next check. */
+  const handed = async (records: unknown[]) => {
+    badge.connections = records;
+    await settle();
+
+    for (const poll of polls) poll();
+
+    await settle();
+  };
+
+  const state = (handle: string) =>
+    card(handle)
+      .all()
+      .find((e) => e.className === 'state')!.textContent;
+
+  await press('alice', 'Mark as unused');
+  await press('bob', 'Retire');
+  await press('bob', 'Retire');
+
+  assert.match(card('alice').textContent, /No longer used/);
+  assert.equal(state('bob'), 'Retired');
+
+  // Records read before the change landed say nothing new, and what was asked still shows.
+  await handed([alice(), bob()]);
+  assert.match(card('alice').textContent, /No longer used/);
+  assert.equal(state('bob'), 'Retired');
+
+  // The backend now says the holder preferred the first account from somewhere else, and
+  // that the second is retired, as asked here.
+  const retired = { status: 'retired', retiredAt: 5, expiresAt: 1 };
+
+  await handed([alice({ mark: 'preferred' }), bob(retired)]);
+  assert.match(card('alice').textContent, /Preferred/);
+  assert.doesNotMatch(card('alice').textContent, /No longer used/);
+  assert.equal(state('bob'), 'Retired');
+
+  // Renewed elsewhere since: it is not drawn retired again by what was asked here before.
+  await handed([alice({ mark: 'preferred' }), bob({ approvedAt: 950 })]);
+  assert.equal(state('bob'), 'Verified');
+
+  await handed([alice(), bob({ approvedAt: 950 })]);
+  assert.doesNotMatch(card('alice').textContent, /Preferred|No longer used/);
+});

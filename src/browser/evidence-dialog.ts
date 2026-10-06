@@ -722,9 +722,21 @@ export function openEvidenceDialog(
 
   /**
    * How accounts were listed from this dialog, in the order it was asked, shown as asked
-   * before the page hands over new records: each names every link of its account.
+   * before the page hands over new records: each names every link of its account, and
+   * holds how those links read when it was asked. Once any of them reads differently the
+   * backend has spoken, for this change or a later one made elsewhere, and what it says
+   * is shown from then on.
    */
-  const listed: { ids: string[]; as: Listing; at: number }[] = [];
+  const listed: { ids: string[]; as: Listing; at: number; before: Map<string, string> }[] = [];
+
+  /** What of a record a listing, a retirement or a renewal changes. */
+  const listing = (record: Evidence) =>
+    JSON.stringify([record.status, record.mark, record.retiredAt, record.approvedAt]);
+
+  /** How each record given reads now, by its id. */
+  const listings = (given: Evidence | Evidence[]) =>
+    new Map([given].flat().map((record) => [record.id, listing(record)]));
+
   let held: Evidence | Evidence[] | undefined;
 
   /** A record as the listings made here leave it, each applied as the backend applies it. */
@@ -784,7 +796,12 @@ export function openEvidenceDialog(
               removable(card).includes(id),
             );
 
-            listed.push({ ids: account ? removable(account) : [id], as, at: Date.now() });
+            listed.push({
+              ids: account ? removable(account) : [id],
+              as,
+              at: Date.now(),
+              before: listings(held ?? []),
+            });
 
             if (held && dialog.open) draw(held);
           },
@@ -806,6 +823,12 @@ export function openEvidenceDialog(
   /** Redraws only for a record that reads differently from the one already on screen. */
   const draw = (given: Evidence | Evidence[]) => {
     held = given;
+
+    const now = listings(given);
+
+    for (const change of [...listed])
+      if (change.ids.some((id) => now.get(id) !== change.before.get(id)))
+        listed.splice(listed.indexOf(change), 1);
 
     const records = arrange(
       [given]
