@@ -674,9 +674,13 @@ export class VerilyStore {
       if (!request.headers.get('content-type')?.startsWith('application/json'))
         return unavailable();
 
-      // The dialog only connects. Every other kind of flow has a page of its own here.
-      // Parsed as the library parses it, so the kind checked is the kind it will run.
-      if (url.pathname === '/api/verily/sessions' && parsed(body!)?.kind !== 'connect')
+      // The dialog connects an account or renews one. Every other kind of flow has a page
+      // of its own here. Parsed as the library parses it, so the kind checked is the kind
+      // it will run.
+      if (
+        url.pathname === '/api/verily/sessions' &&
+        !['connect', 'renew'].includes(String(parsed(body!)?.kind))
+      )
         return unavailable();
     } else if (
       url.pathname !== '/api/verily/methods' &&
@@ -736,7 +740,7 @@ export class VerilyStore {
     const flow = await this.app.service.flow(id, binding).catch(() => undefined);
     const site = flow?.local && this.siteOf(flow.local);
 
-    if (!flow || flow.kind !== 'connect' || !site || site.origin !== origin)
+    if (!flow || !['connect', 'renew'].includes(flow.kind) || !site || site.origin !== origin)
       return html('Unavailable', '', 404);
 
     return new Response(null, {

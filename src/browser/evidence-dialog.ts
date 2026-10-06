@@ -223,6 +223,12 @@ export type Listing = 'preferred' | 'current' | 'unused' | 'retired';
 export interface Manage {
   /** Opens what connects an account, in this dialog's place. Given a provider, starts on it. */
   connect(provider?: string): void;
+  /**
+   * Opens what renews the record named, in this dialog's place: the same account shown
+   * again, which extends that record under its id. `method` is the one method that may.
+   * Absent where the page gave no way to, and Renew then connects on the provider.
+   */
+  renew?(id: string, provider: string, method?: string): void;
   /** Removes the links named. Rejects if any could not be removed. */
   remove(ids: string[]): Promise<void>;
   /**
@@ -290,7 +296,18 @@ function manageRow(evidence: Account, manage: Manage) {
     const renew = act('Renew');
     const remove = act('Remove', true);
 
-    renew.onclick = () => manage.connect(evidence.provider);
+    // The record the card is drawn from is the one renewed. A retired one comes back by the
+    // method it was first shown by alone, and a removed one cannot be renewed at all, so
+    // the account behind it is connected again.
+    renew.onclick = () =>
+      manage.renew && evidence.status !== 'revoked'
+        ? manage.renew(
+            evidence.id,
+            evidence.provider,
+            evidence.status === 'retired' ? evidence.attestations.external[0].method : undefined,
+          )
+        : manage.connect(evidence.provider);
+
     remove.onclick = confirm;
 
     const listing: HTMLElement[] = [];
@@ -742,6 +759,14 @@ export function openEvidenceDialog(
       manage.connect(provider);
       dialog.close();
     },
+    ...(manage.renew
+      ? {
+          renew(id: string, provider: string, method?: string) {
+            manage.renew!(id, provider, method);
+            dialog.close();
+          },
+        }
+      : {}),
     async remove(ids) {
       await manage.remove(ids);
 

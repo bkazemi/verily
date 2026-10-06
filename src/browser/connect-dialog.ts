@@ -61,7 +61,8 @@ export interface FlowView {
 
 export interface ConnectApi {
   methods(): Promise<Methods>;
-  start(provider: string, method: string): Promise<FlowView>;
+  /** Starts a flow by one method: a new link, or a renewal of the record `renew` names. */
+  start(provider: string, method: string, renew?: string): Promise<FlowView>;
   read(id: string): Promise<FlowView>;
   submit(id: string, artifact: string): Promise<FlowView>;
   approve(id: string, visibility: 'public' | 'unlisted', cancel: boolean): Promise<Result>;
@@ -174,6 +175,13 @@ export function openConnectDialog(
   back?: () => void,
   /** The provider to start on, where the holder already said which account they mean. */
   provider?: string,
+  /**
+   * The record to renew, where the holder asked to show one of their accounts again: each
+   * flow started then extends that record under its id. `method` is the one method that
+   * may, for a retired record. Where the holder is not offered it, a new link is the way
+   * back, and the dialog connects as it would with no record named.
+   */
+  renew?: { id: string; method?: string },
 ): Promise<Result> {
   const existing = openDialogs.get(opener);
 
@@ -325,7 +333,14 @@ export function openConnectDialog(
 
     if (!current(asked)) return;
 
-    const all = methods.methods;
+    // A record's renewal stays on its provider, by the one method named where one is.
+    const renewing = methods.methods.filter(
+      (m) => m.provider === provider && (renew?.method === undefined || m.method === renew.method),
+    );
+
+    if (renew && !renewing.length) renew = undefined;
+
+    const all = renew ? renewing : methods.methods;
 
     // A provider asked for that this holder is not offered leaves every option open.
     if (group !== undefined && !all.some((m) => m.provider === group)) group = undefined;
@@ -371,7 +386,7 @@ export function openConnectDialog(
           }
         }
 
-        void busy(control, () => api.start(choice.provider, choice.method), show);
+        void busy(control, () => api.start(choice.provider, choice.method, renew?.id), show);
       };
 
       list.append(control);
@@ -391,7 +406,7 @@ export function openConnectDialog(
       list,
     ];
 
-    if (group !== undefined) {
+    if (group !== undefined && !renew) {
       const back = button('‹ All options');
 
       back.onclick = () => {

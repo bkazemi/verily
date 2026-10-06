@@ -1458,6 +1458,8 @@ async function groupHarness(
   const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
   const body = new Element();
   const asked: string[] = [];
+  /** What each request that carried a body said, in the order they were sent. */
+  const sent: Record<string, string>[] = [];
   const defined: Record<string, new () => Element> = {};
   const polls: (() => void)[] = [];
   /** What the window is being listened to for, as type and handler. */
@@ -1563,10 +1565,12 @@ async function groupHarness(
     TextDecoder,
     atob,
     btoa,
-    fetch: async (url: string) => {
+    fetch: async (url: string, init?: { body?: string }) => {
       const id = new URL(url).pathname.split('/').at(-1)!;
 
       asked.push(id);
+
+      if (init?.body) sent.push(JSON.parse(init.body) as Record<string, string>);
 
       // Held back on request, to model an answer that arrives after the page has moved on.
       await hold?.();
@@ -1623,7 +1627,7 @@ async function groupHarness(
     (context as { innerHeight: number }).innerHeight = height;
   };
 
-  return { verily, asked, cards, defined, polls, upgrade, body, heard, resize };
+  return { verily, asked, sent, cards, defined, polls, upgrade, body, heard, resize };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -3639,4 +3643,158 @@ test("a holder's own dialog lists an account another way, and retires it only on
   );
 
   assert.deepEqual(labels(accounts()[3]!), ['Renew', 'Remove']);
+});
+
+test("Renew in a holder's own dialog renews the record its card is drawn from", async () => {
+  const { defined, sent, cards, body } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    methods: {
+      siteName: 'site.test',
+      verifierName: 'verifier.test',
+      local: { heading: 'Account on site.test', value: 'Alice' },
+      methods: [
+        { provider: 'github', method: 'oauth', name: 'GitHub', action: 'Sign in with GitHub' },
+        { provider: 'github', method: 'gist', name: 'GitHub', action: 'Publish a proof' },
+        { provider: 'notes', method: 'gist', name: 'Notes', action: 'Publish a proof on Notes' },
+      ],
+    },
+    sessions: {
+      id: 'flow',
+      phase: 'pending',
+      provider: { id: 'github', name: 'GitHub', method: 'gist' },
+      instructions: ['Publish this line:'],
+      artifact: 'location',
+    },
+  });
+
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const gist = [{ by: 'provider', method: 'gist', confirmedAt: 1, artifactUrl: 'https://x.test/' }];
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
+
+  badge.connections = [
+    linked('live', 'alice', 100, { visibility: 'unlisted' }),
+    linked('old', 'bob', 200, {
+      visibility: 'unlisted',
+      status: 'retired',
+      retiredAt: 5,
+      expiresAt: 1,
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: gist,
+      },
+    }),
+    // First shown by a method this holder is no longer offered.
+    linked('lost', 'carol', 300, {
+      visibility: 'unlisted',
+      status: 'retired',
+      retiredAt: 5,
+      expiresAt: 1,
+      attestations: {
+        local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+        external: [{ by: 'provider', method: 'backlink', confirmedAt: 1 }],
+      },
+    }),
+    linked('gone', 'dave', 400, { visibility: 'unlisted', status: 'revoked', revokedAt: 5 }),
+    linked('kept', 'dave', 350, {
+      visibility: 'unlisted',
+      status: 'expired',
+      expiresAt: 1,
+      approvedAt: 1,
+      external: { id: 'ext-gone', handle: 'dave', profileUrl: 'https://github.com/dave' },
+    }),
+  ];
+
+  badge.connectedCallback();
+  await settle();
+
+  /** Presses Renew on one account's card, and returns the methods the next dialog offers. */
+  const renew = async (handle: string) => {
+    for (const open of body.all().filter((found) => found.tagName === 'dialog')) open.close();
+
+    const opened = await cards(badge);
+
+    opened.cards
+      .find((card) => card.textContent.includes(`@${handle}`))!
+      .find('button')
+      .find((b) => b.textContent === 'Renew')!.listeners['click']![0]!({});
+
+    await settle();
+    await settle();
+
+    const connect = body.all().find((found) => found.tagName === 'dialog' && found.open)!;
+    const choices = connect.all().find((found) => found.className === 'choices')!;
+
+    return { connect, offered: choices.find('button') };
+  };
+
+  /** Presses the last method offered, and returns what starting its flow sent. */
+  const start = async (offered: Element[]) => {
+    offered.at(-1)!.listeners['click']![0]!({});
+    await settle();
+    await settle();
+
+    return sent.at(-1)!;
+  };
+
+  // A record that stands is renewed under its own id, by any method of its provider.
+  const live = await renew('alice');
+
+  assert.deepEqual(
+    live.offered.map((b) => b.textContent),
+    ['Sign in with GitHub', 'Publish a proof'],
+  );
+
+  assert.deepEqual(await start(live.offered), {
+    kind: 'renew',
+    connectionId: 'live',
+    provider: 'github',
+    method: 'gist',
+  });
+
+  // A retired one is offered the method it was first shown by, and nothing to back out to.
+  const retired = await renew('bob');
+
+  assert.deepEqual(
+    retired.offered.map((b) => b.textContent),
+    ['Publish a proof'],
+  );
+
+  assert.ok(!retired.connect.find('button').some((b) => b.textContent === '‹ All options'));
+
+  assert.deepEqual(await start(retired.offered), {
+    kind: 'renew',
+    connectionId: 'old',
+    provider: 'github',
+    method: 'gist',
+  });
+
+  // Where that method is no longer offered, a new link is the way back.
+  const lost = await renew('carol');
+
+  assert.deepEqual(
+    lost.offered.map((b) => b.textContent),
+    ['Sign in with GitHub', 'Publish a proof'],
+  );
+
+  assert.deepEqual(await start(lost.offered), {
+    kind: 'connect',
+    provider: 'github',
+    method: 'gist',
+  });
+
+  // A removed record cannot be renewed, so its account is connected again.
+  assert.deepEqual(await start((await renew('dave')).offered), {
+    kind: 'connect',
+    provider: 'github',
+    method: 'gist',
+  });
 });

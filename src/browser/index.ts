@@ -428,8 +428,15 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
       return data as unknown as Methods;
     },
-    start: async (provider, method) =>
-      flowView(await ask('/sessions', { kind: 'connect', provider, method })),
+    start: async (provider, method, renew) =>
+      flowView(
+        await ask(
+          '/sessions',
+          renew
+            ? { kind: 'renew', connectionId: renew, provider, method }
+            : { kind: 'connect', provider, method },
+        ),
+      ),
     read: async (id) =>
       flowView(await ask(`/flows/${encodeURIComponent(id)}?format=json`, undefined, id)),
     submit: async (id, artifact) =>
@@ -494,6 +501,8 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       opener: HTMLElement = document.body,
       back?: () => void,
       provider?: string,
+      /** A record of the holder's to renew, in place of connecting: see `openConnectDialog`. */
+      renew?: { id: string; method?: string },
     ): Promise<Result> {
       if (remote && !handoffUrl)
         throw new Error('A backend on another origin requires a handoff URL');
@@ -501,7 +510,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       // Each opening is vouched for afresh, for whoever is signed in to this site now.
       session = undefined;
 
-      return openConnectDialog(opener, flows, back, provider);
+      return openConnectDialog(opener, flows, back, provider, renew);
     },
     /**
      * Draws the pill that opens the connect dialog. The host receives a `verily-result`
@@ -1021,6 +1030,13 @@ if (typeof customElements !== 'undefined' && !customElements.get('verily-badge')
             connect: (provider) => {
               void client
                 .openConnect(this, () => details(this), provider)
+                .then((result) => {
+                  if (result.outcome === 'complete') changed(result);
+                });
+            },
+            renew: (id, provider, method) => {
+              void client
+                .openConnect(this, () => details(this), provider, { id, method })
                 .then((result) => {
                   if (result.outcome === 'complete') changed(result);
                 });

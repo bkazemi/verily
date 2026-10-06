@@ -1404,13 +1404,13 @@ test('the dialog on a site page connects with a session and a binding carried in
     assert.equal(links![0]!.id, outcome.connectionId);
     assert.equal(links![0]!.visibility, 'unlisted');
 
-    // The dialog only connects, whatever a body says twice: the kind held to is the one
-    // the library will read, which is the last.
+    // The dialog only connects or renews, whatever a body says twice: the kind held to is
+    // the one the library will read, which is the last.
     assert.equal(
       (
         await page('/api/verily/sessions', {
           session,
-          body: `{"kind":"connect","kind":"renew","connectionId":"${outcome.connectionId}"}`,
+          body: `{"kind":"connect","kind":"visibility","connectionId":"${outcome.connectionId}"}`,
         })
       ).status,
       404,
@@ -1483,6 +1483,17 @@ test('the dialog on a site page connects with a session and a binding carried in
     // Not the dialog's, so held to this origin like any other request, which the page is not on.
     assert.equal((await remove(outcome.connectionId, 'share')).status, 403);
     assert.equal((await remove(outcome.connectionId, 'visibility')).status, 403);
+
+    // The dialog renews one of the holder's own records too, and starts no other kind of flow.
+    const flowOf = (kind: string) =>
+      page('/api/verily/sessions', {
+        session,
+        body: { kind, connectionId: outcome.connectionId, provider: 'github', method: 'oauth' },
+      });
+
+    assert.equal((await flowOf('renew')).status, 200);
+    assert.equal((await flowOf('visibility')).status, 404);
+    assert.equal((await flowOf('revoke')).status, 404);
 
     // How the holder lists the account is theirs to say from the dialog as well.
     const listed = await page(`/api/verily/connections/${outcome.connectionId}/mark`, {
