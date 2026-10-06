@@ -16,7 +16,7 @@
   <img src="docs/images/badge.png" alt="A profile card with a Verily badge showing a GitHub account" width="480" />
 </p>
 
-Verily is a self-hosted library for Node.js. A signed-in user of your site proves they control an external account, by signing in with GitHub, publishing a gist, linking back with `rel="me"`, or signing with an OpenPGP key. They approve the connection, and Verily publishes it as a record anyone can inspect, with a badge for their profile.
+Verily is a self-hosted library for Node.js. A signed-in user of your site proves they control an external account, by signing in with GitHub, Discord or YouTube, publishing a gist, linking back with `rel="me"`, signing with an OpenPGP key, or answering a mailed link. They approve the connection, and Verily publishes it as a record anyone can inspect, with a badge for their profile.
 
 It doesn't sign anyone into your site, and it doesn't establish legal identity.
 
@@ -86,15 +86,15 @@ const verily = createVerily({
 });
 ```
 
-| Option           | Meaning                                                                                             |
-| ---------------- | --------------------------------------------------------------------------------------------------- |
-| `provider`       | How users prove an external account. One provider or an array; see [Proof methods](#proof-methods). |
-| `baseUrl`        | The public URL you mount Verily at. Every route it serves is under this path.                       |
-| `siteName`       | Your site's name, shown on evidence.                                                                |
-| `verifierName`   | Who vouches for the record, shown on evidence. Usually the backend's domain.                        |
-| `profileOrigins` | The origins a local `profileUrl` may be on.                                                         |
-| `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                          |
-| `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in.           |
+| Option           | Meaning                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| `providers`      | How users prove an external account, as a list; see [Proof methods](#proof-methods).      |
+| `baseUrl`        | The public URL you mount Verily at. Every route it serves is under this path.             |
+| `siteName`       | Your site's name, shown on evidence.                                                      |
+| `verifierName`   | Who vouches for the record, shown on evidence. Usually the backend's domain.              |
+| `profileOrigins` | The origins a local `profileUrl` may be on.                                               |
+| `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                |
+| `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in. |
 
 Sign-in methods need an app registered with the provider, and each site running Verily registers its own. The callback URL is always `<baseUrl>/callback`, so for `baseUrl: 'https://example.com/api/verily'` it is `https://example.com/api/verily/callback`. The provider redirects only to URLs registered in advance, so each place you run Verily, a local one for development included, needs its callback registered.
 
@@ -216,7 +216,7 @@ import {
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                                            | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile, then entering their GitHub username. | The local account needs a `profileUrl`. |
 | `pgpProvider()`        | signing a line Verily gives them with their OpenPGP key, then pasting it and the key.                        | None.                                   |
-| `emailProvider()`      | entering a code Verily mails to their address.                                                               | A function that sends one message.      |
+| `emailProvider()`      | pressing a button, or entering a code, that Verily mails to their address.                                   | A function that sends one message.      |
 
 All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. A proof that does not check out can be put right and handed back on the same step, up to five times, so a mistyped address never means publishing or signing again. Gists and link-backs can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
 
