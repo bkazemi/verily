@@ -1010,6 +1010,7 @@ test('a mailed code is asked for in two steps, and a wrong one says so', async (
   assert.deepEqual(sent, ['alice@example.test', 'AAAA-AAAA', 'K7QM-2XPD']);
   assert.match(dialog.textContent, /Confirm connection/);
   assert.ok(!dialog.textContent.includes('@alice'));
+
   // The footer's logotype is the dialog's own link, so only what the steps drew is counted.
   assert.deepEqual(
     dialog
@@ -3203,4 +3204,439 @@ test('an account shown as removed can still have its older unrevoked records rem
   const [, after] = dialog.all().filter((e) => e.className.includes('account'));
 
   assert.equal(labelled(after!, 'Remove'), undefined);
+});
+
+/** The handles on a dialog's account cards, in the order they are drawn. */
+const handles = (drawn: Element[]) =>
+  drawn.slice(1).map((card) => card.textContent.match(/@(alice|bob|carol|dave|erin)/)![1]);
+
+test('the preferred account leads, unused ones follow the rest, and retired ones sit at the foot', async () => {
+  const records = {
+    first: linked('first', 'alice', 100, { mark: 'unused' }),
+    second: linked('second', 'bob', 200, { status: 'retired', retiredAt: 700, expiresAt: 1 }),
+    third: linked('third', 'carol', 300),
+    fourth: linked('fourth', 'dave', 400, { mark: 'preferred' }),
+    fifth: linked('fifth', 'erin', 500),
+  };
+
+  const { verily, cards } = await groupHarness(records);
+  const client = verily.init({ backendUrl: 'https://verifier.test/api/verily' });
+  const ids = Object.keys(records);
+  const host = new Element();
+
+  await client.mountBadges(host, { connectionIds: ids });
+
+  // Preferring an account is what pins it. The retired one is not counted at all.
+  assert.equal(pillText(host), '@dave+3');
+
+  assert.match(
+    host.links()[0]!.attributes['aria-label']!,
+    /GitHub @dave, GitHub @carol, GitHub @erin, GitHub @alice: Verified/,
+  );
+
+  const opened = await cards(host);
+
+  assert.deepEqual(handles(opened.cards), ['dave', 'carol', 'erin', 'alice', 'bob']);
+
+  // Each says what the holder said of it, in their words and once.
+  assert.match(opened.cards[1]!.textContent, /Preferred/);
+  assert.match(opened.cards[4]!.textContent, /No longer used/);
+  assert.doesNotMatch(opened.cards[2]!.textContent, /Preferred|No longer used/);
+
+  // The retired account is in a group of its own, under what says so and after the rest.
+  const drawn = opened.dialog.all();
+  const group = drawn.find((found) => found.className === 'group')!;
+
+  assert.equal(group.textContent, 'Retired accounts');
+  assert.ok(drawn.indexOf(group) > drawn.indexOf(opened.cards[4]!));
+  assert.ok(drawn.indexOf(group) < drawn.indexOf(opened.cards[5]!));
+
+  const retired = opened.cards[5]!;
+
+  assert.equal(retired.all().find((found) => found.className === 'state')!.textContent, 'Retired');
+
+  // Its last proof and its retirement are two dated rows, and nothing says it ran out.
+  assert.deepEqual(
+    retired.find('dt').map((term) => term.textContent),
+    ['Approved', 'Last verified', 'Retired'],
+  );
+
+  assert.equal(retired.find('svg')[1]!.attributes['class'], 'mark pending');
+
+  // A stacked pill names them in the same order.
+  const stacked = new Element();
+
+  await client.mountBadges(stacked, { connectionIds: ids, stacked: true });
+  assert.equal(pillText(stacked), '@dave@carol@erin@alice');
+});
+
+test('a lapsed preferred account does not lead, and an unused one leads only among unused', async () => {
+  const { verily, cards } = await groupHarness({});
+
+  const present = (records: unknown[]) => {
+    const host = new Element();
+
+    verily.presentConnections(host, records);
+
+    return host;
+  };
+
+  const lapsed = present([
+    linked('first', 'alice', 100, { mark: 'preferred', status: 'expired', expiresAt: 1 }),
+    linked('second', 'bob', 200, { mark: 'unused' }),
+    linked('third', 'carol', 300),
+  ]);
+
+  // It keeps its mark and its place in the dialog, to lead again once renewed.
+  assert.equal(pillText(lapsed), '@carol+1');
+  assert.deepEqual(handles((await cards(lapsed)).cards), ['alice', 'carol', 'bob']);
+
+  assert.equal(
+    pillText(
+      present([
+        linked('first', 'alice', 100, { mark: 'unused' }),
+        linked('second', 'bob', 200, { mark: 'unused' }),
+        linked('third', 'carol', 300, { status: 'expired', expiresAt: 1 }),
+        linked('fourth', 'dave', 400, { status: 'retired', retiredAt: 5, expiresAt: 1 }),
+      ]),
+    ),
+    '@alice+1',
+  );
+
+  // A retired account never leads while any other is shown, whatever became of the other.
+  assert.match(
+    pillText(
+      present([
+        linked('first', 'alice', 100, { status: 'retired', retiredAt: 5, expiresAt: 1 }),
+        linked('second', 'bob', 200, { status: 'expired', expiresAt: 1 }),
+      ]),
+    ),
+    /^@bobExpired$/,
+  );
+});
+
+test('a badge with only retired accounts is a quiet pill of its own that opens the same dialog', async () => {
+  const { verily, cards } = await groupHarness({});
+  const host = new Element();
+
+  verily.presentConnections(host, [
+    linked('first', 'alice', 100, { status: 'retired', retiredAt: 700, expiresAt: 1 }),
+    linked('second', 'bob', 200, { status: 'retired', retiredAt: 800, expiresAt: 1 }),
+  ]);
+
+  const pill = host.links()[0]!;
+
+  // Named, with no count: neither the check that says verified nor the clock that says lapsed.
+  assert.equal(pill.className, 'badge retired');
+  assert.equal(pillText(host), '@aliceRetired');
+  assert.match(pill.attributes['aria-label']!, /^GitHub @alice: Retired \| via: verifier\.test/);
+
+  const [mark, , glyph] = host.find('svg');
+
+  assert.equal(mark!.attributes['class'], 'mark pending');
+
+  assert.deepEqual(
+    mark!.find('path').map((path) => path.attributes['stroke']),
+    ['currentColor', 'currentColor'],
+  );
+
+  assert.equal(glyph!.attributes['class'], 'glyph box');
+
+  const opened = await cards(host);
+
+  assert.deepEqual(handles(opened.cards), ['alice', 'bob']);
+  assert.match(opened.dialog.textContent, /Retired accounts/);
+});
+
+test('a record that says it is retired without saying when, or carries an unknown mark, is not drawn', async () => {
+  const { verily } = await groupHarness({});
+
+  for (const overrides of [
+    { status: 'retired' },
+    { status: 'retired', retiredAt: 'yesterday' },
+    { retiredAt: 5 },
+    { mark: 'favourite' },
+    { status: 'archived' },
+  ]) {
+    const host = new Element();
+
+    verily.presentConnections(host, [linked('first', 'alice', 100, overrides)]);
+    assert.equal(host.textContent, 'Unavailable', JSON.stringify(overrides));
+  }
+});
+
+test('the order holds once a signed record checks, and follows a mark changed since', async () => {
+  const mine = await signer(await generateSigningKey('verifier.test'));
+  const at = (name: string) => `https://verifier.test/api/verily/connections/${name}`;
+
+  const record = (id: string, handle: string, connectedAt: number, overrides: object = {}) =>
+    linked(id, handle, connectedAt, { signedUrl: `${at(id)}?format=signed`, ...overrides });
+
+  /** As the verifier signs it: without what stands now, and without the holder's mark. */
+  const sign = (evidence: ReturnType<typeof linked>) => {
+    const {
+      status,
+      signedUrl: _signedUrl,
+      mark: _mark,
+      retiredAt,
+      ...rest
+    } = evidence as ReturnType<typeof linked> & {
+      signedUrl?: string;
+      mark?: string;
+      retiredAt?: number;
+    };
+
+    return mine.sign({
+      type: 'verily-evidence',
+      issuedAt: 1,
+      ...rest,
+      ...(status === 'retired' ? { version: 2, status, retiredAt } : { version: 1 }),
+    } as never);
+  };
+
+  const first = record('first', 'alice', 100);
+  const second = record('second', 'bob', 200, { mark: 'preferred' });
+  const third = record('third', 'carol', 300, { mark: 'unused' });
+  const fourth = record('fourth', 'dave', 400);
+  const old = record('old', 'erin', 50, { status: 'retired', retiredAt: 700, expiresAt: 1 });
+
+  const { verily, cards, body } = await groupHarness({
+    keys: { keys: [mine.key] },
+    first: await sign(first),
+    second: await sign(second),
+    third: await sign(third),
+    fourth: await sign(fourth),
+    old: await sign(old),
+  });
+
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 120));
+
+  const drawn = async (host: Element) => {
+    for (const open of body.all().filter((found) => found.tagName === 'dialog')) open.remove();
+
+    const opened = await cards(host);
+
+    await settled();
+
+    const accounts = opened.dialog.all().filter((found) => found.className.includes('account'));
+
+    return {
+      order: handles(accounts),
+      signed: accounts.slice(1).map((card) => /signed ✓/.test(card.textContent)),
+      text: accounts.slice(1).map((card) => card.textContent),
+    };
+  };
+
+  const host = new Element();
+
+  verily.presentConnections(host, [first, second, third, fourth, old]);
+  assert.equal(pillText(host), '@bob+3');
+
+  // Every signature has checked by now, and each card is drawn from what was signed. The
+  // marks are in no signed record, and are still what the cards are ordered by.
+  await settled();
+  assert.equal(pillText(host), '@bob+3');
+
+  const before = await drawn(host);
+
+  assert.deepEqual(before.order, ['bob', 'alice', 'dave', 'carol', 'erin']);
+  assert.deepEqual(before.signed, [true, true, true, true, true]);
+  assert.match(before.text[0]!, /Preferred/);
+  assert.match(before.text[3]!, /No longer used/);
+  assert.match(before.text[4]!, /Retired/);
+
+  // The holder has since preferred another account and gone back to using the third. The
+  // signed records kept from before say nothing of either, and the order follows the read.
+  const changed = new Element();
+
+  verily.presentConnections(changed, [
+    first,
+    { ...second, mark: undefined },
+    { ...third, mark: undefined },
+    { ...fourth, mark: 'preferred' },
+    old,
+  ]);
+
+  assert.equal(pillText(changed), '@dave+3');
+
+  const after = await drawn(changed);
+
+  assert.deepEqual(after.order, ['dave', 'alice', 'bob', 'carol', 'erin']);
+  assert.deepEqual(after.signed, [true, true, true, true, true]);
+  assert.match(after.text[0]!, /Preferred/);
+  assert.doesNotMatch(after.text.slice(1, 4).join(' '), /Preferred|No longer used/);
+
+  // A mark is never taken from a signed document that carries one all the same.
+  const smuggled = record('smuggled', 'alice', 100);
+
+  const withMark = new Element();
+
+  const other = await groupHarness({
+    keys: { keys: [mine.key] },
+    smuggled: await mine.sign({
+      type: 'verily-evidence',
+      version: 1,
+      issuedAt: 1,
+      ...(({ status: _status, signedUrl: _signedUrl, ...rest }) => rest)(
+        smuggled as typeof smuggled & { signedUrl?: string },
+      ),
+      mark: 'preferred',
+    } as never),
+  });
+
+  other.verily.presentConnections(withMark, [smuggled]);
+
+  const read = await other.cards(withMark);
+
+  await settled();
+
+  const card = read.dialog.all().filter((found) => found.className.includes('account'))[1]!;
+
+  assert.match(card.textContent, /signed ✓/);
+  assert.doesNotMatch(card.textContent, /Preferred/);
+});
+
+test("a holder's own dialog lists an account another way, and retires it only once asked again", async () => {
+  const { defined, asked, cards } = await groupHarness({
+    handoff: { token: 'vouched' },
+    session: { session: 'opened' },
+    mark: { ok: true },
+  });
+
+  const Badge = defined['verily-badge']! as unknown as new () => Element & {
+    connectedCallback(): void;
+    connections: unknown;
+    dispatched: { type: string; detail: unknown }[];
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const labels = (within: Element) => within.find('button').map((b) => b.textContent);
+
+  const press = async (within: Element, text: string) => {
+    within.find('button').find((b) => b.textContent === text)!.listeners['click']![0]!({});
+
+    await settle();
+    await settle();
+  };
+
+  const badge = new Badge();
+
+  badge.attributes['backend-url'] = 'https://verifier.test/api/verily';
+  badge.attributes['handoff-url'] = '/api/verily/handoff';
+
+  badge.connections = [
+    linked('a', 'alice', 100, { visibility: 'unlisted' }),
+    // One account on two records, the earlier of which has run out.
+    linked('b1', 'bob', 200, {
+      visibility: 'unlisted',
+      status: 'expired',
+      expiresAt: 1,
+      external: { id: 'ext-b', handle: 'bob', profileUrl: 'https://github.com/bob' },
+    }),
+    linked('b2', 'bob', 250, {
+      visibility: 'unlisted',
+      external: { id: 'ext-b', handle: 'bob', profileUrl: 'https://github.com/bob' },
+    }),
+    linked('c', 'carol', 300, { visibility: 'unlisted', status: 'revoked', revokedAt: 5 }),
+    linked('d', 'dave', 400, {
+      visibility: 'unlisted',
+      status: 'retired',
+      retiredAt: 5,
+      expiresAt: 1,
+    }),
+  ];
+
+  badge.connectedCallback();
+  await settle();
+
+  const { dialog } = await cards(badge);
+  const accounts = () => dialog.all().filter((e) => e.className.includes('account'));
+
+  assert.deepEqual(handles(accounts()), ['alice', 'bob', 'carol', 'dave']);
+
+  // An ordinary account can be listed either way or retired, beside Renew and Remove.
+  assert.deepEqual(labels(accounts()[1]!), [
+    'Renew',
+    'Mark as preferred',
+    'Mark as unused',
+    'Retire',
+    'Remove',
+  ]);
+
+  // A removed account has nothing left to do, and a retired one only Renew and Remove.
+  assert.deepEqual(labels(accounts()[3]!), []);
+  assert.deepEqual(labels(accounts()[4]!), ['Renew', 'Remove']);
+
+  await press(accounts()[2]!, 'Mark as preferred');
+
+  assert.deepEqual(asked.slice(-3), ['handoff', 'session', 'mark']);
+
+  assert.equal(
+    JSON.stringify(badge.dispatched.at(-1)!.detail),
+    '{"outcome":"marked","connectionId":"b1","as":"preferred"}',
+  );
+
+  // Shown as asked at once, before the page hands over new records: first, and saying so.
+  assert.deepEqual(handles(accounts()), ['bob', 'alice', 'carol', 'dave']);
+  assert.match(accounts()[1]!.textContent, /Preferred/);
+
+  assert.deepEqual(labels(accounts()[1]!), [
+    'Renew',
+    'Mark as unused',
+    'Mark as current',
+    'Retire',
+    'Remove',
+  ]);
+
+  // Preferring another moves the mark, as it does where it is kept.
+  await press(accounts()[2]!, 'Mark as preferred');
+  assert.deepEqual(handles(accounts()), ['alice', 'bob', 'carol', 'dave']);
+  assert.doesNotMatch(accounts()[2]!.textContent, /Preferred/);
+
+  // An unused account goes after every other still listed, removed ones included.
+  await press(accounts()[1]!, 'Mark as unused');
+  assert.deepEqual(handles(accounts()), ['bob', 'carol', 'alice', 'dave']);
+  assert.match(accounts()[3]!.textContent, /No longer used/);
+
+  await press(accounts()[3]!, 'Mark as current');
+  assert.deepEqual(handles(accounts()), ['alice', 'bob', 'carol', 'dave']);
+  assert.doesNotMatch(accounts()[1]!.textContent, /No longer used/);
+
+  // Retiring says what it does first, and does nothing until asked again.
+  const marked = asked.filter((id) => id === 'mark').length;
+
+  await press(accounts()[2]!, 'Retire');
+
+  assert.match(
+    accounts()[2]!.textContent,
+    /Retiring keeps this record as history\. It will no longer read as verified, and who can read it cannot be changed afterwards\./,
+  );
+
+  assert.deepEqual(labels(accounts()[2]!), ['Cancel', 'Retire']);
+  assert.equal(asked.filter((id) => id === 'mark').length, marked);
+
+  await press(accounts()[2]!, 'Cancel');
+  assert.equal(labels(accounts()[2]!).includes('Mark as preferred'), true);
+
+  await press(accounts()[2]!, 'Retire');
+  await press(accounts()[2]!, 'Retire');
+
+  assert.equal(asked.filter((id) => id === 'mark').length, marked + 1);
+
+  assert.equal(
+    JSON.stringify(badge.dispatched.at(-1)!.detail),
+    '{"outcome":"marked","connectionId":"b1","as":"retired"}',
+  );
+
+  // Both of its records are retired with it, so the card moves to the foot and stays there.
+  assert.deepEqual(handles(accounts()), ['alice', 'carol', 'bob', 'dave']);
+
+  assert.equal(
+    accounts()[3]!
+      .all()
+      .find((e) => e.className === 'state')!.textContent,
+    'Retired',
+  );
+
+  assert.deepEqual(labels(accounts()[3]!), ['Renew', 'Remove']);
 });

@@ -2,6 +2,7 @@ import {
   attestationLabel,
   externalLink,
   externalName,
+  lastProved,
   localSide,
   proofTitle,
   statusLabel,
@@ -55,7 +56,9 @@ export const styles = `
   /* The account's own name carries that weight; a link inside a line of prose does not. */
   .summary a, .method a, .additional a { font: inherit; }
   .reference { margin-top: 2px; }
-  .method { margin-top: 8px; }
+  .method, .listing { margin-top: 8px; }
+  .listing.preferred { color: #23312b; font-weight: 600; }
+  .group { margin: 20px 0 0; color: #6b786f; font-size: 11px; font-weight: 550; }
   .additional { margin-top: 2px; padding-left: 12px; }
   .joiner { display: block; width: 20px; height: 20px; margin: 8px auto -4px; color: #90a096; }
   dl { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid #e5e9e3; display: grid; grid-template-columns: auto 1fr; gap: 5px 16px; font-size: 11px; }
@@ -68,7 +71,7 @@ export const styles = `
   .action:disabled { opacity: .6; cursor: progress; }
   .action.danger:hover { border-color: #b3261e; background: #fdecea; color: #b3261e; }
   .row { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
-  .account .row { align-items: center; justify-content: start; margin-top: 12px; }
+  .account .row { align-items: center; justify-content: start; flex-wrap: wrap; margin-top: 12px; }
   .account .action { padding: 5px 10px; font-size: 12px; }
   footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin: 20px 0 -8px; color: #9aa9a0; font-size: 11px; }
   footer a { display: flex; color: inherit; }
@@ -208,6 +211,12 @@ export type Account = Evidence & {
 };
 
 /**
+ * How a holder may have an account listed: the one to lead with, an ordinary one, one they
+ * no longer use, or one that is finished and kept only as history.
+ */
+export type Listing = 'preferred' | 'current' | 'unused' | 'retired';
+
+/**
  * What the holder of the accounts shown may do from the dialog, where the page that drew
  * the badge said its reader is that holder.
  */
@@ -216,7 +225,16 @@ export interface Manage {
   connect(provider?: string): void;
   /** Removes the links named. Rejects if any could not be removed. */
   remove(ids: string[]): Promise<void>;
+  /**
+   * Lists the account one link names as asked, every record of it at once. Rejects if it
+   * could not be. Absent where the page gave no way to, and the card then offers none.
+   */
+  mark?(id: string, as: Listing): Promise<void>;
 }
+
+/** What the holder is told before an account is retired, since it cannot be undone from here. */
+const retiringNote =
+  'Retiring keeps this record as history. It will no longer read as verified, and who can read it cannot be changed afterwards.';
 
 /**
  * The links removing an account would remove. The record shown may itself be revoked while
@@ -229,6 +247,9 @@ const removable = (evidence: Account) =>
 /**
  * Under a holder's own account: renewing it, which is showing the same account again, and
  * removing it, which asks once more before it does. A removed link has nothing left to do.
+ *
+ * An account still in use can also be listed another way, or retired, which asks first as
+ * removing does. A retired one is renewed or removed and nothing else.
  */
 function manageRow(evidence: Account, manage: Manage) {
   const row = node('div', '', 'row');
@@ -241,13 +262,62 @@ function manageRow(evidence: Account, manage: Manage) {
     return control;
   };
 
+  const [named] = removable(evidence);
+  const { mark } = manage;
+
+  // A mark is the account's, set through any one of its links that still stands.
+  const listable =
+    mark !== undefined && named !== undefined && !['revoked', 'retired'].includes(evidence.status);
+
+  /** A control that lists the account one way, and says so if that did not go through. */
+  const list = (label: string, as: Listing) => {
+    const control = act(label);
+
+    control.onclick = async () => {
+      for (const other of row.children) (other as HTMLButtonElement).disabled = true;
+
+      try {
+        await mark!(named!, as);
+      } catch {
+        offer('That did not go through.');
+      }
+    };
+
+    return control;
+  };
+
   const offer = (note = '') => {
     const renew = act('Renew');
     const remove = act('Remove', true);
 
     renew.onclick = () => manage.connect(evidence.provider);
     remove.onclick = confirm;
-    row.replaceChildren(renew, remove, ...(note ? [node('span', note, 'muted')] : []));
+
+    const listing: HTMLElement[] = [];
+
+    if (listable) {
+      const retire = act('Retire');
+
+      retire.onclick = retiring;
+
+      listing.push(
+        ...(evidence.mark === 'preferred' ? [] : [list('Mark as preferred', 'preferred')]),
+        ...(evidence.mark === 'unused' ? [] : [list('Mark as unused', 'unused')]),
+        ...(evidence.mark === undefined ? [] : [list('Mark as current', 'current')]),
+        retire,
+      );
+    }
+
+    row.replaceChildren(renew, ...listing, remove, ...(note ? [node('span', note, 'muted')] : []));
+  };
+
+  const retiring = () => {
+    const cancel = act('Cancel');
+    const sure = list('Retire', 'retired');
+
+    cancel.onclick = () => offer();
+    row.replaceChildren(node('span', retiringNote, 'muted'), cancel, sure);
+    cancel.focus();
   };
 
   const confirm = () => {
@@ -425,12 +495,21 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
 
   copy.append(node('div', status, 'state'), attribution);
 
-  summary.append(verificationMark(current ? 'current' : 'inactive'), copy);
+  const retired = evidence.status === 'retired';
+
+  // A retired account claims nothing now, which is not the same as a claim that failed.
+  summary.append(verificationMark(current ? 'current' : retired ? 'pending' : 'inactive'), copy);
   const dates = node('dl');
   const dateRows: [string, number][] = [['Approved', evidence.approvedAt]];
 
   if (evidence.status === 'revoked') {
     if (evidence.revokedAt !== undefined) dateRows.push(['Revoked on', evidence.revokedAt]);
+  } else if (retired) {
+    // Two rows, always, so a reader sees any gap between them: an account retired weeks
+    // after it was last proved went unproved for those weeks.
+    dateRows.push(['Last verified', lastProved(evidence)]);
+
+    if (evidence.retiredAt !== undefined) dateRows.push(['Retired', evidence.retiredAt]);
   } else {
     // A proof that has gone unread has not reached its expiry, so it still reads forward.
     dateRows.push([
@@ -443,7 +522,7 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
   // Only artifact methods drift: a sign-in is established once and does not go stale.
   const main = evidence.attestations.external[0];
 
-  if (main.artifactUrl) dateRows.push(['Last checked', main.confirmedAt]);
+  if (main.artifactUrl && !retired) dateRows.push(['Last checked', main.confirmedAt]);
 
   for (const [label, time] of dateRows) {
     dates.append(node('dt', label), node('dd', moment(time)));
@@ -465,6 +544,15 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
     summary,
     ...attestationNote(main, names),
     ...evidence.attestations.external.slice(1).flatMap((a) => attestationNote(a, names, true)),
+    // How the holder lists the account, in their words and apart from how it was shown:
+    // nothing checked it, so it is never among the methods above it.
+    ...(evidence.status === 'revoked' || retired
+      ? []
+      : evidence.mark === 'preferred'
+        ? [node('div', 'Preferred', 'listing preferred')]
+        : evidence.mark === 'unused'
+          ? [node('div', 'No longer used', 'muted listing')]
+          : []),
     dates,
     ...(manage && removable(evidence).length ? [manageRow(evidence, manage)] : []),
   );
@@ -509,8 +597,9 @@ function addRow(manage: Manage) {
 }
 
 /**
- * The subject once, then each account linked to it on its own card, in the order they
- * were connected. Every record given is of the one subject, which the caller has checked.
+ * The subject once, then each account linked to it on its own card, in the order given.
+ * Retired accounts sit in a group of their own at the foot, under what says they are.
+ * Every record given is of the one subject, which the caller has checked.
  */
 function render(content: HTMLElement, records: Account[], manage?: Manage, later?: Later) {
   const [first] = records as [Account, ...Account[]];
@@ -532,11 +621,21 @@ function render(content: HTMLElement, records: Account[], manage?: Manage, later
     }),
   );
 
+  const retired = records.filter((record) => record.status === 'retired');
+
   content.replaceChildren(
     localCard,
     linkMark(),
-    ...records.map((record) => externalCard(record, manage, later)),
+    ...records
+      .filter((record) => record.status !== 'retired')
+      .map((record) => externalCard(record, manage, later)),
     ...(manage ? [addRow(manage)] : []),
+    ...(retired.length
+      ? [
+          node('h3', 'Retired accounts', 'group'),
+          ...retired.map((record) => externalCard(record, manage, later)),
+        ]
+      : []),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
     // the card they came from, and a second provider on this subject gets its own card.
     node(
@@ -603,7 +702,38 @@ export function openEvidenceDialog(
 
   /** Links removed from this dialog, shown as removed before the page hands over new records. */
   const removed = new Map<string, number>();
+
+  /**
+   * How accounts were listed from this dialog, in the order it was asked, shown as asked
+   * before the page hands over new records: each names every link of its account.
+   */
+  const listed: { ids: string[]; as: Listing; at: number }[] = [];
   let held: Evidence | Evidence[] | undefined;
+
+  /** A record as the listings made here leave it, each applied as the backend applies it. */
+  const relisted = (evidence: Evidence): Evidence => {
+    let record = evidence;
+
+    for (const { ids, as, at } of listed) {
+      if (['revoked', 'retired'].includes(record.status)) break;
+
+      if (!ids.includes(record.id)) {
+        // One preferred account for a holder: picking another moves the mark.
+        if (as === 'preferred' && record.mark === 'preferred')
+          record = { ...record, mark: undefined };
+
+        continue;
+      }
+
+      record =
+        as === 'retired'
+          ? // Its signed form is another document now, to be read with the records to come.
+            { ...record, status: 'retired', retiredAt: at, mark: undefined, signedUrl: undefined }
+          : { ...record, mark: as === 'current' ? undefined : as };
+    }
+
+    return record;
+  };
 
   const actions: Manage | undefined = manage && {
     // The other dialog opens over this one before this one goes, so the page behind is
@@ -619,6 +749,22 @@ export function openEvidenceDialog(
 
       if (held && dialog.open) draw(held);
     },
+    ...(manage.mark
+      ? {
+          async mark(id: string, as: Listing) {
+            await manage.mark!(id, as);
+
+            // Every link of the account the one named belongs to, as the cards group them.
+            const account = arrange([held ?? []].flat()).find((card) =>
+              removable(card).includes(id),
+            );
+
+            listed.push({ ids: account ? removable(account) : [id], as, at: Date.now() });
+
+            if (held && dialog.open) draw(held);
+          },
+        }
+      : {}),
   };
 
   root.append(dialog);
@@ -642,7 +788,7 @@ export function openEvidenceDialog(
         .map((e) =>
           removed.has(e.id) && e.status !== 'revoked'
             ? { ...e, status: 'revoked' as const, revokedAt: removed.get(e.id) }
-            : standing(e),
+            : relisted(standing(e)),
         ),
     );
 

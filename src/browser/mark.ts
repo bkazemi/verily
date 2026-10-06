@@ -100,5 +100,13 @@ export const clockMark = () =>
     ['path', { d: 'M8 4.6V8h2.6' }],
   ]);
 
+/** The box on a retired record: a lid, what it holds, and a slot to take it down by. */
+export const boxMark = () =>
+  statusMark('box', [
+    ['path', { d: 'M2.6 3.8h10.8v2.6H2.6z' }],
+    ['path', { d: 'M3.7 6.4v5.8h8.6V6.4' }],
+    ['path', { d: 'M6.6 9h2.8' }],
+  ]);
+
 /** The dash on a record that is revoked or cannot be shown. */
 export const dashMark = () => statusMark('dash', [['path', { d: 'M4.4 8h7.2' }]]);

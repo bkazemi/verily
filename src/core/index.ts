@@ -3,9 +3,17 @@ export type Visibility = 'public' | 'unlisted';
 /**
  * `unconfirmed` is a published proof that has not been read lately. It is not disproved,
  * and turns back to `verified` the moment the proof reads again. `expired` is an approval
- * that ran out, which only the holder renewing it undoes.
+ * that ran out, which only the holder renewing it undoes. `retired` is an account its
+ * holder said is finished: the record is kept as it stood at its last proof and never
+ * reads as verified again, unless that proof is made afresh.
  */
-export type Status = 'verified' | 'unconfirmed' | 'expired' | 'revoked';
+export type Status = 'verified' | 'unconfirmed' | 'expired' | 'retired' | 'revoked';
+
+/**
+ * How the holder would have an account listed: the one to lead with, or one they still
+ * control and no longer use. The holder's own statement, and no part of what was verified.
+ */
+export type Mark = 'preferred' | 'unused';
 
 /** What a site links: one of its accounts, a single page, or the site itself. */
 export type LocalKind = 'account' | 'page' | 'site';
@@ -115,6 +123,13 @@ export interface Connection {
   attestations?: Attestations;
   /** The proof itself, for a method whose artifact this backend publishes rather than reads. */
   proof?: string;
+  /** Set and cleared by the holder. Absent is an ordinary current account. */
+  mark?: Mark;
+  /**
+   * When the holder said the account is finished. From then the record is frozen at its
+   * last proof: never renewed by another method, never reread, never verified.
+   */
+  retiredAt?: number;
 }
 
 export interface Flow {
@@ -449,10 +464,17 @@ export interface Evidence {
   visibilityApprovedAt: number;
   expiresAt: number;
   revokedAt?: number;
+  /**
+   * What the holder says of the account, and when they said it was finished. Both are the
+   * holder's statements, beside the attestations and never among them: nothing checked them.
+   */
+  mark?: Mark;
+  retiredAt?: number;
   evidenceUrl: string;
   /**
    * Where this record can be had signed, on a verifier that signs. Only a public record
-   * that stands has a signed form: once saved, a signed record cannot be taken back.
+   * that stands, or one retired, has a signed form: once saved, a signed record cannot be
+   * taken back.
    */
   signedUrl?: string;
 }
@@ -473,6 +495,9 @@ export const freshnessMs = 7 * 86400000;
  */
 export function status(connection: Connection, now: number, freshness = freshnessMs): Status {
   if (connection.revokedAt !== undefined) return 'revoked';
+
+  // Frozen at its last proof, so neither its expiry nor its freshness is read again.
+  if (connection.retiredAt !== undefined) return 'retired';
 
   if (now >= connection.expiresAt) return 'expired';
 
@@ -498,11 +523,24 @@ export function fresh(attestation: Attestation, now: number, freshness = freshne
 }
 
 /**
+ * The date a retired record stands on: when its account was last proved. A sign-in was
+ * proved when it happened, and a published proof when it was last read.
+ */
+export function lastProved(evidence: Pick<Evidence, 'authenticatedAt' | 'attestations'>): number {
+  const main = evidence.attestations.external[0];
+
+  return main.artifactUrl ? main.confirmedAt : evidence.authenticatedAt;
+}
+
+/**
  * The word for a record's state. Evidence can be read after it was issued, so an approval
  * that has run out since reads as expired whatever status it was issued with.
  */
 export function statusLabel(evidence: Pick<Evidence, 'status' | 'expiresAt'>, now: number): string {
   if (evidence.status === 'revoked') return 'Revoked';
+
+  // Before expiry: a retired record's approval has long run out, and that is not its state.
+  if (evidence.status === 'retired') return 'Retired';
 
   if (evidence.status === 'expired' || evidence.expiresAt <= now) return 'Expired';
 

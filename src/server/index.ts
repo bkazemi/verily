@@ -6,6 +6,7 @@ import {
   isArtifactProvider,
   isCodeProvider,
   isRedirectProvider,
+  lastProved,
   localSide,
   proofTitle,
   providerMethod,
@@ -422,20 +423,34 @@ function evidencePage(
         e.external.kind === 'mailbox' ? undefined : e.external.id,
         externalNotes(e.attestations, names),
       ) +
-      times([
-        ['Approved', e.approvedAt],
-        ['Authenticated', e.authenticatedAt],
-        [current ? 'Valid until' : 'Expired on', e.status === 'revoked' ? undefined : e.expiresAt],
-        ['Revoked on', e.revokedAt],
-        // Only a method that publishes an artifact drifts; a sign-in does not go stale.
-        [
-          'Last checked',
-          e.attestations.external[0].artifactUrl
-            ? e.attestations.external[0].confirmedAt
-            : undefined,
-        ],
-        ['Sharing link expires', e.linkExpiresAt],
-      ]) +
+      times(
+        e.status === 'retired'
+          ? [
+              ['Approved', e.approvedAt],
+              // Two rows, always, so a reader sees any gap between them: an account retired
+              // weeks after it was last proved went unproved for those weeks.
+              ['Last verified', lastProved(e)],
+              ['Retired', e.retiredAt],
+              ['Sharing link expires', e.linkExpiresAt],
+            ]
+          : [
+              ['Approved', e.approvedAt],
+              ['Authenticated', e.authenticatedAt],
+              [
+                current ? 'Valid until' : 'Expired on',
+                e.status === 'revoked' ? undefined : e.expiresAt,
+              ],
+              ['Revoked on', e.revokedAt],
+              // Only a method that publishes an artifact drifts; a sign-in does not go stale.
+              [
+                'Last checked',
+                e.attestations.external[0].artifactUrl
+                  ? e.attestations.external[0].confirmedAt
+                  : undefined,
+              ],
+              ['Sharing link expires', e.linkExpiresAt],
+            ],
+      ) +
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
     ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with OpenPGP key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
@@ -457,9 +472,12 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
   const names = { site: d.siteName, provider: d.providerName };
   const local = localSide(d.local, d.siteName);
 
+  // A retired record did not stand when it was signed, and its heading says so first.
+  const retired = d.version === 2;
+
   return page(
     base,
-    'Signed record',
+    retired ? 'Retired connection' : 'Signed record',
     `<p>${escape(d.verifierName)} signed this record. It shows what stood when it was signed, not what stands now.</p>` +
       card(
         local.heading,
@@ -475,11 +493,20 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
         d.external.kind === 'mailbox' ? undefined : d.external.id,
         externalNotes(d.attestations, names),
       ) +
-      times([
-        ['Signed', d.issuedAt],
-        ['Approved', d.approvedAt],
-        ['Valid until', d.expiresAt],
-      ]) +
+      times(
+        retired
+          ? [
+              ['Signed', d.issuedAt],
+              ['Approved', d.approvedAt],
+              ['Last verified', lastProved(d)],
+              ['Retired', d.retiredAt],
+            ]
+          : [
+              ['Signed', d.issuedAt],
+              ['Approved', d.approvedAt],
+              ['Valid until', d.expiresAt],
+            ],
+      ) +
       `<p class="fine">Signing key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>.</p>
     <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
   );
@@ -607,7 +634,8 @@ export function createVerily(options: ServerOptions) {
   /**
    * The methods a page offers. A flow on an existing record stays in its namespace, so
    * where the holder is signed in that record narrows the list; removing a link from the
-   * external side refuses a standing proof, which anybody can hand back.
+   * external side refuses a standing proof, which anybody can hand back. A retired record
+   * is renewed by the method it was first shown by, so that one is offered alone.
    */
   async function offer(
     kind: Flow['kind'],
@@ -616,12 +644,25 @@ export function createVerily(options: ServerOptions) {
     requested: string | null,
   ): Promise<Provider[]> {
     let namespace = requested ?? undefined;
+    let only: string | undefined;
 
-    if (user && id) namespace = (await service.read(id, user)).provider;
+    if (user && id) {
+      const held = await service.read(id, user);
+
+      namespace = held.provider;
+
+      if (held.status === 'retired') {
+        // Who can read a retired record is frozen with the rest of it.
+        if (kind === 'visibility') throw new Unavailable();
+
+        only = held.attestations.external[0].method;
+      }
+    }
 
     const offered = (user ? permitted(user) : service.providers).filter(
       (p) =>
         (namespace === undefined || p.id === namespace) &&
+        (only === undefined || providerMethod(p) === only) &&
         !(['revoke', 'share-revoke'].includes(kind) && isArtifactProvider(p) && p.expect),
     );
 
@@ -1273,7 +1314,7 @@ export function createVerily(options: ServerOptions) {
         }
 
         const management = path.match(
-          /^\/connections\/([^/]+)\/(disconnect|share|share-revoke|visibility)$/,
+          /^\/connections\/([^/]+)\/(disconnect|mark|share|share-revoke|visibility)$/,
         );
 
         if (management) {
@@ -1286,8 +1327,15 @@ export function createVerily(options: ServerOptions) {
             return json({ ok: true });
           }
 
+          // Acts on the account the record names: every record of it this holder has.
+          if (management[2] === 'mark') {
+            await service.mark(id, user, data.as as 'preferred' | 'current' | 'unused' | 'retired');
+
+            return json({ ok: true });
+          }
+
           if (management[2] === 'visibility') {
-            await service.read(id, user);
+            if ((await service.read(id, user)).status === 'retired') throw new Unavailable();
 
             return json({ url: `${service.baseUrl}/visibility/${id}` });
           }

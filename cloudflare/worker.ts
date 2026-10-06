@@ -1,5 +1,11 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
-import { externalName, localSide, statusLabel, type Evidence } from '../src/core/index.js';
+import {
+  externalName,
+  lastProved,
+  localSide,
+  statusLabel,
+  type Evidence,
+} from '../src/core/index.js';
 import { logo } from '../src/logo.js';
 import { escape } from '../src/server/escape.js';
 import { styleVersion } from '../src/server/style.js';
@@ -15,7 +21,7 @@ import {
 } from '../src/server/index.js';
 import { CloudflareStorage } from './storage.js';
 import { OwnerAuth } from './auth.js';
-import { registry, sessionCookie, Sites, type Site, peek } from './sites.js';
+import { registry, sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
 import { allow, client, limits, prune } from './limits.js';
 import type { LocalAccount, LocalKind } from '../src/core/index.js';
 
@@ -124,7 +130,7 @@ function dailyMail(configured: string | number | undefined): number | undefined 
 }
 
 /** The library's own management routes, which a site session does not get. */
-const management = /^\/api\/verily\/connections\/[^/]+\/(disconnect|share|share-revoke)$/;
+const management = /^\/api\/verily\/connections\/[^/]+\/(disconnect|mark|share|share-revoke)$/;
 
 /** GETs that create state, and so are limited like every POST. */
 const limitedGets = ['/begin', '/start', '/api/verily/sessions', '/api/verily/callback'];
@@ -134,11 +140,18 @@ const maxBodyBytes = 65536;
 
 /**
  * What the dialogs on a registered site's own page may ask for: the methods, a connect
- * flow's start, state, proof and approval, and the removal of one of the holder's own
- * links. Everything else stays same-origin.
+ * flow's start, state, proof and approval, and the removal or the listing of one of the
+ * holder's own accounts. Everything else stays same-origin.
  */
 const dialogPaths =
-  /^\/api\/verily\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/disconnect)$/;
+  /^\/api\/verily\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/(disconnect|mark))$/;
+
+/** How a holder may have an account listed, as the library's mark route takes it. */
+const listings: readonly Listing[] = ['preferred', 'current', 'unused', 'retired'];
+
+/** Said beside the control that retires an account, since nothing here asks twice. */
+const retiringNote =
+  'Retiring keeps this record as history. It will no longer read as verified, and who can read it cannot be changed afterwards.';
 
 /** Carries a flow's binding for a page on another origin, where the cookie cannot. */
 const flowHeader = 'X-Verily-Flow';
@@ -530,6 +543,8 @@ export class VerilyStore {
         return html('Unavailable', '', 403);
 
       if (url.pathname === '/disconnect') return this.disconnect(request);
+
+      if (url.pathname === '/mark') return this.mark(request);
     }
 
     if (request.method === 'GET' && url.pathname === '/site/connections') return this.read(request);
@@ -557,8 +572,9 @@ export class VerilyStore {
     }
 
     if (url.pathname.startsWith('/api/verily/')) {
-      // A site session removes a link through this worker, which reports it back to the
-      // site, and has no sharing links. The library's routes would do neither.
+      // A site session removes a link, or lists an account another way, through this
+      // worker, which reports it back to the site, and has no sharing links. The library's
+      // routes would do neither.
       if (
         request.method === 'POST' &&
         management.test(url.pathname) &&
@@ -596,14 +612,24 @@ export class VerilyStore {
     if (found && !found.session.closed && !found.session.operation)
       return this.settings(found.session.local, this.site(found.session));
 
-    // A disconnect that failed partway is the one thing left to do with this session.
-    if (found?.session.operation && found.session.operation.finishedAt === undefined)
-      return html(
-        'Disconnect not finished',
-        `<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(found.session.operation.connection)}"><button>Try again</button></form>`,
-        200,
-        'single',
-      );
+    // A disconnect or a mark that failed partway is the one thing left to do with this session.
+    if (found?.session.operation && found.session.operation.finishedAt === undefined) {
+      const { connection, mark } = found.session.operation;
+
+      return mark
+        ? html(
+            'Change not finished',
+            `<p>Changing how this account is listed did not finish.</p><form action="/mark" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><input type="hidden" name="as" value="${escape(mark)}"><button>Try again</button></form>`,
+            200,
+            'single',
+          )
+        : html(
+            'Disconnect not finished',
+            `<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><button>Try again</button></form>`,
+            200,
+            'single',
+          );
+    }
 
     if (await this.auth.authenticated(request)) return this.settings(this.local);
 
@@ -826,7 +852,8 @@ export class VerilyStore {
     if (!found || !connection) return html('Unavailable', '', 404);
 
     const { key, session } = found;
-    let current = session.operation?.connection === connection ? session : undefined;
+    const held = session.operation;
+    let current = held?.connection === connection && !held.mark ? session : undefined;
 
     if (!current) {
       const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
@@ -846,6 +873,51 @@ export class VerilyStore {
     return see(
       this.sites.returnUrl(this.site(session), session.local, session.txn, {
         operation: 'disconnect',
+        outcome: 'complete',
+        connection,
+        visibility: current.operation!.visibility,
+        finishedAt: current.operation!.finishedAt!,
+      }),
+    );
+  }
+
+  /**
+   * Lists an account another way, or retires it, from a site session, and reports it back
+   * to the site as a disconnect is reported: pending on the session first, then changed,
+   * then complete. Asking again for what already holds changes nothing, so a retry is safe.
+   */
+  private async mark(request: Request): Promise<Response> {
+    const found = await this.sites.session(request);
+    const fields = new URLSearchParams(await request.text());
+    const connection = fields.get('connection') ?? '';
+    const as = listings.find((listing) => listing === fields.get('as'));
+
+    if (!found || !connection || !as) return html('Unavailable', '', 404);
+
+    const { key, session } = found;
+    const held = session.operation;
+    let current = held?.connection === connection && held.mark === as ? session : undefined;
+
+    if (!current) {
+      const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
+
+      // Checked before anything is held: what cannot be done must not be left pending.
+      if (!owned || owned.status === 'revoked' || (owned.status === 'retired' && as !== 'retired'))
+        return html('Unavailable', '', 404);
+
+      current = await this.sites.pending(key, connection, owned.visibility, as);
+
+      if (!current) return html('Unavailable', '', 404);
+    }
+
+    if (current.operation!.finishedAt === undefined) {
+      await this.app.service.mark(connection, session.local, as);
+      current = await this.sites.completed(key);
+    }
+
+    return see(
+      this.sites.returnUrl(this.site(session), session.local, session.txn, {
+        operation: 'mark',
         outcome: 'complete',
         connection,
         visibility: current.operation!.visibility,
@@ -892,12 +964,27 @@ export class VerilyStore {
         ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>`
         : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
 
+    const retired = e.status === 'retired';
+    const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+    // How the holder lists the account, which acts on every record of it they have. A
+    // site's holder is sent back to the site with the change, as with a disconnect.
+    const listing = ['revoked', 'retired'].includes(e.status)
+      ? ''
+      : `<form action="${site ? '/mark' : `/api/verily/connections/${escape(e.id)}/mark`}" method="post">${site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : ''}
+      ${e.mark === 'preferred' ? '' : '<button name="as" value="preferred">Mark as preferred</button>'}
+      ${e.mark === 'unused' ? '' : '<button name="as" value="unused">Mark as unused</button>'}
+      ${e.mark === undefined ? '' : '<button name="as" value="current">Mark as current</button>'}
+      <button name="as" value="retired">Retire</button>
+      <p class="fine">${escape(retiringNote)}</p></form>`;
+
     const actions =
       site && e.status === 'revoked'
         ? ''
         : `<p><a href="/api/verily/renew/${escape(e.id)}">Renew this connection</a></p>
       <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
-      ${site?.visibility?.length === 1 ? '' : `<p><a href="/api/verily/visibility/${escape(e.id)}">Change visibility</a></p>`}
+      ${retired || site?.visibility?.length === 1 ? '' : `<p><a href="/api/verily/visibility/${escape(e.id)}">Change visibility</a></p>`}
+      ${listing}
       ${
         site
           ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`
@@ -908,7 +995,12 @@ export class VerilyStore {
       <h3>${escape(externalName(e.external))}</h3>
       <dl><dt>Status</dt><dd>${escape(statusLabel(e, Date.now()))}</dd>
       <dt>Visibility</dt><dd>${escape(e.visibility)}</dd>
-      <dt>Expires</dt><dd>${escape(new Date(e.expiresAt).toISOString().replace(/\.\d{3}Z$/, 'Z'))}</dd></dl>
+      ${
+        retired
+          ? `<dt>Last verified</dt><dd>${escape(moment(lastProved(e)))}</dd><dt>Retired</dt><dd>${escape(moment(e.retiredAt!))}</dd>`
+          : `<dt>Expires</dt><dd>${escape(moment(e.expiresAt))}</dd>`
+      }</dl>
+      ${e.mark === 'preferred' ? '<p class="fine">Preferred</p>' : e.mark === 'unused' ? '<p class="fine">No longer used</p>' : ''}
       ${shown}
       ${actions}</section>`;
   }

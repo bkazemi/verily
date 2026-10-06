@@ -13,7 +13,7 @@ import {
   type FlowView,
   type Methods,
 } from './connect-dialog.js';
-import { openEvidenceDialog, type Account, type Manage } from './evidence-dialog.js';
+import { openEvidenceDialog, type Account, type Listing, type Manage } from './evidence-dialog.js';
 import { drawSignedWith, standing, watchSigned } from './signed.js';
 
 export type { Evidence } from '../core/index.js';
@@ -172,9 +172,11 @@ const live = (evidence: Evidence) =>
   evidence.status === 'verified' && evidence.expiresAt > Date.now();
 
 /**
- * A subject's accounts, one entry for each, in the order they were connected, earliest
- * first. Records are not accounts: the same account can stand on several, shown a second
- * way, or revoked once and connected again. Those are one account and get one card.
+ * A subject's accounts, one entry for each. The one its holder prefers comes first, then
+ * the rest in the order they were connected, earliest first, then those the holder no
+ * longer uses, and last those retired. Records are not accounts: the same account can
+ * stand on several, shown a second way, or revoked once and connected again. Those are one
+ * account and get one card.
  *
  * Where any of an account's records is verified now, the earliest of those speaks for it,
  * and the ways the others show it are listed beneath as other methods. Its lapsed
@@ -217,15 +219,28 @@ function accounts(records: Evidence[]): Account[] {
         sources: verified.length ? verified : [base],
       };
     })
-    .sort((a, b) => a.connectedAt - b.connectedAt);
+    .sort((a, b) => place(a) - place(b) || a.connectedAt - b.connectedAt);
 }
 
 /**
- * One subject's accounts as a single pill: the first connected, then how many more stand
- * behind it. The order is the order they were connected in, which a renewal never changes.
- * Only accounts verified now are counted, and one of those leads when the first connected
- * has lapsed, so the pill never puts a lapsed account forward while a good one sits behind
- * a number. The lapsed ones are all still there in the dialog, each in its place.
+ * Where an account is listed among a subject's others, before the order they were
+ * connected in. This is all there is to preferring an account: there is no separate pin.
+ */
+function place(account: Evidence): number {
+  if (account.status === 'retired') return 3;
+
+  return account.mark === 'preferred' ? 0 : account.mark === 'unused' ? 2 : 1;
+}
+
+/**
+ * One subject's accounts as a single pill: the first of them, then how many more stand
+ * behind it. The order is the holder's preferred account, then the order the rest were
+ * connected in, which a renewal never changes, then the ones no longer used.
+ * Only accounts verified now are counted, and one of those leads when the first has
+ * lapsed, so the pill never puts a lapsed account forward while a good one sits behind
+ * a number. The lapsed ones are all still there in the dialog, each in its place. A
+ * preferred account that has lapsed keeps its mark, and leads again once renewed. A
+ * retired account is never counted, and leads only where nothing else is shown.
  *
  * `load` gives the records afresh when the dialog opens and as it stays open.
  */
@@ -687,6 +702,15 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
       return ask(`/connections/${encodeURIComponent(id)}/disconnect`, {});
     },
+    /**
+     * Says how the holder would have an account listed, or retires it. Names one record
+     * and acts on the account: every record of it the holder has.
+     */
+    mark(id: string, as: Listing) {
+      if (remote) session = undefined;
+
+      return ask(`/connections/${encodeURIComponent(id)}/mark`, { as });
+    },
     issueShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share`, {}),
     revokeShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share-revoke`, {}),
   };
@@ -830,7 +854,12 @@ function validEvidence(value: unknown): value is Evidence {
       ['account', 'key', 'page', 'mailbox'].includes(String(value.external.kind))) &&
     (value.revokedAt === undefined ||
       (typeof value.revokedAt === 'number' && Number.isFinite(value.revokedAt))) &&
-    ['verified', 'unconfirmed', 'expired', 'revoked'].includes(String(value.status)) &&
+    ['verified', 'unconfirmed', 'expired', 'retired', 'revoked'].includes(String(value.status)) &&
+    // A retired record stands on its dates, so one that does not say when is not one.
+    (value.status === 'retired'
+      ? typeof value.retiredAt === 'number' && Number.isFinite(value.retiredAt)
+      : value.retiredAt === undefined) &&
+    (value.mark === undefined || ['preferred', 'unused'].includes(String(value.mark))) &&
     ['public', 'unlisted'].includes(String(value.visibility)) &&
     (value.connectedAt === undefined ||
       (typeof value.connectedAt === 'number' && Number.isFinite(value.connectedAt))) &&
@@ -1003,6 +1032,10 @@ if (typeof customElements !== 'undefined' && !customElements.get('verily-badge')
                 await client.disconnect(id);
                 changed({ outcome: 'removed', connectionId: id });
               }
+            },
+            mark: async (id, as) => {
+              await client.mark(id, as);
+              changed({ outcome: 'marked', connectionId: id, as });
             },
           });
         } else managers.delete(this);

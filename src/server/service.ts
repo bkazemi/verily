@@ -19,6 +19,7 @@ import {
   type FlowResult,
   type Limit,
   type LocalAccount,
+  type Mark,
   type Method,
   type Provider,
   type Records,
@@ -170,17 +171,33 @@ export class VerilyService {
    * A public record that stands, signed as of now. Signed when asked for, not when
    * approved, so a signed record says the record stood on the day it was taken and none can be
    * made once it is removed.
+   *
+   * A retired record is signed too, as what it is: the durable form of the claim that the
+   * account was the holder's when it was last proved. It did not stand when it was signed,
+   * so it is a version of its own that says so, which a reader of the first refuses.
    */
   async signed(id: string): Promise<SignedEvidence> {
     const current = await this.signer();
 
     if (!current) throw new Unavailable();
 
-    const { status, revokedAt: _revokedAt, signedUrl: _signedUrl, ...record } = await this.read(id);
+    const {
+      status,
+      revokedAt: _revokedAt,
+      signedUrl: _signedUrl,
+      mark: _mark,
+      retiredAt,
+      ...record
+    } = await this.read(id);
+
+    const document = { type: 'verily-evidence' as const, issuedAt: this.now(), ...record };
+
+    if (status === 'retired')
+      return current.sign({ ...document, version: 2, status, retiredAt: retiredAt! });
 
     if (status !== 'verified') throw new Unavailable();
 
-    return current.sign({ type: 'verily-evidence', version: 1, issuedAt: this.now(), ...record });
+    return current.sign({ ...document, version: 1 });
   }
 
   /** What a signed record says, if this instance signed it. */
@@ -329,6 +346,9 @@ export class VerilyService {
         )
           throw new Unavailable();
 
+        // Who can read a retired record is frozen with the rest of it.
+        if (kind === 'visibility' && connection.retiredAt !== undefined) throw new Unavailable();
+
         subject = connection.local;
 
         if (['renew', 'visibility'].includes(kind)) account = connection.external;
@@ -411,6 +431,7 @@ export class VerilyService {
       .filter(
         (c) =>
           c.revokedAt === undefined &&
+          c.retiredAt === undefined &&
           c.local.id === local.id &&
           c.provider === provider.id &&
           (c.attestations?.external[0].method ?? 'oauth') !== provider.method,
@@ -465,6 +486,10 @@ export class VerilyService {
    * Removing a link from the external side takes a method whose proof is fresh. A standing
    * proof, such as a link back, is there for anyone to point at: handing one back shows
    * the link exists, not that whoever handed it back holds the account.
+   *
+   * A retired record is renewed by the method it was first shown by and no other. Another
+   * would be listed beneath a main proof nobody has read since, and the record would come
+   * back unconfirmed.
    */
   private chosen(
     kind: Flow['kind'],
@@ -482,6 +507,8 @@ export class VerilyService {
     } else provider = this.resolve(choice.provider, choice.method);
 
     if (connection && provider.id !== connection.provider) throw new Unavailable();
+
+    if (kind === 'renew' && connection && !revives(connection, provider)) throw new Unavailable();
 
     if (
       ['revoke', 'share-revoke'].includes(kind) &&
@@ -1045,6 +1072,7 @@ export class VerilyService {
 
         // The id exists before the record does, because a hosted proof is addressed by it.
         const connectionId = secret();
+        const mark = await this.accountMark(tx, flow.local!, provider.id, flow.external!);
 
         connection = {
           id: connectionId,
@@ -1062,6 +1090,8 @@ export class VerilyService {
             external: [this.attestation(flow, provider, connectionId)],
           },
           proof: hosted(provider) ? flow.artifact : undefined,
+          // The account's other records say how the holder has it listed, and so does this.
+          ...(mark ? { mark } : {}),
         };
       } else {
         const existing = await tx.get('connections', flow.connectionId!);
@@ -1083,12 +1113,35 @@ export class VerilyService {
           // subject snapshot refreshes because the holder just approved what it shows.
           if (flow.local!.id !== existing.local.id) throw new Unavailable();
 
+          // Asked again here: the record may have been retired since the flow started.
+          if (!revives(existing, provider)) throw new Unavailable();
+
           this.recordMethod(connection, flow, provider);
+
+          if (connection.retiredAt !== undefined) {
+            // Live again on the strength of the proof just made and nothing older. A record
+            // made for the account while this one sat retired may have been marked since,
+            // and this one would otherwise be drawn in its place and hide that choice.
+            const mark = await this.accountMark(
+              tx,
+              connection.local,
+              connection.provider,
+              connection.external,
+              connection.id,
+            );
+
+            delete connection.retiredAt;
+            delete connection.mark;
+
+            if (mark) connection.mark = mark;
+          }
         } else if (flow.kind === 'revoke') {
           connection.revokedAt = this.now();
           connection.revocationReason = 'external';
         } else if (flow.kind === 'visibility') {
           if (allowed && !allowed.includes(visibility)) throw new Unavailable();
+
+          if (connection.retiredAt !== undefined) throw new Unavailable();
 
           connection.visibility = visibility;
           connection.visibilityApprovedAt = this.now();
@@ -1159,10 +1212,12 @@ export class VerilyService {
       };
 
     const [main, ...rest] = connection.attestations.external;
+    // A retired record is as it stood when it was retired, and nothing is read after that.
+    const at = connection.retiredAt ?? this.now();
 
     return {
       ...connection.attestations,
-      external: [main, ...rest.filter((a) => fresh(a, this.now(), this.freshness))],
+      external: [main, ...rest.filter((a) => fresh(a, at, this.freshness))],
     };
   }
 
@@ -1188,10 +1243,15 @@ export class VerilyService {
       visibilityApprovedAt: connection.visibilityApprovedAt,
       expiresAt: connection.expiresAt,
       revokedAt: connection.revokedAt,
+      // How an account is listed says nothing once its record is removed or retired.
+      ...(connection.mark && !['revoked', 'retired'].includes(standing)
+        ? { mark: connection.mark }
+        : {}),
+      ...(standing === 'retired' ? { retiredAt: connection.retiredAt } : {}),
       evidenceUrl,
       ...(this.options.signingKey !== undefined &&
       connection.visibility === 'public' &&
-      standing === 'verified'
+      ['verified', 'retired'].includes(standing)
         ? { signedUrl: `${evidenceUrl}?format=signed` }
         : {}),
     };
@@ -1201,7 +1261,8 @@ export class VerilyService {
    * The live record a connect flow reproves by another method, if there is one: the same
    * subject linked to the same account on the same provider, first shown some other way.
    * The same method again is a second record, as it always was; renewing is how that
-   * one is extended.
+   * one is extended. A retired record is never joined: it is frozen, so proving its account
+   * another way makes a new record and leaves that one as history behind it.
    */
   private async joins(tx: Transaction, flow: Flow): Promise<Connection | undefined> {
     const provider = this.providerOf(flow);
@@ -1210,6 +1271,7 @@ export class VerilyService {
       .filter(
         (c) =>
           c.revokedAt === undefined &&
+          c.retiredAt === undefined &&
           c.local.id === flow.local!.id &&
           c.provider === provider.id &&
           (c.attestations?.external[0].method ?? 'oauth') !== providerMethod(provider) &&
@@ -1409,6 +1471,117 @@ export class VerilyService {
     });
   }
 
+  /**
+   * The holder's records of one account that are not revoked. A mark belongs to an account,
+   * and an account can stand on several records: shown a second way on a record of its own,
+   * or removed once and connected again. They are told apart as a badge tells them, by
+   * provider and the id the provider gave.
+   */
+  private async account(
+    tx: Transaction,
+    local: LocalAccount,
+    provider: string,
+    external: ExternalAccount,
+  ): Promise<Connection[]> {
+    return (await tx.list('connections')).filter(
+      (c) =>
+        c.revokedAt === undefined &&
+        c.local.id === local.id &&
+        c.provider === provider &&
+        c.external.id === external.id,
+    );
+  }
+
+  /**
+   * The mark an account's records carry, for a record about to stand beside them: every
+   * one neither revoked nor retired, lapsed ones included, since those hold a mark that
+   * must survive their own renewal.
+   */
+  private async accountMark(
+    tx: Transaction,
+    local: LocalAccount,
+    provider: string,
+    external: ExternalAccount,
+    except?: string,
+  ): Promise<Mark | undefined> {
+    return (await this.account(tx, local, provider, external)).find(
+      (c) => c.id !== except && c.retiredAt === undefined && c.mark !== undefined,
+    )?.mark;
+  }
+
+  /**
+   * Marks an account as the holder would have it listed, or retires it. Names one record
+   * and acts on the account, or a mark on one record could vanish behind a sibling, and
+   * retiring one could leave the account reading as verified through another.
+   *
+   * No fresh proof is asked for. A mark never widens who can read a record or makes one
+   * read as verified, and a holder retiring an account often can no longer prove it.
+   */
+  async mark(
+    id: string,
+    local: LocalAccount,
+    as: 'preferred' | 'current' | 'unused' | 'retired',
+  ): Promise<void> {
+    if (!['preferred', 'current', 'unused', 'retired'].includes(as)) throw new Unavailable();
+
+    await this.transaction(async (tx) => {
+      const named = await this.owned(tx, id, local);
+
+      if (named.revokedAt !== undefined) throw new Unavailable();
+
+      // A record already retired is left exactly as it is: its dates are what it stands on.
+      const records = (await this.account(tx, local, named.provider, named.external)).filter(
+        (c) => c.retiredAt === undefined,
+      );
+
+      if (as === 'retired') {
+        // Whatever its status: a lapsed one left live could be read again later and bring
+        // the account back. Nothing is revoked.
+        for (const record of records) {
+          record.retiredAt = this.now();
+          delete record.mark;
+          await tx.put('connections', record.id, record);
+          await this.audit(tx, record.id, 'retire', 'local');
+        }
+
+        return;
+      }
+
+      // Only a retired account is left, and that is listed as retired and nothing else.
+      if (!records.length) throw new Unavailable();
+
+      const mark = as === 'current' ? undefined : as;
+
+      for (const record of records) {
+        if (record.mark === mark) continue;
+
+        if (mark) record.mark = mark;
+        else delete record.mark;
+
+        await tx.put('connections', record.id, record);
+        await this.audit(tx, record.id, `mark-${as}`, 'local');
+      }
+
+      if (as !== 'preferred') return;
+
+      // One preferred account per holder: picking another moves the mark. Only that mark
+      // is taken from the others, and what they say of being unused is left alone.
+      for (const other of await tx.list('connections')) {
+        if (
+          other.local.id !== local.id ||
+          other.revokedAt !== undefined ||
+          other.mark !== 'preferred' ||
+          records.some((record) => record.id === other.id)
+        )
+          continue;
+
+        delete other.mark;
+        await tx.put('connections', other.id, other);
+        await this.audit(tx, other.id, 'mark-current', 'local');
+      }
+    });
+  }
+
   async share(
     id: string,
     local: LocalAccount,
@@ -1485,6 +1658,8 @@ export class VerilyService {
    * `budget` bounds the reads per run, since providers rate-limit and the alarm this runs
    * on is shared. Oldest first, so nothing starves however many connections are waiting.
    *
+   * A retired record is never asked about: its proof is no longer expected to be there.
+   *
    * Returns how many were confirmed. A connection revoked here is not one of them.
    */
   async recheck(budget = 5): Promise<number> {
@@ -1495,7 +1670,13 @@ export class VerilyService {
 
     const due = await this.transaction(async (tx) =>
       (await tx.list('connections'))
-        .filter((c) => c.revokedAt === undefined && c.expiresAt > now && c.attestations)
+        .filter(
+          (c) =>
+            c.revokedAt === undefined &&
+            c.retiredAt === undefined &&
+            c.expiresAt > now &&
+            c.attestations,
+        )
         .flatMap((connection) =>
           connection
             .attestations!.external.map((attestation) => ({
@@ -1572,8 +1753,15 @@ export class VerilyService {
     return this.transaction(async (tx) => {
       const current = await tx.get('connections', connection.id);
 
-      // It may have been revoked or reproved while the fetch was in flight.
-      if (!current?.attestations || current.revokedAt !== undefined) return 0;
+      // It may have been revoked or reproved while the fetch was in flight. Or retired, and
+      // then an answer written now would move the proof date it was frozen with, or revoke
+      // it on a withdrawal.
+      if (
+        !current?.attestations ||
+        current.revokedAt !== undefined ||
+        current.retiredAt !== undefined
+      )
+        return 0;
 
       const [first, ...rest] = current.attestations.external;
       const held = main ? first : rest.find((a) => a.method === method);
@@ -1611,7 +1799,11 @@ export class VerilyService {
     ]);
   }
 
-  /** Run periodically. Pending secrets expire immediately; historical evidence defaults to 90 days. */
+  /**
+   * Run periodically. Pending secrets expire immediately; historical evidence defaults to 90
+   * days. A retired record is history its holder asked to keep, so it stays for as long as
+   * it is not revoked, and once revoked goes like any other.
+   */
   async prune(retentionMs = 90 * 86400000): Promise<void> {
     if (!Number.isSafeInteger(retentionMs) || retentionMs < 0) throw new Error('Invalid retention');
 
@@ -1627,7 +1819,11 @@ export class VerilyService {
       const audit = await tx.list('audit');
 
       for (const connection of await tx.list('connections')) {
-        if ((connection.revokedAt ?? connection.expiresAt) + retentionMs <= now) {
+        const ended =
+          connection.revokedAt ??
+          (connection.retiredAt === undefined ? connection.expiresAt : Infinity);
+
+        if (ended + retentionMs <= now) {
           await tx.delete('connections', connection.id);
           await tx.delete('shares', connection.id);
         } else if (connection.connectedAt === undefined) {
@@ -1695,6 +1891,18 @@ function connected(connection: Connection): number {
       connection.visibilityApprovedAt,
       ...(connection.attestations?.external.map((a) => a.confirmedAt) ?? []),
     )
+  );
+}
+
+/**
+ * Whether a renewal by this method may go ahead. Any may renew a live record. A retired one
+ * is revived by the method it was first shown by alone, which replaces the proof the
+ * record is judged by.
+ */
+function revives(connection: Connection, provider: Provider): boolean {
+  return (
+    connection.retiredAt === undefined ||
+    (connection.attestations?.external[0].method ?? 'oauth') === providerMethod(provider)
   );
 }
 

@@ -1,4 +1,4 @@
-import { signedBy, verifySigned, type Evidence } from '../core/index.js';
+import { signedBy, verifySigned, type Evidence, type SignedDocument } from '../core/index.js';
 
 /**
  * What came of checking a record against its signed record in this browser: the same
@@ -52,12 +52,16 @@ function canonical(value: unknown): string {
     .join(',')}}`;
 }
 
-/** What a record claims, apart from whether it stands now: all a signed record can bear out. */
+/**
+ * What a record claims, apart from whether it stands now: all a signed record can bear out.
+ * The holder's mark is no claim of the verifier's and is in no signed record.
+ */
 function claims(record: object): string {
   const {
     status: _status,
     revokedAt: _revokedAt,
     signedUrl: _signedUrl,
+    mark: _mark,
     links: _links,
     type: _type,
     version: _version,
@@ -187,14 +191,30 @@ async function check(evidence: Evidence): Promise<Checked> {
     )
       return { state: 'invalid' };
 
+    // A retired record is signed as a version of its own, and a record that stands as the
+    // other. One served for the other is the record caught between the two, and no verdict.
+    if ((document.version === 2) !== (evidence.status === 'retired'))
+      return { state: 'unchecked', why: 'unreadable' };
+
     // The record as it was signed. Whether it stands now is no part of a signed record, so
-    // that alone is kept from the record as it was read.
-    const { type: _type, version: _version, issuedAt: _issuedAt, ...said } = document;
+    // that is kept from the record as it was read, and so is the holder's mark, which is in
+    // no signed record: whatever a document says of either is left behind.
+    const {
+      type: _type,
+      version: _version,
+      issuedAt: _issuedAt,
+      status: _status,
+      retiredAt: _retiredAt,
+      mark: _mark,
+      ...said
+    } = document as SignedDocument & Partial<Pick<Evidence, 'status' | 'retiredAt' | 'mark'>>;
 
     const record: unknown = {
       ...said,
       status: evidence.status,
       ...(evidence.revokedAt === undefined ? {} : { revokedAt: evidence.revokedAt }),
+      ...(document.version === 2 ? { retiredAt: document.retiredAt } : {}),
+      ...(evidence.mark === undefined ? {} : { mark: evidence.mark }),
       signedUrl: evidence.signedUrl,
     };
 
@@ -252,6 +272,10 @@ export function signature(evidence: Evidence): Promise<Signature> {
  * it, with only its present state taken from the record as read, so what stands beside the
  * signature mark is what was signed. One whose signed record failed is not shown as verified: the
  * verifier's own signature does not bear it out, so it reads as unconfirmed.
+ *
+ * The holder's mark is taken from the record as read too, each time, and never from the
+ * signed record kept: a mark would otherwise vanish the moment its record checked, and one
+ * changed since would go on being shown as it was.
  */
 export function standing<T extends Evidence>(evidence: T): T {
   if (evidence.signedUrl === undefined) return evidence;
@@ -259,12 +283,16 @@ export function standing<T extends Evidence>(evidence: T): T {
   const key = shown(evidence);
   const signed = signedAs.get(key);
 
-  if (signed)
+  if (signed) {
+    const { mark: _mark, ...said } = signed;
+
     return {
-      ...signed,
+      ...said,
       status: evidence.status,
       ...(evidence.revokedAt === undefined ? {} : { revokedAt: evidence.revokedAt }),
+      ...(evidence.mark === undefined ? {} : { mark: evidence.mark }),
     } as T;
+  }
 
   return evidence.status === 'verified' && failures.has(key)
     ? { ...evidence, status: 'unconfirmed' }

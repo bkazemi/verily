@@ -1,5 +1,5 @@
 import { externalName, statusLabel, type Evidence } from '../core/index.js';
-import { clockMark, dashMark, markStyles, paintMark, verificationMark } from './mark.js';
+import { boxMark, clockMark, dashMark, markStyles, paintMark, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
 
 const styles = `
@@ -54,7 +54,9 @@ const styles = `
   .peek .via { display: block; margin-top: 6px; font-size: 11px; color: var(--verily-muted, #65726c); }
   .provider { display: block; flex-shrink: 0; width: 14px; height: 14px; }
   .expired .icon { color: #815a12; background: #fbefce; }
-  .revoked .icon, .message .icon { color: #626d69; background: #edf0ee; }
+  .revoked .icon, .retired .icon, .message .icon { color: #626d69; background: #edf0ee; }
+  /* Nothing ran out and nothing wants attention: the holder chose this, so it is only quiet. */
+  .retired .name { color: var(--verily-muted, #65726c); }
   .message { color: var(--verily-muted, #65726c); }
   .add { font-weight: 600; }
   @media (prefers-reduced-motion: no-preference) {
@@ -290,7 +292,15 @@ export function renderBadge(
 ): HTMLElement | null {
   const provider = evidence.providerName;
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
-  const state = current ? 'verified' : evidence.status === 'revoked' ? 'revoked' : 'expired';
+  const retired = evidence.status === 'retired';
+
+  const state = current
+    ? 'verified'
+    : retired
+      ? 'retired'
+      : evidence.status === 'revoked'
+        ? 'revoked'
+        : 'expired';
 
   const label = statusLabel(evidence, Date.now());
 
@@ -305,7 +315,9 @@ export function renderBadge(
   const named = rows.map((row) => `, ${row.providerName} ${externalName(row.external)}`).join('');
   const others = `${named}${unnamed ? ` and ${unnamed} more` : ''}`;
 
-  paintMark(mark, current ? 'current' : 'inactive');
+  // A retired account claims nothing now, so its mark is drawn as one waiting to be read
+  // is: in the page's text colour, and not as a verification that failed.
+  paintMark(mark, current ? 'current' : retired ? 'pending' : 'inactive');
 
   if (linked) {
     (badge as HTMLAnchorElement).href = evidence.evidenceUrl;
@@ -364,7 +376,7 @@ export function renderBadge(
   if (!current) {
     const icon = span('icon', '');
 
-    icon.append(state === 'expired' ? clockMark() : dashMark());
+    icon.append(retired ? boxMark() : state === 'expired' ? clockMark() : dashMark());
 
     icon.setAttribute('aria-hidden', 'true');
     badge.append(span('label', label), icon);

@@ -168,6 +168,8 @@ A user with several accounts gets one badge for all of them. Give it every conne
 
 It shows the account that was connected first, then how many more there are, such as `+2`. Clicking it opens the same details, with each account on its own card in the order they were connected. Only accounts that are verified now are counted, and one of those leads if the first has lapsed. An account that appears on more than one record, because it was shown a second way or removed and connected again, is shown once. The ids must all belong to the same user.
 
+A holder can change that order. The account they mark as preferred comes first and leads the badge, and the ones they mark as unused come after the rest; an unused account is still verified and still counted. An account they retire is kept as history: it is never counted, sits in a group of its own at the foot of the details, and reads as retired with the date it was last verified. A badge with nothing but retired accounts is a quiet pill that names the first and opens the same details. If you would rather show nothing, leave retired records out of what you give the badge.
+
 On a desktop, resting the pointer on that badge, or reaching it with the keyboard, opens a small panel beside it naming the accounts the number stands for: up to eight, then the rest as a count. The panel floats over the page, so nothing moves, and clicking still opens the details. It needs a browser with the Popover API; without one the badge simply has no panel. Add `peek="off"` to the badge to leave it out.
 
 Add `stacked` to name the accounts in the badge itself, one to a row:
@@ -189,7 +191,10 @@ await client.openConnect(); // the connect dialog; call from a click
 await client.connect({ provider: 'github' }); // opens <baseUrl>/verify in a popup; call from a click
 await client.mountBadge(element, { connectionId }); // draws once; call again to refresh
 await client.disconnect(connectionId);
+await client.mark(connectionId, 'preferred'); // or 'unused', 'current', 'retired'
 ```
+
+`mark` names one record and acts on the account, on every record of it the user has. Preferring one account takes the mark from whichever had it. Retiring freezes the records at their last proof: they are never rechecked, never read as verified, cannot change visibility, and are kept until removed. Only a renewal by the method a record was first shown by brings it back.
 
 To match your site's look, set any of these CSS variables on an ancestor: `--verily-surface`, `--verily-text`, `--verily-border`, `--verily-muted`, `--verily-hover`, `--verily-font-family`, `--verily-font-size`.
 
@@ -361,7 +366,7 @@ Once a user has a link, show their badge in place of the pill, and give it the s
 ></verily-badge>
 ```
 
-The badge's dialog then has Renew and Remove under each account, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verily-result` on each change. `verily.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
+The badge's dialog then has Renew and Remove under each account, the controls that mark it as preferred or unused or retire it, and Add account below them, which opens the verify flow in the dialog's place with a way back. It fires `verily-result` on each change. `verily.beginUrl('manage')` still opens a user's links on the instance, for a site that would rather link there.
 
 **3. Read connections where you show them.**
 
@@ -369,6 +374,8 @@ The badge's dialog then has Renew and Remove under each account, and Add account
 const { [user.id]: connections } = await verily.connections([user.id]);
 const verified = connections.filter((c) => c.status === 'verified');
 ```
+
+Show only `verified` records as verified. A `retired` record is an account the user said is finished: it carries `retiredAt` and can be shown as history, never as a current account. `mark` is `preferred` or `unused` where the user set one, which is their word on how to order their accounts and nothing that was checked.
 
 To show them, hand the records to the badge. It draws them as given and fetches nothing, so it works for unlisted links, which a browser cannot read for itself:
 
@@ -427,7 +434,7 @@ createVerily({
 
 With a key set:
 
-- **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form.
+- **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form. A public retired record has one, signed as `version: 2` with `status: "retired"` and `retiredAt`, so a reader that knows only version 1 refuses it and never takes it for a record that stood.
 - **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verily-keys.json`.
 - **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
 - The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
@@ -475,7 +482,7 @@ setInterval(
 );
 ```
 
-- **`prune()`** deletes expired flows, and deletes expired or revoked records after 90 days.
+- **`prune()`** deletes expired flows, and deletes expired or revoked records after 90 days. A retired record is kept until it is removed.
 - **`recheck()`** re-reads gists and link-backs that are due, up to 5 per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`) and stays current for 7 days after its last successful read (`freshnessMs`); after that it shows as unconfirmed until a read succeeds. A failed read changes nothing. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
 
 **If you never call `recheck()`, set `freshnessMs: Infinity`.** Otherwise connections proved by gist, link-back or PGP lapse after a week.

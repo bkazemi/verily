@@ -765,3 +765,88 @@ test('making a record public on a signing instance says a signed record outlives
     assert.equal(typeof view.signedNote === 'string', expected);
   }
 });
+
+/**
+ * How a reader from before retired records took a signed document, kept here as it was
+ * written: it knew one version, and ignored any field it did not know.
+ */
+const versionOneReads = (document: { type?: unknown; version?: unknown; issuedAt?: unknown }) =>
+  document?.type === 'verily-evidence' &&
+  document.version === 1 &&
+  typeof document.issuedAt === 'number';
+
+/** What a signed record says under its signature, read with no check of who signed it. */
+const said = async (signed: string) =>
+  JSON.parse(
+    (await openpgp.readCleartextMessage({ cleartextMessage: signed })).getText(),
+  ) as Record<string, unknown>;
+
+test('a retired record is signed as a version an older reader refuses', async () => {
+  const f = fixture({ signingKey: await newKey() });
+  const id = await f.connect();
+
+  // A live record is signed as it always was, without the mark its holder gave it.
+  await f.service.mark(id, alice, 'preferred');
+  assert.equal((await f.service.read(id)).mark, 'preferred');
+
+  const live = await said(await f.service.signed(id));
+
+  assert.equal(live.version, 1);
+  assert.ok(versionOneReads(live));
+  assert.ok(!('mark' in live) && !('status' in live) && !('retiredAt' in live));
+
+  f.advance(5000);
+  await f.service.mark(id, alice, 'retired');
+  f.advance(400 * 86400000);
+
+  // Long past its expiry, and still to be had signed: this is the durable form of the claim.
+  const evidence = await f.service.read(id);
+
+  assert.equal(evidence.signedUrl, `${evidence.evidenceUrl}?format=signed`);
+
+  const signed = await (await f.request(`/connections/${id}?format=signed`)).text();
+  const retired = await said(signed);
+
+  assert.equal(retired.version, 2);
+  assert.equal(retired.status, 'retired');
+  assert.equal(retired.retiredAt, 1005000);
+  assert.ok(!('mark' in retired));
+
+  // Read as version 1 it would be taken for a record that stood, so it must not be read.
+  assert.ok(!versionOneReads(retired));
+
+  const checked = (await f.service.checked(signed))!;
+
+  assert.equal(checked.version, 2);
+  assert.equal(checked.version === 2 && checked.retiredAt, 1005000);
+
+  const page = await (await f.check(signed)).text();
+
+  assert.match(page, /<h1>Retired connection<\/h1>/);
+  assert.match(page, /<dt>Last verified<\/dt><dd>1970-01-01T00:16:40Z<\/dd>/);
+  assert.match(page, /<dt>Retired<\/dt><dd>1970-01-01T00:16:45Z<\/dd>/);
+  assert.doesNotMatch(page, /Valid until/);
+
+  // Removed, it has no signed form, as no removed record has.
+  await f.service.revoke(id, alice);
+  assert.equal((await f.request(`/connections/${id}?format=signed`)).status, 404);
+});
+
+test('a version 2 document that does not say it is retired is not read', async () => {
+  const key = await newKey();
+  const { sign, key: published } = await signer(key);
+
+  const retired = { ...document, version: 2 as const, status: 'retired' as const, retiredAt: 7 };
+
+  assert.equal((await verifySigned(await sign(retired), [published]))!.version, 2);
+  // Version 1 files already saved check as they always did.
+  assert.equal((await verifySigned(await sign(document), [published]))!.version, 1);
+
+  for (const altered of [
+    { ...retired, status: 'verified' },
+    { ...retired, retiredAt: undefined },
+    { ...document, version: 2 },
+    { ...document, version: 3 },
+  ])
+    assert.equal(await verifySigned(await sign(altered as never), [published]), undefined);
+});
