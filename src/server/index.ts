@@ -25,8 +25,14 @@ import {
   type SignedDocument,
   type Visibility,
 } from '../core/index.js';
-import { codeAttempts, VerilyService, Unavailable, type ServiceOptions } from './service.js';
-import { copyScript } from './copy.js';
+import {
+  artifactAttempts,
+  codeAttempts,
+  VerilyService,
+  Unavailable,
+  type ServiceOptions,
+} from './service.js';
+import { copyScript, waitScript } from './copy.js';
 import { escape } from './escape.js';
 import { logo } from '../logo.js';
 import { stylesheet, styleVersion } from './style.js';
@@ -119,7 +125,7 @@ const headers = {
   'X-Robots-Tag': 'noindex, nofollow',
   'X-Content-Type-Options': 'nosniff',
   'Content-Security-Policy':
-    "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 };
 
 const html = (body: string, status = 200) =>
@@ -248,6 +254,18 @@ function standingNote(flow: Flow, site: string): string | undefined {
   return flow.standing?.some((a) => a.method === 'backlink')
     ? `This account already links back to ${site}. Confirming records that too.`
     : undefined;
+}
+
+/**
+ * Said above a proof that was handed back and refused, while the flow still waits for it:
+ * why, where the provider said why in words meant for the holder, and how many tries remain.
+ */
+function refusedNote(flow: Flow): string | undefined {
+  if (!flow.tries) return undefined;
+
+  const left = artifactAttempts - flow.tries;
+
+  return `${flow.reason ? `That did not check out: ${flow.reason}.` : 'That could not be checked.'} ${left === 1 ? 'One try is' : `${left} tries are`} left.`;
 }
 
 /** Said beside every artifact method: what the holder publishes is public by design. */
@@ -691,7 +709,10 @@ export function createVerily(options: ServerOptions) {
         artifact: provider.artifact,
         field: artifactField(provider),
         input: provider.input ?? 'url',
-        ...(flow.suggested ? { suggested: flow.suggested } : {}),
+        ...((flow.artifact ?? flow.suggested)
+          ? { suggested: flow.artifact ?? flow.suggested }
+          : {}),
+        ...(flow.tries ? { refused: refusedNote(flow) } : {}),
         note: artifactNote(provider),
       });
 
@@ -728,6 +749,22 @@ export function createVerily(options: ServerOptions) {
 
     return flow;
   }
+
+  /**
+   * What the tab a confirmation was pressed in says. It is the end of that tab's part: the
+   * page that asked is waiting on the flow and carries on from there, so this one offers
+   * nowhere to go.
+   */
+  const confirmed = (flow: Flow) =>
+    html(
+      page(
+        prefix,
+        flow.phase === 'failed' ? 'Address not confirmed' : 'Address confirmed',
+        flow.phase === 'failed'
+          ? `<p>${escape(flow.reason ?? 'This address could not be confirmed')}.</p>`
+          : '<p>You can close this tab now.</p>',
+      ),
+    );
 
   async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -767,6 +804,16 @@ export function createVerily(options: ServerOptions) {
           return new Response(copyScript, {
             headers: { ...headers, 'Content-Type': 'text/javascript' },
           });
+
+        if (path === '/wait.js')
+          return new Response(waitScript, {
+            headers: { ...headers, 'Content-Type': 'text/javascript' },
+          });
+
+        const phase = path.match(/^\/flows\/([^/]+)\/phase$/);
+
+        // All a waiting page needs to know, and only the browser that started the flow.
+        if (phase) return json({ phase: (await service.flow(phase[1]!, binding(request))).phase });
 
         if (path === '/result.js')
           return new Response(
@@ -898,11 +945,12 @@ export function createVerily(options: ServerOptions) {
                 prefix,
                 `Verify with ${provider.name}`,
                 `${instructions(provider.instructions(flow.expect))}
+            ${flow.tries ? `<p>${escape(refusedNote(flow))}</p>` : ''}
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
             <label>${escape(artifactField(provider))} ${
               provider.artifact === 'document'
-                ? '<textarea name="artifact" rows="14" cols="72" required></textarea>'
-                : `<input name="artifact" type="${provider.input ?? 'url'}" value="${escape(flow.suggested ?? '')}" autocapitalize="none" spellcheck="false" required>`
+                ? `<textarea name="artifact" rows="14" cols="72" required>${escape(flow.artifact ?? '')}</textarea>`
+                : `<input name="artifact" type="${provider.input ?? 'url'}" value="${escape(flow.artifact ?? flow.suggested ?? '')}" autocapitalize="none" spellcheck="false" required>`
             }</label>
             <button>Check my proof</button></form>
             <p class="fine">${escape(artifactNote(provider))}</p>
@@ -925,7 +973,7 @@ export function createVerily(options: ServerOptions) {
                 `${
                   step.sentTo === undefined
                     ? ''
-                    : `<p>A message was sent to ${escape(step.sentTo)}. Press the button in it, then come back to this page.</p><p><a href="${escape(prefix)}/flows/${escape(flow.id)}">I pressed the button</a></p><p>Or enter the code from the message here.</p>${
+                    : `<p>A message was sent to ${escape(step.sentTo)}. Press the button in it, and this page carries on.</p><noscript><p><a href="${escape(prefix)}/flows/${escape(flow.id)}">I pressed the button</a></p></noscript><p>Or enter the code from the message here.</p>${
                         step.wrong
                           ? `<p>That code did not match. ${step.triesLeft === 1 ? 'One try is' : `${step.triesLeft} tries are`} left.</p>`
                           : ''
@@ -938,7 +986,7 @@ export function createVerily(options: ServerOptions) {
                 : '<input name="artifact" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>'
             }</label>
             <button>${step.sentTo === undefined ? `Send the ${escape(provider.name.toLowerCase())}` : 'Check my code'}</button></form>
-            ${step.sentTo === undefined ? `<p class="fine">${escape(codeNote)}</p>` : ''}`,
+            ${step.sentTo === undefined ? `<p class="fine">${escape(codeNote)}</p>` : `<script src="${escape(prefix)}/wait.js" defer></script>`}`,
               ),
             );
           }
@@ -989,11 +1037,17 @@ export function createVerily(options: ServerOptions) {
         const confirmation = path.match(/^\/confirm\/([^/]+)$/);
 
         // Where the button in a message leads, in whatever browser the holder reads mail
-        // in. Arriving confirms nothing: a scanner that opens every link in a message gets
-        // this page and stops, and the holder is shown what they are confirming first.
+        // in. In the browser that started the flow, arriving is the confirmation: its
+        // cookie shows the one who asked is the one who opened the message. Anywhere else
+        // arriving confirms nothing: a scanner that opens every link in a message carries
+        // no cookie, gets this page and stops, and a holder on another device is shown
+        // what they are confirming first.
         if (confirmation) {
           const token = url.searchParams.get('token') ?? '';
           const asked = await service.confirming(confirmation[1]!, token);
+
+          if (await service.flow(confirmation[1]!, binding(request)).catch(() => undefined))
+            return confirmed(await service.confirm(confirmation[1]!, token));
 
           const next: Record<string, string> = {
             connect: `link it to this ${subjectNoun(asked.local?.kind) ?? 'site'}`,
@@ -1148,6 +1202,8 @@ export function createVerily(options: ServerOptions) {
               method: data.method || undefined,
             }),
             await context(request, kind),
+            // Posted from this origin, which the check on every POST has already held it to.
+            true,
           );
 
           if (asJson && kind === 'connect')
@@ -1162,25 +1218,7 @@ export function createVerily(options: ServerOptions) {
         const confirmation = path.match(/^\/confirm\/([^/]+)$/);
 
         if (confirmation) {
-          const flow = await service.confirm(confirmation[1]!, data.token ?? '');
-
-          // The flow is still the browser's that started it. This one may be that browser,
-          // and then it can carry on from here; any other is sent back to where it began.
-          const here = await service.flow(flow.id, binding(request)).catch(() => undefined);
-
-          return html(
-            page(
-              prefix,
-              flow.phase === 'failed' ? 'Address not confirmed' : 'Address confirmed',
-              flow.phase === 'failed'
-                ? `<p>${escape(flow.reason ?? 'This address could not be confirmed')}.</p>`
-                : `<p>Go back to the page where you started. It carries on from here.</p>${
-                    here
-                      ? `<p><a href="${escape(prefix)}/flows/${escape(flow.id)}">Or carry on in this window</a></p>`
-                      : '<p>You can close this window.</p>'
-                  }`,
-            ),
-          );
+          return confirmed(await service.confirm(confirmation[1]!, data.token ?? ''));
         }
 
         const submission = path.match(/^\/flows\/([^/]+)\/submit$/);

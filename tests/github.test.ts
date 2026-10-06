@@ -29,6 +29,21 @@ test('GitHub adapter sends PKCE and reads identity from authenticated provider A
   assert.equal(url.searchParams.get('scope'), '');
   assert.equal(url.searchParams.has('client_secret'), false);
 
+  assert.equal(url.searchParams.get('prompt'), 'select_account');
+
+  // A flow on a record names its account, so the chooser is not forced a second time.
+  const known = new URL(
+    provider.authorizationUrl({
+      state: 'state',
+      challenge: 'challenge',
+      redirectUri: 'https://site.test/callback',
+      account: { id: '42', handle: 'alice', profileUrl: 'https://github.com/alice' },
+    }),
+  );
+
+  assert.equal(known.searchParams.get('login'), 'alice');
+  assert.equal(known.searchParams.has('prompt'), false);
+
   assert.deepEqual(
     await provider.authenticate({
       code: 'code',

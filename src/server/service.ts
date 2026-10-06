@@ -266,6 +266,12 @@ export class VerilyService {
     kind: Flow['kind'] = 'connect',
     choice: { provider?: string; method?: string } = {},
     context?: Record<string, string>,
+    /**
+     * Whether the caller has shown the holder asked for this themselves, as a form posted
+     * from their own page shows and following a link does not. Without it the flow reads
+     * nothing at its start and ends on an approval, however little there is to approve.
+     */
+    attended = false,
   ) {
     if (kind === 'connect' && !local) throw new Unavailable();
 
@@ -294,10 +300,16 @@ export class VerilyService {
       connectionId,
       phase: 'pending',
       expiresAt: this.now() + (this.options.flowTtlMs ?? 600000),
+      ...(attended ? { attended } : {}),
     };
 
     // Removal from the external side answers to nobody local, so nothing local rides on it.
     if (context && !['revoke', 'share-revoke'].includes(kind)) flow.context = { ...context };
+
+    // The account a sign-in is asked for by name. Only where the local holder of the record
+    // started the flow: removal from the external side is started by anyone, and is told
+    // nothing about the account it would have to show.
+    let account: ExternalAccount | undefined;
 
     const provider = await this.transaction(async (tx) => {
       // Whose link this is. A flow against an existing connection may carry no local
@@ -318,6 +330,8 @@ export class VerilyService {
           throw new Unavailable();
 
         subject = connection.local;
+
+        if (['renew', 'visibility'].includes(kind)) account = connection.external;
       }
 
       const provider = this.chosen(kind, choice, connection);
@@ -356,7 +370,7 @@ export class VerilyService {
 
     // Where a record already says whose account this is, there is nothing to ask the
     // holder: the proof is either there to be read or it is not.
-    if (artifact && flow.suggested)
+    if (artifact && flow.suggested && attended)
       await this.offered(flow.id, binding, artifact, flow.expect!, flow.suggested);
 
     // A redirect provider hands the holder to its own site; an artifact provider tells
@@ -377,6 +391,7 @@ export class VerilyService {
               state,
               challenge: hash(verifier),
               redirectUri: `${this.baseUrl}/callback`,
+              ...(account ? { account } : {}),
             }),
           }
         : { flowId: flow.id, binding };
@@ -514,10 +529,36 @@ export class VerilyService {
 
       await this.established(id, binding, external, handed);
     } catch (error) {
-      await this.failed(id, error);
+      await this.refused(id, error, artifact);
     }
 
     return id;
+  }
+
+  /**
+   * Takes a refused proof as something the holder can put right, and leaves the flow
+   * waiting for it. What they must publish is minted per flow, so a flow ended here would
+   * have them publish or sign all over again for a mistyped address. The tries are counted
+   * all the same: each one is a fetch somewhere the holder chose.
+   */
+  private async refused(id: string, error: unknown, artifact: string) {
+    await this.transaction(async (tx) => {
+      const flow = await tx.get('flows', id);
+
+      if (flow?.phase !== 'exchanging') return;
+
+      flow.tries = (flow.tries ?? 0) + 1;
+      // Only a `Refused` reason is kept: any other error may describe this backend.
+      flow.reason = error instanceof Refused ? error.message : undefined;
+
+      if (flow.tries >= artifactAttempts) await this.ended(tx, flow, 'failed');
+      else {
+        flow.phase = 'pending';
+        flow.artifact = artifact;
+      }
+
+      await tx.put('flows', id, flow);
+    });
   }
 
   /**
@@ -828,12 +869,17 @@ export class VerilyService {
       const flow = await accepted(tx);
 
       flow.artifact = artifact;
+      flow.reason = undefined;
       flow.authenticatedAt = this.now();
 
       if (standing.length) flow.standing = standing;
 
       flow.phase = 'approval';
-      await tx.put('flows', id, flow);
+
+      // Nothing for the holder to decide, so nothing to ask them. The visibility passed is
+      // never read: both of these keep the record's own.
+      if (await this.settled(tx, flow)) await this.conclude(tx, flow, 'unlisted');
+      else await tx.put('flows', id, flow);
     });
   }
 
@@ -905,8 +951,9 @@ export class VerilyService {
   }
 
   /**
-   * A failed check leaves the flow dead rather than retryable in place. Only a `Refused`
-   * reason is kept: any other error may describe this backend rather than the proof.
+   * A sign-in or a mailed code that fails leaves the flow dead: there is nothing in it to
+   * put right, and starting again costs the holder nothing. Only a `Refused` reason is
+   * kept: any other error may describe this backend rather than the proof.
    */
   private async failed(id: string, error: unknown) {
     await this.transaction(async (tx) => {
@@ -955,6 +1002,34 @@ export class VerilyService {
         return undefined;
       }
 
+      return this.conclude(tx, flow, visibility, allowed);
+    });
+  }
+
+  /**
+   * Whether approving a flow would decide anything. A renewal, or another way of showing
+   * an account the subject is already linked to, changes neither who is linked nor who
+   * can read it: the holder asked for exactly this and the account has been checked
+   * against the record, so it is recorded without asking them to say so again.
+   */
+  private async settled(tx: Transaction, flow: Flow): Promise<boolean> {
+    // A flow anyone could have sent the holder's browser into is theirs only once they
+    // approve it, and the approval is a form that only their own page can post.
+    if (!flow.attended) return false;
+
+    return flow.kind === 'renew' || (flow.kind === 'connect' && !!(await this.joins(tx, flow)));
+  }
+
+  /** Records what an approved flow does, and ends it. The caller has checked who approves. */
+  private async conclude(
+    tx: Transaction,
+    flow: Flow,
+    visibility: Visibility,
+    allowed?: Visibility[],
+  ): Promise<string> {
+    const id = flow.id;
+
+    {
       let connection: Connection;
       const provider = this.providerOf(flow);
       const joined = flow.kind === 'connect' ? await this.joins(tx, flow) : undefined;
@@ -1038,7 +1113,7 @@ export class VerilyService {
       await tx.put('flows', id, flow);
 
       return connection.id;
-    });
+    }
   }
 
   /**
@@ -1729,6 +1804,9 @@ const dayMs = 86400000;
 
 /** How many wrong codes a flow takes before it is dead. */
 export const codeAttempts = 5;
+
+/** How many times a published proof may be refused before its flow is dead. */
+export const artifactAttempts = 5;
 
 /** Crockford's base 32: no I, L, O or U, so no letter is mistaken for a digit when typed. */
 const codeAlphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';

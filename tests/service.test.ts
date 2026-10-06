@@ -486,14 +486,16 @@ test('a holder-paced proof is published, read back, and kept open for the reader
 
   provider.artifacts.set(url, other.expect!);
   await f.service.submit(flow.flowId, flow.binding, url);
-  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'failed');
-  assert.equal((await f.service.flow(flow.flowId, flow.binding)).reason, 'Line not found');
+  // Refused, and still waiting: the line is this flow's, so a dead flow would have the
+  // holder publish a new one for a mistake in where they said it was.
+  const refused = await f.service.flow(flow.flowId, flow.binding);
 
-  // A failed check is dead rather than retryable in place.
-  provider.artifacts.set(url, flow.expect!);
-  await assert.rejects(f.service.submit(flow.flowId, flow.binding, url));
+  assert.equal(refused.phase, 'pending');
+  assert.equal(refused.reason, 'Line not found');
+  assert.equal(refused.artifact, url);
+  assert.equal(refused.expect, flow.expect);
 
-  const good = await f.service.start(alice);
+  const good = flow;
 
   provider.artifacts.set(url, good.expect!);
   await f.service.submit(good.flowId, good.binding, url);
@@ -524,10 +526,17 @@ test('an artifact flow refuses a location the provider will not accept', async (
   provider.artifacts.set('https://evil.test/alice', flow.expect!);
   await f.service.submit(flow.flowId, flow.binding, 'https://evil.test/alice');
 
-  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'failed');
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'pending');
   // Only a Refused reason is the holder's to read; any other error stays with the backend.
   assert.equal((await f.service.flow(flow.flowId, flow.binding)).reason, undefined);
   assert.deepEqual(await f.service.mine(alice), []);
+
+  // Each try is a fetch somewhere the holder chose, so they are counted and they run out.
+  for (let tries = 1; tries < 5; tries++)
+    await f.service.submit(flow.flowId, flow.binding, 'https://evil.test/alice');
+
+  assert.equal((await f.service.flow(flow.flowId, flow.binding)).phase, 'failed');
+  await assert.rejects(f.service.submit(flow.flowId, flow.binding, 'https://evil.test/alice'));
 });
 
 test('a redirect provider has no submit path and an artifact provider no callback', async () => {

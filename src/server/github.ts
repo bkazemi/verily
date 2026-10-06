@@ -14,9 +14,11 @@ export function githubProvider(options: {
     id: 'github',
     name: 'GitHub',
     method: 'oauth',
-    authorizationUrl({ state, challenge, redirectUri }) {
+    authorizationUrl({ state, challenge, redirectUri, account }) {
       const url = new URL('https://github.com/login/oauth/authorize');
 
+      // A new link is to whichever account the holder picks. A flow on a record already
+      // names its account, so GitHub is asked for that one and not made to offer a choice.
       url.search = new URLSearchParams({
         client_id: options.clientId,
         redirect_uri: redirectUri,
@@ -24,7 +26,7 @@ export function githubProvider(options: {
         code_challenge: challenge,
         code_challenge_method: 'S256',
         scope: '',
-        prompt: 'select_account',
+        ...(account ? { login: account.handle } : { prompt: 'select_account' }),
       }).toString();
 
       return url.href;

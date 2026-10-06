@@ -611,8 +611,16 @@ test('opening the link confirms nothing, pressing its button does, and the first
 
   const waiting = await (await f.request(path, { headers: { cookie } })).text();
 
-  assert.match(waiting, /Press the button in it/);
-  assert.match(waiting, /I pressed the button/);
+  assert.match(waiting, /Press the button in it, and this page carries on/);
+  // The page watches the flow itself, and only a reader with no scripting is given a link.
+  assert.match(waiting, /<script src="\/api\/verily\/wait\.js" defer>/);
+  assert.match(waiting, /<noscript><p><a href="[^"]+">I pressed the button<\/a><\/p><\/noscript>/);
+
+  assert.deepEqual(await (await f.request(`${path}/phase`, { headers: { cookie } })).json(), {
+    phase: 'pending',
+  });
+
+  assert.equal((await f.request(`${path}/phase`)).status, 404);
 
   const link = linkIn(f.outbox[0]!);
 
@@ -651,8 +659,7 @@ test('opening the link confirms nothing, pressing its button does, and the first
   const confirmed = await pressed.text();
 
   assert.match(confirmed, /Address confirmed/);
-  assert.match(confirmed, /Go back to the page where you started/);
-  assert.ok(!confirmed.includes('carry on in this window'));
+  assert.match(confirmed, /You can close this tab now\./);
 
   // The page that was waiting has moved on to the approval, and only it can approve.
   const review = await (await f.request(path, { headers: { cookie } })).text();
@@ -662,7 +669,7 @@ test('opening the link confirms nothing, pressing its button does, and the first
   assert.equal((await f.request(link.path)).status, 404);
 });
 
-test('the browser that started the flow is offered the way on from the confirmation', async () => {
+test('the browser that started the flow confirms by opening the link, with nothing to press', async () => {
   const f = pages();
 
   const start = await f.request('/sessions', {
@@ -678,12 +685,23 @@ test('the browser that started the flow is offered the way on from the confirmat
   await f.request(`${path}/submit`, { ...post, body: 'artifact=alice%40example.test' });
 
   const link = linkIn(f.outbox[0]!);
-  const pressed = await f.request(`/confirm/${link.id}`, { ...post, body: `token=${link.token}` });
 
-  assert.match(
-    await pressed.text(),
-    new RegExp(`href="/api/verily${path}">Or carry on in this window`),
+  // The cookie alone opens nothing: the token in the message is still the proof.
+  assert.equal(
+    (await f.request(`/confirm/${link.id}?token=wrong`, { headers: { cookie } })).status,
+    404,
   );
+
+  const opened = await (await f.request(link.path, { headers: { cookie } })).text();
+
+  assert.match(opened, /Address confirmed/);
+  assert.match(opened, /You can close this tab now\./);
+  assert.ok(!opened.includes('Confirm this address'));
+  assert.ok(!opened.includes('<a href'));
+
+  // The page that was waiting is at the approval, and the link is spent.
+  assert.match(await (await f.request(path, { headers: { cookie } })).text(), /Confirm connection/);
+  assert.equal((await f.request(link.path, { headers: { cookie } })).status, 404);
 });
 
 test("a removal anybody can start is mailed in the installation's name, never the record's site", async () => {
@@ -815,4 +833,29 @@ test('send limits keep no address, are pruned once spent, and can be lifted', as
 
   for (const bad of [{ day: 0 }, { address: -1 }, { day: 1.5 }, { address: Number.NaN }])
     assert.throws(() => fixture([], bad), /Invalid send limit/);
+});
+
+test('a waiting page keeps waiting while its confirmation is still being recorded', async () => {
+  const { waitScript } = await import('../src/server/copy.js');
+  const phases = ['pending', 'exchanging', 'approval'];
+  let tick!: () => Promise<void>;
+  let reloads = 0;
+  let cleared = 0;
+
+  new Function('setInterval', 'clearInterval', 'fetch', 'location', waitScript)(
+    (work: () => Promise<void>) => (tick = work),
+    () => cleared++,
+    () => Promise.resolve({ ok: true, json: () => Promise.resolve({ phase: phases.shift() }) }),
+    { pathname: '/api/verily/flows/f1', reload: () => reloads++ },
+  );
+
+  await tick();
+  assert.equal(reloads, 0);
+
+  // Reloaded now, the page would show neither step, and nothing would move it on.
+  await tick();
+  assert.deepEqual([reloads, cleared], [0, 0]);
+
+  await tick();
+  assert.deepEqual([reloads, cleared], [1, 1]);
 });

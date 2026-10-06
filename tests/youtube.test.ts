@@ -44,6 +44,20 @@ test('YouTube adapter sends PKCE, reads the chosen channel and revokes the token
   assert.equal(url.searchParams.get('access_type'), 'online');
   assert.equal(url.searchParams.has('client_secret'), false);
 
+  assert.equal(url.searchParams.get('prompt'), 'select_account');
+
+  // A flow on a record offers the choice too: a channel id cannot name a Google account.
+  const known = new URL(
+    youtube.authorizationUrl({
+      state: 'state',
+      challenge: 'challenge',
+      ...input,
+      account: { id: channelId, handle: 'alicetrades', profileUrl: 'https://youtube.com/x' },
+    }),
+  );
+
+  assert.equal(known.searchParams.get('prompt'), 'select_account');
+
   assert.deepEqual(await youtube.authenticate(input), {
     id: channelId,
     handle: 'alicetrades',

@@ -22,7 +22,9 @@ export function youtubeProvider(options: {
       const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
 
       // select_account lets a holder with several Google accounts, or a channel under a
-      // brand account, pick the one they mean rather than whichever is signed in.
+      // brand account, pick the one they mean rather than whichever is signed in. A flow on
+      // a record asks too: a channel is not a Google account, so nothing here can name the
+      // one to use, and the wrong one signed in silently would be refused with no way round.
       url.search = new URLSearchParams({
         response_type: 'code',
         client_id: options.clientId,

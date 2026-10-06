@@ -34,6 +34,20 @@ test('Discord adapter sends PKCE and reads identity from authenticated provider 
   assert.equal(url.searchParams.get('scope'), 'identify');
   assert.equal(url.searchParams.has('client_secret'), false);
 
+  assert.equal(url.searchParams.get('prompt'), 'consent');
+
+  // A flow on a record asks for consent too: a grant withdrawn since could not be given again.
+  const known = new URL(
+    provider.authorizationUrl({
+      state: 'state',
+      challenge: 'challenge',
+      redirectUri: 'https://site.test/callback',
+      account: { id: '7', handle: 'alice', profileUrl: 'https://discord.com/users/7' },
+    }),
+  );
+
+  assert.equal(known.searchParams.get('prompt'), 'consent');
+
   assert.deepEqual(
     await provider.authenticate({
       code: 'code',
