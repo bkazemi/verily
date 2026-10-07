@@ -86,6 +86,13 @@ export interface Attestation {
   /** What a reader should expect to find at artifactUrl, such as a challenge token. */
   expect?: string;
   /**
+   * Set where the method publishes something of the subject's, as its address, and this
+   * subject had nothing for it to publish: `expect` is then a string minted for the holder
+   * and names nobody. Such a proof holds whatever the subject's address becomes, where one
+   * that published an address is a proof of that address alone.
+   */
+  minted?: boolean;
+  /**
    * When this side was last confirmed. For `declared` and `oauth` that is the moment it
    * was established; artifact methods drift out of date and are reconfirmed on a schedule.
    */
@@ -155,6 +162,8 @@ export interface Flow {
    * unguessable and per-flow, so an artifact made for one flow cannot complete another.
    */
   expect?: string;
+  /** Whether `expect` was minted for a method that had nothing of the subject's to state. */
+  minted?: boolean;
   /**
    * What the holder handed back: an address to read, or the proof itself. On a flow still
    * waiting it is what they last handed back and had refused, kept so they can put it right.
@@ -304,9 +313,18 @@ export interface ArtifactProvider {
    * says the far side points at this exact subject, so the subject's own address is the
    * whole of what is proved and a per-flow token could not be part of it. Absent means the
    * backend mints an unguessable string instead, which is what a method wants when any
-   * fresh artifact will do. Throw when the subject cannot be proved this way at all.
+   * fresh artifact will do. So does returning nothing, for a subject that gives the method
+   * nothing to state: one with no address has no address to point at. Throw when the
+   * subject cannot be proved this way at all.
    */
-  expect?(local: LocalAccount): string;
+  expect?(local: LocalAccount): string | undefined;
+  /**
+   * Words the string the backend mints, given its unguessable part. The default names the
+   * site, so the holder can see what they are agreeing to before they publish. A method
+   * that publishes where anyone can look without being told where, as DNS is, may not want
+   * the site said there at all.
+   */
+  mint?(secret: string): string;
   /**
    * Where the proof lives. `location` means the holder publishes it somewhere only they
    * can write and hands back an address, so the address is half of what is proved.
@@ -603,8 +621,8 @@ export function attestationLabel(
     oauth: `Signed in with ${names.provider}`,
     gist: `Published a proof on ${names.provider}`,
     backlink: `Linked back to ${names.site}`,
-    dns: `Named ${names.site} in a DNS record`,
-    wellknown: `Named ${names.site} in a file it serves`,
+    dns: 'Published a proof in its DNS',
+    wellknown: 'Published a proof in a file it serves',
     signature: 'Proved with a signature',
     code: 'Entered a code sent to this address',
   }[method];

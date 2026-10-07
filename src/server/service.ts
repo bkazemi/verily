@@ -366,10 +366,33 @@ export class VerilyService {
       // freedom: the subject's address is the whole claim, so that method states it here
       // and gives up per-flow uniqueness for a standing link that is read again on a
       // schedule instead.
-      if (artifact)
-        flow.expect = artifact.expect
-          ? artifact.expect(subject!)
-          : `Verily proof for ${this.siteOf(subject!)}: ${secret()}`;
+      //
+      // Where such a method has nothing of the subject's to state, it publishes a minted
+      // string like any other, and then keeps the one it has: a flow the local holder runs
+      // on their own record asks for the string already standing, as it would ask for the
+      // same address, and not for a new record in DNS every time the link is renewed.
+      //
+      // Only a minted string is kept this way. A record that published an address the
+      // subject no longer has is a proof of that address, and is not asked for again.
+      if (artifact) {
+        const stated = artifact.expect?.(subject!);
+
+        const standing =
+          artifact.expect && connection && ['renew', 'visibility'].includes(kind)
+            ? connection.attestations?.external.find(
+                (a) => a.method === artifact.method && a.minted,
+              )?.expect
+            : undefined;
+
+        flow.expect =
+          stated ??
+          standing ??
+          (artifact.mint
+            ? artifact.mint(secret())
+            : `Verily proof for ${this.siteOf(subject!)}: ${secret()}`);
+
+        if (artifact.expect && stated === undefined) flow.minted = true;
+      }
 
       // These kinds are all started by the local holder, whose own record this is. Removal
       // from the external side is started by anyone, and is told nothing.
@@ -935,7 +958,8 @@ export class VerilyService {
         const expect = provider.expect(flow.local!);
         const known = provider.known(flow.external!);
 
-        if (!known) continue;
+        // A minted string is found nowhere the holder was not asked to put it.
+        if (!known || expect === undefined) continue;
 
         const handed = provider.resolve?.(known) ?? known;
         const external = await this.deadline(provider.verify({ artifact: handed, expect }));
@@ -1350,8 +1374,10 @@ export class VerilyService {
 
     if (attestation.expect === undefined || !provider || !isArtifactProvider(provider)) return true;
 
-    if (!provider.expect) return true;
+    if (!provider.expect || attestation.minted) return true;
 
+    // A subject with nothing to state gives nothing back, which no published address
+    // equals: a proof of the address it used to have does not name it now.
     try {
       return provider.expect(local) === attestation.expect;
     } catch {
@@ -1384,6 +1410,8 @@ export class VerilyService {
         : flow.artifact;
 
       external.expect = flow.expect;
+
+      if (flow.minted) external.minted = true;
 
       if (hosted) external.hosted = true;
     }

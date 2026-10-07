@@ -286,7 +286,15 @@ function refusedNote(flow: Flow): string | undefined {
 }
 
 /** Said beside every artifact method: what the holder publishes is public by design. */
-function artifactNote(provider: ArtifactProvider): string {
+function artifactNote(provider: ArtifactProvider, expect?: string): string {
+  // A minted string names nobody, so there is nothing for a reader to follow. What names
+  // the subject is its address, which a site may give as http as well as https.
+  if (
+    ['dns', 'wellknown'].includes(provider.method) &&
+    !['https:', 'http:'].includes(URL.parse(expect ?? '')?.protocol ?? '')
+  )
+    return `This ${provider.method === 'dns' ? 'record' : 'file'} is public, and anyone can look it up. It does not say what it is for.`;
+
   const notes: Record<string, string> = {
     backlink:
       'This link is public, as is the page you point at. Anyone reading either one can follow it here.',
@@ -798,7 +806,7 @@ export function createVerily(options: ServerOptions) {
           ? { suggested: flow.artifact ?? flow.suggested }
           : {}),
         ...(flow.tries ? { refused: refusedNote(flow) } : {}),
-        note: artifactNote(provider),
+        note: artifactNote(provider, flow.expect),
       });
 
     if (flow.phase === 'pending' && isCodeProvider(provider))
@@ -1038,7 +1046,7 @@ export function createVerily(options: ServerOptions) {
                 : `<input name="artifact" type="${provider.input ?? 'url'}" value="${escape(flow.artifact ?? flow.suggested ?? '')}" autocapitalize="none" spellcheck="false" required>`
             }</label>
             <button>Check my proof</button></form>
-            <p class="fine">${escape(artifactNote(provider))}</p>
+            <p class="fine">${escape(artifactNote(provider, flow.expect))}</p>
             <script src="${escape(prefix)}/copy.js" defer></script>`,
               ),
             );

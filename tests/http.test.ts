@@ -133,6 +133,44 @@ test('the verify page names what is linked, which is not always an account', asy
   );
 });
 
+test('a domain proof is said to name the subject only where it publishes its address', async () => {
+  const subjects: Record<string, typeof alice | typeof bob> = {
+    secure: alice,
+    plain: { ...alice, profileUrl: 'http://site.test/users/1' },
+    none: bob,
+  };
+
+  const app = createVerily({
+    storage: new MemoryStorage(),
+    providers: [dnsProvider()],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test', 'http://site.test'],
+    reportUrl: 'mailto:reports@site.test',
+    authenticate: async (r) => subjects[r.headers.get('cookie')?.match(/local=(\w+)/)?.[1] ?? ''],
+  });
+
+  const request = (path: string, options: RequestInit = {}) =>
+    app.handle(new Request(`https://site.test/api/verily${path}`, options));
+
+  const page = async (who: string) => {
+    const start = await request('/sessions?kind=connect', { headers: { cookie: `local=${who}` } });
+    const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=${who}`;
+    const path = start.headers.get('location')!.replace('/api/verily', '');
+
+    return (await request(path, { headers: { cookie } })).text();
+  };
+
+  // An address over http is still the subject's address, published for anyone to follow.
+  for (const who of ['secure', 'plain']) assert.match(await page(who), /the page it names/, who);
+
+  const minted = await page('none');
+
+  assert.match(minted, /<code>verily-proof=/);
+  assert.match(minted, /It does not say what it is for/);
+});
+
 test('forged origins, missing local authentication, and cross-account mutations fail', async () => {
   const f = fixture(),
     id = await f.connect('public');
