@@ -611,6 +611,14 @@ export function attestationLabel(
 }
 
 /**
+ * A subject's second identifier, shown beneath its name, or nothing where the name is
+ * already all of it: a mailbox's address and a domain are each their own id.
+ */
+export function externalId(external: ExternalAccount): string | undefined {
+  return external.kind === 'mailbox' || external.kind === 'domain' ? undefined : external.id;
+}
+
+/**
  * Where a subject's name may link, or nothing where it has no page of its own. A mailbox's
  * address is `mailto:`, which opens a message to it and shows a reader nothing.
  */

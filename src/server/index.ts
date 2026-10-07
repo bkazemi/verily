@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   attestationLabel,
+  externalId,
   externalLink,
   externalName,
   isArtifactProvider,
@@ -327,6 +328,25 @@ function providerNames(providers: Provider[]): string {
   return [...new Set(providers.map((p) => p.name))].join(' or ');
 }
 
+/**
+ * What the holder would be linking, for the sentence that asks them to: an account with a
+ * sign-in provider, a key, an address, a domain. Each is named once, however many ways it
+ * can be shown.
+ */
+function heldNames(providers: Provider[]): string {
+  const held = (p: Provider) =>
+    ({
+      signature: `${p.name} key`,
+      code: `${p.name.toLowerCase()} address`,
+      dns: 'domain',
+      wellknown: 'domain',
+    })[providerMethod(p) as string] ?? `${p.name} account`;
+
+  const names = [...new Set(providers.map(held))];
+
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0]!;
+}
+
 /** Seconds are the finest thing a record measured in days can mean; milliseconds are noise. */
 const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -443,8 +463,8 @@ function evidencePage(
         names.provider,
         externalName(e.external),
         externalLink(e.external),
-        // A mailbox's address is its name already, so there is no second identifier.
-        e.external.kind === 'mailbox' ? undefined : e.external.id,
+        // A mailbox's address or a domain is its name already, so there is no second identifier.
+        externalId(e.external),
         externalNotes(e.attestations, names),
       ) +
       times(
@@ -514,7 +534,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
         names.provider,
         externalName(d.external),
         externalLink(d.external),
-        d.external.kind === 'mailbox' ? undefined : d.external.id,
+        externalId(d.external),
         externalNotes(d.attestations, names),
       ) +
       times(
@@ -935,7 +955,7 @@ export function createVerily(options: ServerOptions) {
                 ? card(subject(user).heading, subject(user).value, user.profileUrl)
                 : '<p>Authenticate with the matching external account to review and remove this link.</p>'
             }
-            <p>Confirm the connection between this ${escape(subjectNoun(user?.kind) ?? 'site')} and your ${escape(providerNames(offered))} account.</p>
+            <p>Confirm the connection between this ${escape(subjectNoun(user?.kind) ?? 'site')} and your ${escape(heldNames(offered))}.</p>
             ${kind === 'renew' && offered.length > 1 ? '<p class="fine">Renewing another way adds that method beneath the one this connection was first shown by.</p>' : ''}
             ${forms}`,
             ),
@@ -1086,7 +1106,7 @@ export function createVerily(options: ServerOptions) {
               provider.name,
               externalName(flow.external!),
               externalLink(flow.external!),
-              flow.external!.kind === 'mailbox' ? undefined : flow.external!.id,
+              externalId(flow.external!),
             )}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             ${found ? `<p>${escape(found)}</p>` : ''}

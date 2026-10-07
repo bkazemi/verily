@@ -32,10 +32,11 @@ try {
     `
     import assert from 'node:assert/strict';
     import { createRequire } from 'node:module';
-    import { createVerily, githubProvider, discordProvider, youtubeProvider, emailProvider, resendSender, githubLinkProvider, linkProvider, PostgresStorage, status, init } from '@bkazemi/verily';
+    import { createVerily, githubProvider, discordProvider, youtubeProvider, emailProvider, resendSender, githubLinkProvider, linkProvider, dnsProvider, wellKnownProvider, PostgresStorage, status, init } from '@bkazemi/verily';
     assert.equal(typeof createVerily, 'function'); assert.equal(typeof githubProvider, 'function');
     assert.equal(typeof linkProvider, 'function'); assert.equal(typeof discordProvider, 'function'); assert.equal(typeof youtubeProvider, 'function');
     assert.equal(githubLinkProvider().id, 'github');
+    assert.equal(dnsProvider().method, 'dns'); assert.equal(wellKnownProvider().method, 'wellknown');
     assert.equal(emailProvider({ send: resendSender({ apiKey: 're_test', from: 'verify@example.test' }) }).id, 'email');
     assert.equal(typeof PostgresStorage, 'function'); assert.equal(typeof status, 'function'); assert.equal(typeof init, 'function');
     const { createSiteClient, pseudonym } = await import('@bkazemi/verily/site');
