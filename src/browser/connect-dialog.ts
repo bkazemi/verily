@@ -1,5 +1,5 @@
 import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
-import { externalLink, externalName } from '../core/index.js';
+import { externalId, externalLink, externalName } from '../core/index.js';
 import { accountCard, linkMark, node, outward, stampLink, styles } from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
 import { version } from '../version.js';
@@ -651,7 +651,7 @@ export function openConnectDialog(
         ? [logo, document.createTextNode(flow.provider.name)]
         : [document.createTextNode(flow.provider.name)],
       externalName(flow.external!),
-      flow.external!.kind === 'mailbox' ? undefined : flow.external!.id,
+      externalId(flow.external!),
       externalLink(flow.external!),
     );
 

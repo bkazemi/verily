@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createVerily } from '../src/server/index.js';
+import { createVerily, dnsProvider, wellKnownProvider } from '../src/server/index.js';
 import type { ArtifactProvider, Provider } from '../src/core/index.js';
 import {
   alice,
@@ -114,6 +114,23 @@ test('a served page draws the logotype white on its own plate, in either colour 
   assert.match(logo, /fill="#ffffff"/);
   // Nothing in it follows the page's text colour, which is what changes with the scheme.
   assert.ok(!logo.includes('currentColor'));
+});
+
+test('the verify page names what is linked, which is not always an account', async () => {
+  const said = async (providers: Provider[]) =>
+    (
+      await (
+        await fixture(providers).request('/verify', { headers: { cookie: 'local=alice' } })
+      ).text()
+    ).match(/between this \w+ and your ([^<]*)\.<\/p>/)![1];
+
+  assert.equal(await said([fakeProvider()]), 'GitHub account');
+
+  // A key and a domain are not accounts, and two ways of showing one domain name it once.
+  assert.equal(
+    await said([fakeProvider(), fakeDocumentProvider(), dnsProvider(), wellKnownProvider()]),
+    'GitHub account, Keys key or domain',
+  );
 });
 
 test('forged origins, missing local authentication, and cross-account mutations fail', async () => {

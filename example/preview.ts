@@ -62,9 +62,16 @@ const server = createServer((request, response) => {
     const id = url.pathname.split('/').at(-1)!;
 
     if (
-      !['current', 'signed-in', 'signed', 'mailed', 'unconfirmed', 'expired', 'revoked'].includes(
-        id,
-      ) &&
+      ![
+        'current',
+        'signed-in',
+        'signed',
+        'mailed',
+        'domain',
+        'unconfirmed',
+        'expired',
+        'revoked',
+      ].includes(id) &&
       !extra[id]
     ) {
       response.writeHead(404);
@@ -94,6 +101,15 @@ const server = createServer((request, response) => {
       confirmedAt: Date.now() - 3600000,
     };
 
+    // A domain names the subject in its own DNS, and the proof is the lookup that read it.
+    const record = {
+      by: 'provider' as const,
+      method: 'dns' as const,
+      artifactUrl: `${origin}/demo`,
+      expect: 'https://joesite.example/joe',
+      confirmedAt: Date.now() - 3600000,
+    };
+
     const evidence: Evidence = {
       id,
       local: { label: 'Joe', reference: 'joesite-member-1' },
@@ -112,20 +128,30 @@ const server = createServer((request, response) => {
                 handle: 'joe@joesite.example',
                 profileUrl: 'mailto:joe@joesite.example',
               }
-            : extra[id]
-              ? { id: `demo-${id}`, handle: extra[id].handle, profileUrl: `${origin}/demo` }
-              : { id: 'demo-account', handle: 'Joe', profileUrl: `${origin}/demo` },
+            : id === 'domain'
+              ? {
+                  id: 'joemarshall.example',
+                  kind: 'domain',
+                  handle: 'joemarshall.example',
+                  profileUrl: `${origin}/demo`,
+                }
+              : extra[id]
+                ? { id: `demo-${id}`, handle: extra[id].handle, profileUrl: `${origin}/demo` }
+                : { id: 'demo-account', handle: 'Joe', profileUrl: `${origin}/demo` },
       provider:
-        extra[id]?.provider ?? (id === 'signed' ? 'openpgp' : id === 'mailed' ? 'email' : 'github'),
+        extra[id]?.provider ??
+        { signed: 'openpgp', mailed: 'email', domain: 'domain' }[id] ??
+        'github',
       providerName:
         extra[id]?.providerName ??
-        (id === 'signed' ? 'OpenPGP' : id === 'mailed' ? 'Email' : 'GitHub'),
+        { signed: 'OpenPGP', mailed: 'Email', domain: 'Domain' }[id] ??
+        'GitHub',
       siteName: 'JoeSite',
       verifierName: 'JoeSite',
       visibility: 'public',
       status: extra[id]?.retired
         ? 'retired'
-        : ['current', 'signed-in', 'signed', 'mailed', ...Object.keys(extra)].includes(id)
+        : ['current', 'signed-in', 'signed', 'mailed', 'domain', ...Object.keys(extra)].includes(id)
           ? 'verified'
           : id === 'revoked'
             ? 'revoked'
@@ -165,22 +191,24 @@ const server = createServer((request, response) => {
             : id === 'mailed'
               ? // A mailed link or code, which like a sign-in publishes nothing.
                 [{ by: 'provider', method: 'code', confirmedAt: Date.now() - 86400000 }]
-              : ['current', 'unconfirmed'].includes(id)
-                ? [proof]
-                : [
-                    { by: 'provider', method: 'oauth', confirmedAt: Date.now() - 86400000 },
-                    ...(id === 'signed-in'
-                      ? [
-                          {
-                            by: 'provider' as const,
-                            method: 'backlink' as const,
-                            artifactUrl: `${origin}/demo`,
-                            expect: 'https://joesite.example/joe',
-                            confirmedAt: Date.now() - 3600000,
-                          },
-                        ]
-                      : []),
-                  ],
+              : id === 'domain'
+                ? [record]
+                : ['current', 'unconfirmed'].includes(id)
+                  ? [proof]
+                  : [
+                      { by: 'provider', method: 'oauth', confirmedAt: Date.now() - 86400000 },
+                      ...(id === 'signed-in'
+                        ? [
+                            {
+                              by: 'provider' as const,
+                              method: 'backlink' as const,
+                              artifactUrl: `${origin}/demo`,
+                              expect: 'https://joesite.example/joe',
+                              confirmedAt: Date.now() - 3600000,
+                            },
+                          ]
+                        : []),
+                    ],
       },
     };
 

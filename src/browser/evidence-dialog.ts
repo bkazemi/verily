@@ -1,5 +1,6 @@
 import {
   attestationLabel,
+  externalId,
   externalLink,
   externalName,
   lastProved,
@@ -559,8 +560,8 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
     // would print it twice here, since this heading writes it either way.
     logo ? [logo, document.createTextNode(provider)] : [document.createTextNode(provider)],
     externalName(evidence.external),
-    // A mailbox's address is its name already, so there is no second identifier.
-    evidence.external.kind === 'mailbox' ? undefined : evidence.external.id,
+    // A mailbox's address or a domain is its name already, so there is no second identifier.
+    externalId(evidence.external),
     externalLink(evidence.external),
     // Status first, then how it was shown, then when. The proof explains the state
     // above it, so it cannot sit before that state has been given.
