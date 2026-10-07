@@ -12,6 +12,7 @@ import { styleVersion } from '../src/server/style.js';
 import {
   createVerily,
   discordProvider,
+  dnsProvider,
   emailProvider,
   generateSigningKey,
   resendSender,
@@ -353,6 +354,10 @@ export class VerilyStore {
           clientSecret: env.GITHUB_CLIENT_SECRET,
         }),
         githubLinkProvider(),
+        // A domain shown by a record in its DNS, which is one fetch to a fixed resolver. The
+        // file method reads a host the holder names, and a Worker cannot check where that
+        // resolves, so it is not offered here.
+        dnsProvider(),
         ...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET
           ? [
               discordProvider({

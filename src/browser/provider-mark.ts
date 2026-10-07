@@ -82,7 +82,7 @@ function key(): SVGSVGElement {
   ]);
 }
 
-/** A globe, drawn here like the key, for a link back from a page on the open web. */
+/** A globe, drawn here like the key, for a page or a domain on the open web. */
 function globe(): SVGSVGElement {
   return lines([
     'M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z',
@@ -131,6 +131,10 @@ export function providerMark(provider: string, method?: string): SVGSVGElement |
     email: envelope,
   };
 
-  // A site names its own link-back providers, so those fall back on the method's mark.
-  return marks[provider]?.() ?? (method === 'backlink' ? globe() : undefined);
+  // A site names its own link-back providers, so those fall back on the method's mark,
+  // which a domain shown by its DNS or by a file shares.
+  return (
+    marks[provider]?.() ??
+    (['backlink', 'dns', 'wellknown'].includes(method ?? '') ? globe() : undefined)
+  );
 }

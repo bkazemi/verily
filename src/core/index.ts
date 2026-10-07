@@ -42,9 +42,11 @@ export interface ExternalAccount {
    * A page is an address that was read and nothing more: a method that only fetches a
    * document learns what it says, never whose account the address is. A mailbox is an
    * account in all but how it is written: its domain issued it and can hand it to somebody
-   * else, but its address is already its whole name and it has no profile to link to.
+   * else, but its address is already its whole name and it has no profile to link to. A
+   * domain is likewise issued and can be handed over, and is named by itself: what was
+   * shown is control of the name, whatever is or is not served at it.
    */
-  kind?: 'account' | 'key' | 'page' | 'mailbox';
+  kind?: 'account' | 'key' | 'page' | 'mailbox' | 'domain';
   handle: string;
   /** Where a reader goes to see the subject. For a mailbox, its `mailto:` address. */
   profileUrl: string;
@@ -60,7 +62,8 @@ export interface ExternalAccount {
  * source could improve on it. A sign-in and a mailed code happen once, between the holder
  * and this backend. The rest publish an artifact a reader can fetch.
  */
-export type Method = 'declared' | 'oauth' | 'gist' | 'backlink' | 'signature' | 'code';
+export type Method =
+  'declared' | 'oauth' | 'gist' | 'backlink' | 'dns' | 'wellknown' | 'signature' | 'code';
 
 /** Who vouches for one side: this backend from its own records, or the account's provider. */
 export type Attester = 'backend' | 'provider';
@@ -600,6 +603,8 @@ export function attestationLabel(
     oauth: `Signed in with ${names.provider}`,
     gist: `Published a proof on ${names.provider}`,
     backlink: `Linked back to ${names.site}`,
+    dns: `Named ${names.site} in a DNS record`,
+    wellknown: `Named ${names.site} in a file it serves`,
     signature: 'Proved with a signature',
     code: 'Entered a code sent to this address',
   }[method];

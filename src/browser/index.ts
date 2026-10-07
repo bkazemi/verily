@@ -860,7 +860,7 @@ function validEvidence(value: unknown): value is Evidence {
     validAttestations(value.attestations) &&
     (value.local.kind === undefined || typeof value.local.kind === 'string') &&
     (value.external.kind === undefined ||
-      ['account', 'key', 'page', 'mailbox'].includes(String(value.external.kind))) &&
+      ['account', 'key', 'page', 'mailbox', 'domain'].includes(String(value.external.kind))) &&
     (value.revokedAt === undefined ||
       (typeof value.revokedAt === 'number' && Number.isFinite(value.revokedAt))) &&
     ['verified', 'unconfirmed', 'expired', 'retired', 'revoked'].includes(String(value.status)) &&
