@@ -230,9 +230,9 @@ test('the holder cannot point the read at anything but the file', async () => {
 
 test('a file that does not carry the line proves nothing', async () => {
   const cases: [string, ReturnType<typeof wellKnown>, RegExp][] = [
-    ['missing line', wellKnown('nothing here'), /no line naming/],
-    ['the address inside a longer line', wellKnown(`see ${expect}`), /no line naming/],
-    ['a longer address', wellKnown(`${expect}0`), /no line naming/],
+    ['missing line', wellKnown('nothing here'), /no line with this value/],
+    ['the address inside a longer line', wellKnown(`see ${expect}`), /no line with this value/],
+    ['a longer address', wellKnown(`${expect}0`), /no line with this value/],
     ['a missing file', wellKnown('', { status: 404 }), /unavailable/],
     [
       'a redirect',
@@ -266,7 +266,10 @@ test('both methods name the subject by its address and need it to have one', () 
   for (const instance of [dns([]).instance, wellKnown('').instance]) {
     assert.equal(instance.id, 'domain');
     assert.equal(instance.expect!(alice), alice.profileUrl);
-    assert.throws(() => instance.expect!(bob), /profileUrl/);
+    // A subject with no address has nothing to name, and is proved by a minted string
+    // that says nothing of the site.
+    assert.equal(instance.expect!(bob), undefined);
+    assert.equal(instance.mint!('abc'), 'verily-proof=abc');
     assert.equal(instance.known!(shown as never), 'example.test');
     // A page on the domain is not the domain.
     assert.equal(instance.known!({ ...shown, kind: 'page' } as never), undefined);
@@ -274,8 +277,8 @@ test('both methods name the subject by its address and need it to have one', () 
 
   const names = { site: 'Site', provider: 'Domain' };
 
-  assert.equal(attestationLabel('dns', names), 'Named Site in a DNS record');
-  assert.equal(attestationLabel('wellknown', names), 'Named Site in a file it serves');
+  assert.equal(attestationLabel('dns', names), 'Published a proof in its DNS');
+  assert.equal(attestationLabel('wellknown', names), 'Published a proof in a file it serves');
 });
 
 test('a domain is linked by its record, joined by its file, and unconfirmed once unread', async () => {
@@ -341,4 +344,151 @@ test('a domain is linked by its record, joined by its file, and unconfirmed once
   now += 2000;
   assert.equal(await service.recheck(), 1);
   assert.equal((await service.read(id)).status, 'verified');
+});
+
+test('a subject with no address is proved by a minted record, kept across renewals', async () => {
+  let now = 1000000;
+  let records: string[] = [];
+  const asked: string[] = [];
+
+  const request = ((url: string) => {
+    asked.push(String(url));
+
+    return Promise.resolve(
+      String(url).startsWith('https://dns.google/')
+        ? new Response(
+            JSON.stringify({ Status: 0, Answer: records.map((data) => ({ type: 16, data })) }),
+          )
+        : new Response('', { status: 404 }),
+    );
+  }) as unknown as typeof fetch;
+
+  const service = new VerilyService({
+    storage: new MemoryStorage(),
+    providers: [dnsProvider({ fetch: request }), wellKnownProvider({ fetch: request })],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test'],
+    now: () => now,
+    validityMs: 30 * 86400000,
+    recheckMs: 1000,
+    freshnessMs: 5000,
+  });
+
+  const choice = { provider: 'domain', method: 'dns' };
+  const flow = await service.start(bob, undefined, 'connect', choice);
+
+  // Unguessable, and silent about the site: DNS is read by anyone, and this subject's site
+  // gave it no public page to name.
+  assert.match(flow.expect!, /^verily-proof=[\w-]{20,}$/);
+  assert.ok(!flow.expect!.includes('Site'));
+
+  records = [flow.expect!];
+  await service.submit(flow.flowId, flow.binding, 'example.test');
+
+  const id = (await service.approve(flow.flowId, flow.binding, bob, 'unlisted'))!;
+
+  assert.deepEqual((await service.read(id, bob)).external, shown);
+  // A minted string is in no file the holder was not asked to put it in.
+  assert.ok(!asked.includes(file));
+
+  // The record is reread like any other standing proof.
+  now += 2000;
+  assert.equal(await service.recheck(), 1);
+
+  // Renewing asks for the record already there, and finds it without asking for anything.
+  const renewal = await service.start(bob, id, 'renew', choice, undefined, true);
+
+  assert.equal(renewal.expect, flow.expect);
+  assert.equal((await service.flow(renewal.flowId, renewal.binding)).phase, 'complete');
+
+  // Another subject is given a string of its own, so one record proves one link.
+  const other = await service.start(
+    { ...bob, id: 'private-local-9' },
+    undefined,
+    'connect',
+    choice,
+  );
+
+  assert.notEqual(other.expect, flow.expect);
+  await service.submit(other.flowId, other.binding, 'example.test');
+  assert.equal((await service.flow(other.flowId, other.binding)).phase, 'pending');
+});
+
+test('a proof of an address the subject no longer has is not kept as a minted one', async () => {
+  let records = [alice.profileUrl];
+  let body = '';
+
+  const request = ((url: string) =>
+    Promise.resolve(
+      String(url).startsWith('https://dns.google/')
+        ? new Response(
+            JSON.stringify({ Status: 0, Answer: records.map((data) => ({ type: 16, data })) }),
+          )
+        : new Response(body, { headers: { 'content-type': 'text/plain' } }),
+    )) as unknown as typeof fetch;
+
+  const service = new VerilyService({
+    storage: new MemoryStorage(),
+    providers: [dnsProvider({ fetch: request }), wellKnownProvider({ fetch: request })],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test'],
+  });
+
+  const dns = { provider: 'domain', method: 'dns' };
+  const first = await service.start(alice, undefined, 'connect', dns);
+
+  await service.submit(first.flowId, first.binding, 'example.test');
+
+  const id = (await service.approve(first.flowId, first.binding, alice, 'unlisted'))!;
+
+  // The site takes the subject's page away, so there is no address left to publish.
+  const { profileUrl: _, ...hidden } = alice;
+
+  // The same domain shown another way is not added to a record of the old address.
+  const other = await service.start(hidden, undefined, 'connect', {
+    provider: 'domain',
+    method: 'wellknown',
+  });
+
+  assert.match(other.expect!, /^verily-proof=/);
+  body = other.expect!;
+  await service.submit(other.flowId, other.binding, 'example.test');
+
+  const second = (await service.approve(other.flowId, other.binding, hidden, 'unlisted'))!;
+
+  assert.notEqual(second, id);
+
+  assert.deepEqual(
+    (await service.read(id, hidden)).attestations.external.map((a) => [a.method, a.expect]),
+    [['dns', alice.profileUrl]],
+  );
+
+  // A record first shown by a minted string does hold, and is joined. Its own proof of an
+  // address goes the same way once the subject has none: replaced, never kept beside.
+  const [minted] = (await service.read(second, hidden)).attestations.external;
+
+  assert.deepEqual([minted.method, minted.minted], ['wellknown', true]);
+
+  const named = await service.start(alice, undefined, 'connect', dns);
+
+  await service.submit(named.flowId, named.binding, 'example.test');
+  await service.approve(named.flowId, named.binding, alice, 'unlisted');
+
+  const again = await service.start(hidden, undefined, 'connect', dns);
+
+  records = [again.expect!];
+  await service.submit(again.flowId, again.binding, 'example.test');
+  await service.approve(again.flowId, again.binding, hidden, 'unlisted');
+
+  assert.deepEqual(
+    (await service.read(second, hidden)).attestations.external.map((a) => [a.method, a.expect]),
+    [
+      ['wellknown', other.expect],
+      ['dns', again.expect],
+    ],
+  );
 });

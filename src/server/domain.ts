@@ -60,8 +60,8 @@ export interface WellKnownProviderOptions extends DomainProviderOptions {
 }
 
 /**
- * Proves a domain by a record in its DNS. The holder publishes the local subject's address
- * in a TXT record at `_verily.<domain>` and names the domain; this looks the record up and
+ * Proves a domain by a record in its DNS. The holder publishes the local subject's address,
+ * or a string minted for them where the subject has none, in a TXT record at `_verily.<domain>` and names the domain; this looks the record up and
  * checks the address is there. It reaches a domain that serves no page of its own, or only
  * forwards somewhere else, which a link back never can.
  *
@@ -70,8 +70,8 @@ export interface WellKnownProviderOptions extends DomainProviderOptions {
  * nothing is said about a parent or a subdomain. A domain changes hands like an account,
  * and takes the record with it or drops it.
  *
- * Like a link back, the proof is a standing statement and not a per-flow token, so
- * freshness comes from `recheck()` looking it up again. A lookup that could not be made is
+ * Like a link back, the proof is a standing statement, so freshness comes from `recheck()`
+ * looking it up again and a renewal asks for the record already there. A lookup that could not be made is
  * unread, never absent.
  */
 export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvider {
@@ -137,7 +137,7 @@ export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvid
             text(record.data) === expect,
         )
       )
-        throw new Refused(`No TXT record at ${label}.${domain} names this subject`);
+        throw new Refused(`No TXT record at ${label}.${domain} has this value`);
 
       return account(domain);
     },
@@ -145,8 +145,8 @@ export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvid
 }
 
 /**
- * Proves a domain by a file it serves. The holder puts the local subject's address on a
- * line of `/.well-known/verily.txt` and names the domain; this reads the file and checks
+ * Proves a domain by a file it serves. The holder puts the local subject's address, or a
+ * string minted for them where the subject has none, on a line of `/.well-known/verily.txt` and names the domain; this reads the file and checks
  * the line is there. It is for a holder who can add a file to a site and cannot reach its
  * DNS or its pages' markup.
  *
@@ -165,7 +165,7 @@ export function wellKnownProvider(options: WellKnownProviderOptions = {}): Artif
     method: 'wellknown',
 
     instructions: (expect) => [
-      'Serve a plain text file at this path on your domain, with this address on a line of its own, then enter the domain below.',
+      'Serve a plain text file at this path on your domain, with this on a line of its own, then enter the domain below.',
       { code: path },
       { code: expect },
     ],
@@ -208,7 +208,7 @@ export function wellKnownProvider(options: WellKnownProviderOptions = {}): Artif
 
         if (!lines.some((line) => line.trim() === expect))
           throw new Refused(
-            truncated ? 'File is too large to read' : 'File has no line naming this subject',
+            truncated ? 'File is too large to read' : 'File has no line with this value',
           );
       } finally {
         await discard(response);
@@ -228,13 +228,13 @@ function shared(options: DomainProviderOptions) {
     field: 'Your domain',
     input: 'text' as const,
 
-    // The subject's own address is the entire claim, so there is nothing per-flow to mint.
-    expect(local: LocalAccount) {
-      if (!local.profileUrl)
-        throw new Error('A domain proof needs a local subject with a profileUrl to name');
+    // The subject's own address is the entire claim, where it has one. A subject with no
+    // page a reader could open has nothing to name, and is proved by a minted string.
+    expect: (local: LocalAccount) => local.profileUrl,
 
-      return local.profileUrl;
-    },
+    // DNS and a well-known path are read by anyone, unasked. A subject with no public page
+    // is one its site keeps private, so the string says nothing of the site either.
+    mint: (secret: string) => `verily-proof=${secret}`,
 
     // A domain is where it says it is, so a record of one already says where to look.
     known: (account: ExternalAccount) => (account.kind === 'domain' ? account.id : undefined),
