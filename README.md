@@ -208,6 +208,8 @@ import {
   githubGistProvider,
   linkProvider,
   githubLinkProvider,
+  dnsProvider,
+  wellKnownProvider,
   pgpProvider,
 } from '@bkazemi/verily';
 ```
@@ -220,10 +222,12 @@ import {
 | `githubGistProvider()` | publishing a public gist containing a line Verily gives them.                                                | None.                                   |
 | `linkProvider()`       | adding a `rel="me"` link to their profile on a page they control.                                            | The local account needs a `profileUrl`. |
 | `githubLinkProvider()` | putting their profile URL in the website field of their GitHub profile, then entering their GitHub username. | The local account needs a `profileUrl`. |
+| `dnsProvider()`        | adding a TXT record to their domain's DNS, then entering the domain.                                         | The local account needs a `profileUrl`. |
+| `wellKnownProvider()`  | serving a text file at a fixed path on their domain, then entering the domain.                               | The local account needs a `profileUrl`. |
 | `pgpProvider()`        | signing a line Verily gives them with their OpenPGP key, then pasting it and the key.                        | None.                                   |
 | `emailProvider()`      | pressing a button, or entering a code, that Verily mails to their address.                                   | A function that sends one message.      |
 
-All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. A proof that does not check out can be put right and handed back on the same step, up to five times, so a mistyped address never means publishing or signing again. Gists and link-backs can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
+All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. A proof that does not check out can be put right and handed back on the same step, up to five times, so a mistyped address never means publishing or signing again. Gists, link-backs, DNS records and files can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
 
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
@@ -238,6 +242,8 @@ Proving the same account a second way adds that proof to the existing record ins
 **A link-back found at sign-in.** With `githubProvider()` and `githubLinkProvider()` both listed, signing in with GitHub also reads the profile that signed in. If its website field already links to the user's `profileUrl`, the approval step says so, and confirming records the link-back beside the sign-in. The user never picks the second method or types a username. A link with `http://` in place of `https://` counts; a different host, port or path does not.
 
 **Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verily checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
+
+**Domains.** `dnsProvider()` proves a domain that serves no page of its own, or only forwards elsewhere. The user adds a TXT record named `_verily` whose value is their `profileUrl`, and enters the domain. Verily looks up `_verily.<domain>` through `https://dns.google/resolve`, a fixed resolver, so it runs on Cloudflare Workers, and the evidence links to that lookup for a reader to repeat. `wellKnownProvider()` reads `https://<domain>/.well-known/verily.txt` instead and looks for the `profileUrl` on a line of its own. It fetches a host the user names, so it follows the link-back's rules: Node, or `hosts`. Both name the account by the exact domain entered, and say nothing about its subdomains. List both and a domain proved one way picks up the other if it is already there.
 
 **Your own method.** A provider is an object, and [`src/core/index.ts`](src/core/index.ts) documents each shape. An artifact provider may also set `field` and `input` to name what it asks for, `resolve` to turn something short such as a username into the address to read, and `known` to say where to look for an account already on record, which is what lets a proof be found without asking. A sign-in provider's `authorizationUrl` is passed `account` on a renewal or visibility change, so it can ask for that account by name.
 

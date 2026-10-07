@@ -52,6 +52,25 @@ export function publicFetch(
   };
 }
 
+/**
+ * How an address the holder named is fetched. A deployment that named its hosts has
+ * vouched for where they resolve, so the platform's own fetch will do. One that reads any
+ * host has vouched for nothing, and the holder picks the name: every address it resolves
+ * to is checked, on the connection that uses it, which only Node lets this do.
+ */
+export function transport(options: { fetch?: typeof fetch; hosts?: string[] }): Fetch {
+  if (options.fetch) return options.fetch;
+
+  if (options.hosts) return (url, init) => fetch(url, init);
+
+  if (!pinnable())
+    throw new Error(
+      'Reading any host needs Node, which lets it check where a name resolves; name the hosts to read instead',
+    );
+
+  return publicFetch();
+}
+
 /** A lookup that answers only with addresses that are all permitted, or not at all. */
 function pinned(resolve: Resolve, permitted: (address: string) => boolean): LookupFunction {
   return (hostname, options, callback) => {

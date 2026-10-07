@@ -50,6 +50,13 @@ export { githubGistProvider } from './github-gist.js';
 
 export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './link.js';
 
+export {
+  dnsProvider,
+  wellKnownProvider,
+  type DomainProviderOptions,
+  type WellKnownProviderOptions,
+} from './domain.js';
+
 export { pgpProvider } from './pgp.js';
 
 export { generateSigningKey, signer } from './signing.js';
@@ -229,6 +236,8 @@ function methodAction(provider: Provider): string {
     oauth: `Sign in with ${provider.name}`,
     gist: `Publish a proof on ${provider.name}`,
     backlink: `Link back from ${provider.name}`,
+    dns: 'Add a DNS record',
+    wellknown: 'Serve a file',
     signature: `Sign with ${provider.name}`,
     code: `Confirm by ${provider.name.toLowerCase()}`,
   };
@@ -252,9 +261,15 @@ function artifactField(provider: ArtifactProvider): string {
  * standing: it goes on the record with this one, and they did not ask for it by name.
  */
 function standingNote(flow: Flow, site: string): string | undefined {
-  return flow.standing?.some((a) => a.method === 'backlink')
-    ? `This account already links back to ${site}. Confirming records that too.`
-    : undefined;
+  const found: Record<string, string> = {
+    backlink: `This account already links back to ${site}.`,
+    dns: `This domain already names ${site} in a DNS record.`,
+    wellknown: `This domain already names ${site} in a file it serves.`,
+  };
+
+  const note = flow.standing?.map((a) => found[a.method]).find((said) => said !== undefined);
+
+  return note ? `${note} Confirming records that too.` : undefined;
 }
 
 /**
@@ -271,9 +286,18 @@ function refusedNote(flow: Flow): string | undefined {
 
 /** Said beside every artifact method: what the holder publishes is public by design. */
 function artifactNote(provider: ArtifactProvider): string {
-  return provider.method === 'backlink'
-    ? 'This link is public, as is the page you point at. Anyone reading either one can follow it here.'
-    : 'This line is public, as is whatever published it. Publish nothing else alongside it.';
+  const notes: Record<string, string> = {
+    backlink:
+      'This link is public, as is the page you point at. Anyone reading either one can follow it here.',
+    dns: 'This record is public, as is the page it names. Anyone reading either one can follow it here.',
+    wellknown:
+      'This file is public, as is the page it names. Anyone reading either one can follow it here.',
+  };
+
+  return (
+    notes[provider.method] ??
+    'This line is public, as is whatever published it. Publish nothing else alongside it.'
+  );
 }
 
 /**

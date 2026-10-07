@@ -9,7 +9,7 @@ import {
   type LocalAccount,
 } from '../core/index.js';
 import { discard, readBounded } from './body.js';
-import { pinnable, publicFetch, type Fetch } from './public-fetch.js';
+import { transport } from './public-fetch.js';
 
 /**
  * Domain suffixes that must never be fetched. The holder names the address, so it names
@@ -205,25 +205,6 @@ async function backlinked(
   throw new Refused(
     truncated ? 'Page is too large to read' : 'Page has no rel="me" link to this subject',
   );
-}
-
-/**
- * How pages are fetched. A deployment that named its hosts has vouched for where they
- * resolve, so the platform's own fetch will do. One that reads any host has vouched for
- * nothing, and the holder picks the name: every address it resolves to is checked, on the
- * connection that uses it, which only Node lets this do.
- */
-function transport(options: LinkProviderOptions): Fetch {
-  if (options.fetch) return options.fetch;
-
-  if (options.hosts) return (url, init) => fetch(url, init);
-
-  if (!pinnable())
-    throw new Error(
-      'Reading any host needs Node, which lets it check where a name resolves; name the hosts to read instead',
-    );
-
-  return publicFetch();
 }
 
 /**
