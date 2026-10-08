@@ -524,6 +524,44 @@ export class VerilyService {
         if (suggested) flow.suggested = suggested;
       }
 
+      // A draft carries only public setup, never a session or a successful proof.
+      // Scope it to the exact subject and operation. Starting again
+      // authenticates the holder as usual and mints a fresh binding and deadline.
+      // Context belongs to the current visit: hosted sessions and return transactions
+      // change when the holder signs in again and must never be restored from a draft.
+      if (artifact?.method === 'dns' && local && ['connect', 'renew'].includes(kind)) {
+        const id = hash(
+          JSON.stringify([
+            local.id,
+            this.siteOf(local),
+            local.reference,
+            local.profileUrl,
+            provider.id,
+            kind,
+            connectionId,
+          ]),
+        );
+
+        const saved = await tx.get('dnsDrafts', id);
+        const draft = saved && saved.expiresAt > this.now() ? saved : undefined;
+
+        flow.dnsDraftId = id;
+
+        if (draft) {
+          flow.expect = draft.expect;
+
+          if (draft.artifact) flow.suggested = draft.artifact;
+        }
+
+        await tx.put('dnsDrafts', id, {
+          id,
+          flowId: flow.id,
+          expect: flow.expect!,
+          ...(draft?.artifact ? { artifact: draft.artifact } : {}),
+          expiresAt: draft?.expiresAt ?? this.now() + 7 * 86400000,
+        });
+      }
+
       await tx.put('flows', flow.id, flow);
 
       return provider;
@@ -544,7 +582,7 @@ export class VerilyService {
           flowId: flow.id,
           binding,
           expect: flow.expect!,
-          instructions: artifact.instructions(flow.expect!),
+          instructions: artifact.instructions(flow.expect!, flow.suggested),
         }
       : isRedirectProvider(provider)
         ? {
@@ -684,6 +722,15 @@ export class VerilyService {
 
       if (flow.phase !== 'pending' || !flow.expect || !isArtifactProvider(provider))
         throw new Unavailable();
+
+      if (flow.dnsDraftId) {
+        const draft = await tx.get('dnsDrafts', flow.dnsDraftId);
+
+        if (draft?.flowId === flow.id) {
+          draft.artifact = artifact;
+          await tx.put('dnsDrafts', draft.id, draft);
+        }
+      }
 
       flow.phase = 'exchanging';
       await tx.put('flows', id, flow);
@@ -1338,6 +1385,12 @@ export class VerilyService {
     connection?: Connection,
   ) {
     connection ??= flow.connectionId ? await tx.get('connections', flow.connectionId) : undefined;
+
+    if (flow.dnsDraftId && phase !== 'failed') {
+      const draft = await tx.get('dnsDrafts', flow.dnsDraftId);
+
+      if (draft?.flowId === flow.id) await tx.delete('dnsDrafts', draft.id);
+    }
 
     flow.phase = phase;
 
@@ -2105,6 +2158,9 @@ export class VerilyService {
 
       for (const flow of await tx.list('flows'))
         if (flow.expiresAt <= now) await tx.delete('flows', flow.id);
+
+      for (const draft of await tx.list('dnsDrafts'))
+        if (draft.expiresAt <= now) await tx.delete('dnsDrafts', draft.id);
 
       for (const limit of await tx.list('limits'))
         if (limit.expiresAt <= now) await tx.delete('limits', limit.id);

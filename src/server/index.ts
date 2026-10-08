@@ -407,6 +407,18 @@ function times(rows: [string, number | undefined][]) {
     .join('')}</dl>`;
 }
 
+/** Provider setup with the flow’s return instructions, shared by HTML and the dialog. */
+function proofInstructions(provider: ArtifactProvider, flow: Flow): Instruction[] {
+  return [
+    ...provider.instructions(flow.expect!, flow.artifact ?? flow.suggested),
+    ...(flow.dnsDraftId
+      ? [
+          'Your DNS setup is saved for seven days from when you started. To continue later, sign in and choose the DNS method again. For a renewal, reopen the same connection’s renewal. The proof must pass a fresh check; keep this TXT value while you wait.',
+        ]
+      : []),
+  ];
+}
+
 /**
  * What the holder is told, as the provider wrote it. A command is set as a block and never
  * reflowed: it is copied character for character, and one wrapped line is a broken command.
@@ -940,7 +952,7 @@ export function createVerily(options: ServerOptions) {
 
     if (flow.phase === 'pending' && flow.expect && isArtifactProvider(provider))
       Object.assign(view, {
-        instructions: provider.instructions(flow.expect),
+        instructions: proofInstructions(provider, flow),
         artifact: provider.artifact,
         field: artifactField(provider),
         input: provider.input ?? 'url',
@@ -1170,7 +1182,7 @@ export function createVerily(options: ServerOptions) {
               page(
                 prefix,
                 `Verify with ${provider.name}`,
-                `${instructions(provider.instructions(flow.expect))}
+                `${instructions(proofInstructions(provider, flow))}
             ${flow.tries ? `<p>${escape(refusedNote(flow))}</p>` : ''}
             <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
             <label>${escape(artifactField(provider))} ${

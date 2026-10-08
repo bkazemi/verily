@@ -111,12 +111,35 @@ export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvid
     ...shared(options),
     method: 'dns',
 
-    instructions: (expect) => [
-      'Add a TXT record to your domain’s DNS with this name and value, then enter the domain below.',
-      { code: label },
-      { code: expect },
-      'A new record can take a few minutes to be seen.',
-    ],
+    instructions(expect, artifact) {
+      let domain = artifact ? named(artifact) : undefined;
+
+      if (!domain && artifact) {
+        try {
+          domain = looked(artifact);
+        } catch {
+          /* An invalid input is never a command. */
+        }
+      }
+
+      const record = domain ? `${label}.${domain}` : `${label}.YOUR-DOMAIN`;
+
+      return [
+        domain
+          ? 'Add a TXT record with this name and value.'
+          : 'Add a TXT record with this name and value. Replace YOUR-DOMAIN with the exact domain you enter below.',
+        { code: record },
+        'If your DNS host adds the domain automatically, enter only _verily for the root domain. For a subdomain such as www.example.com in the example.com zone, enter _verily.www.',
+        { code: expect },
+        domain
+          ? `Proves control of ${domain} only. Parent domains and subdomains must be verified separately.`
+          : 'Proves control of the exact domain you enter. Parent domains and subdomains must be verified separately.',
+        'DNS changes can take up to 72 hours to appear. Check the published record with:',
+        { code: `dig TXT ${record} +short` },
+        ...(domain ? [[{ text: 'Look up this TXT record', href: lookup(domain) }]] : []),
+        'Keep the TXT record in place after verification so Verily can check it again.',
+      ];
+    },
 
     resolve(artifact) {
       const domain = named(artifact);
