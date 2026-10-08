@@ -240,6 +240,6 @@ function address(userId: string): string {
 }
 
 /** The last sixteen digits, in the groups of four that fingerprints are read in. */
-function short(fingerprint: string): string {
+export function short(fingerprint: string): string {
   return (fingerprint.slice(-16).match(/.{4}/g) ?? []).join(' ');
 }

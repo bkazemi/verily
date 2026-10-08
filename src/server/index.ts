@@ -66,6 +66,8 @@ export {
 
 export { pgpProvider } from './pgp.js';
 
+import { short } from './pgp.js';
+
 export { generateSigningKey, signer } from './signing.js';
 
 export {
@@ -511,7 +513,7 @@ function evidencePage(
             ],
       ) +
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
-    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with OpenPGP key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>${keyNamed(named)}` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
+    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? `<br>${keyLine(base, keyId, named)}` : ''}<br><a href="${escape(safeUrl(e.signedUrl))}">Download signed record</a> · <a href="${escape(base)}/check">Check a record</a></p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
@@ -523,14 +525,18 @@ function evidencePage(
 type Named = { domain: string; lookup: string; dnssec: boolean };
 
 /**
- * Says a key is named in a domain's DNS, as a link to the lookup that found it: a second
- * place to learn whose the key is, which is not this server. The domain written is the one
- * that was asked, whatever address the record beside it gives for its verifier.
+ * Names a signing key on one line: its last sixteen digits, linked to the key itself with
+ * the whole fingerprint on hover, then whether a domain's DNS was read naming it. That is a
+ * link to the lookup that found it, a second place to learn whose the key is which is not
+ * this server, and its hover names the domain that was asked, whatever address the record
+ * beside it gives for its verifier.
  */
-function keyNamed(named?: Named) {
+function keyLine(base: string, keyId: string, named?: Named) {
+  const key = `Key <a href="${escape(base)}/keys.asc" title="${escape(keyId)}">${escape(short(keyId))}</a>`;
+
   return named
-    ? `, which <a href="${escape(named.lookup)}" rel="noreferrer">${escape(named.domain)} names in its DNS</a>${named.dnssec ? ', validated by DNSSEC' : ''}`
-    : '';
+    ? `${key} · <a href="${escape(named.lookup)}" rel="noreferrer" title="${escape(`View the lookup for ${named.domain}`)}">confirmed in DNS${named.dnssec ? ' (DNSSEC)' : ''}</a>`
+    : key;
 }
 
 const checkForm =
@@ -580,7 +586,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
               ['Valid until', d.expiresAt],
             ],
       ) +
-      `<p class="fine">Signing key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>${keyNamed(named)}.</p>
+      `<p class="fine">${keyLine(base, keyId, named)}</p>
     <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
   );
 }
