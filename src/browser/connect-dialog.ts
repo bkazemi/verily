@@ -94,7 +94,7 @@ const connectStyles = `
   /* The block scrolls and its frame does not, so the copy button stays in its corner. */
   .code { position: relative; margin: 10px 0; }
   pre { margin: 0; padding: 10px 64px 10px 12px; border: 1px solid #e0e6df; border-radius: 8px; background: #f6f8f5; font: 12px/1.5 ui-monospace, monospace; white-space: pre; overflow-x: auto; }
-  .code .action { position: absolute; top: 6px; right: 6px; padding: 3px 8px; font-size: 11px; }
+  .code .action { position: absolute; top: 9px; right: 9px; padding: 3px 8px; font-size: 11px; }
   label { display: grid; gap: 4px; margin-top: 12px; font-weight: 600; }
   input[type=url], input[type=email], input[type=tel], input[type=text], textarea { width: 100%; padding: 8px 10px; border: 1px solid #cfd8d2; border-radius: 8px; font: 13px/1.4 system-ui, sans-serif; color: inherit; background: #fff; }
   textarea { font-family: ui-monospace, monospace; font-size: 12px; resize: vertical; }
