@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   attestationLabel,
   externalId,
+  externalIdGroups,
   externalLink,
   externalName,
   isArtifactProvider,
@@ -214,14 +215,20 @@ function card(
   heading: string,
   name: string,
   url: string | undefined,
-  reference?: string,
+  reference?: string | string[],
   ...extra: string[]
 ) {
   const profile = url && safeUrl(url);
 
   return `<div class="side"><p class="who">${escape(heading)}</p><p class="name">${
     profile ? `<a href="${escape(profile)}" rel="noreferrer">${escape(name)}</a>` : escape(name)
-  }</p>${reference ? `<p class="reference">${escape(reference)}</p>` : ''}${extra.join('')}</div>`;
+  }</p>${
+    typeof reference === 'string'
+      ? `<p class="reference">${escape(reference)}</p>`
+      : reference
+        ? `<p class="reference fingerprint">${reference.map((group) => `<span>${escape(group)}</span>`).join('')}</p>`
+        : ''
+  }${extra.join('')}</div>`;
 }
 
 /**
@@ -504,7 +511,7 @@ function evidencePage(
         externalName(e.external),
         externalLink(e.external),
         // A mailbox's address or a domain is its name already, so there is no second identifier.
-        externalId(e.external),
+        externalIdGroups(e.external) ?? externalId(e.external),
         externalNotes(e.attestations, names),
       ) +
       times(
@@ -568,7 +575,7 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
     e.providerName,
     externalName(e.external),
     externalLink(e.external),
-    externalId(e.external),
+    externalIdGroups(e.external) ?? externalId(e.external),
     `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? ` · <a href="${record}#signed">signed</a>` : ''}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
     times(
@@ -677,7 +684,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
         names.provider,
         externalName(d.external),
         externalLink(d.external),
-        externalId(d.external),
+        externalIdGroups(d.external) ?? externalId(d.external),
         externalNotes(d.attestations, names),
       ) +
       times(
@@ -1240,7 +1247,7 @@ export function createVerily(options: ServerOptions) {
               provider.name,
               externalName(flow.external!),
               externalLink(flow.external!),
-              externalId(flow.external!),
+              externalIdGroups(flow.external!) ?? externalId(flow.external!),
             )}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             ${found ? `<p>${escape(found)}</p>` : ''}

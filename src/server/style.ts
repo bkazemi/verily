@@ -189,6 +189,8 @@ main:has(.accounts) { max-width: 54rem; }
 .reference, .how { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.5; }
 
 .name + .how, .reference + .how { margin-top: .5rem; }
+.fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
+.fingerprint span { display: inline-block; margin-right: .5ch; }
 .how.additional { padding-left: .75rem; }
 
 .fine { color: var(--muted); font-size: .8125rem; line-height: 1.55; margin-bottom: .625rem; }

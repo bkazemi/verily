@@ -1,6 +1,7 @@
 import {
   attestationLabel,
   externalId,
+  externalIdGroups,
   externalLink,
   externalName,
   lastProved,
@@ -65,6 +66,9 @@ export const styles = `
   /* The account's own name carries that weight; a link inside a line of prose does not. */
   .summary a, .method a, .additional a { font: inherit; }
   .reference { margin-top: 2px; }
+  /* A fingerprint in fours: it breaks between groups, and copies as one unbroken word. */
+  .fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
+  .fingerprint span { display: inline-block; margin-right: .5ch; }
   .method { margin-top: 8px; }
   /* In the corner the heading leaves empty, apart from everything that was checked. */
   .listing { position: absolute; top: 12px; right: 14px; padding: 1px 8px; border: 1px solid #e0e6df; border-radius: 999px; color: #6b786f; font-size: 11px; font-weight: 550; }
@@ -287,7 +291,7 @@ function moment(time: number) {
 export function accountCard(
   heading: Node[],
   name: string,
-  reference: string | undefined,
+  reference: string | string[] | undefined,
   url?: string,
   ...extra: HTMLElement[]
 ) {
@@ -301,7 +305,13 @@ export function accountCard(
 
   card.append(title, value);
 
-  if (reference) card.append(node('div', reference, 'muted reference'));
+  if (typeof reference === 'string') card.append(node('div', reference, 'muted reference'));
+  else if (reference) {
+    const groups = node('div', '', 'muted reference fingerprint');
+
+    groups.append(...reference.map((group) => node('span', group)));
+    card.append(groups);
+  }
 
   card.append(...extra);
 
@@ -810,7 +820,7 @@ function externalCard(
     logo ? [logo, document.createTextNode(provider)] : [document.createTextNode(provider)],
     externalName(evidence.external),
     // A mailbox's address or a domain is its name already, so there is no second identifier.
-    externalId(evidence.external),
+    externalIdGroups(evidence.external) ?? externalId(evidence.external),
     externalLink(evidence.external),
     // Status first, then how it was shown, then when. The proof explains the state
     // above it, so it cannot sit before that state has been given.

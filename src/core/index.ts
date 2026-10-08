@@ -746,6 +746,14 @@ export function externalId(external: ExternalAccount): string | undefined {
 }
 
 /**
+ * A key's fingerprint in groups of four, as gpg prints it, so a renderer can break the line
+ * between groups. Nothing for any other subject, whose id is written as it stands.
+ */
+export function externalIdGroups(external: ExternalAccount): string[] | undefined {
+  return external.kind === 'key' ? (external.id.match(/.{1,4}/g) ?? undefined) : undefined;
+}
+
+/**
  * Where a subject's name may link, or nothing where it has no page of its own. A mailbox's
  * address is `mailto:`, which opens a message to it and shows a reader nothing.
  */
