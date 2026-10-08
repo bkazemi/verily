@@ -14,7 +14,13 @@ import {
   type FlowView,
   type Methods,
 } from './connect-dialog.js';
-import { openEvidenceDialog, type Account, type Listing, type Manage } from './evidence-dialog.js';
+import {
+  openEvidenceDialog,
+  subjectUrl,
+  type Account,
+  type Listing,
+  type Manage,
+} from './evidence-dialog.js';
 import { drawSignedWith, standing, watchSigned } from './signed.js';
 
 export type { Evidence } from '../core/index.js';
@@ -196,22 +202,6 @@ function accounts(records: Evidence[]): Account[] {
     // Every record the card speaks for, so its signature mark answers for all of them.
     sources: verified.length ? verified : [lead],
   }));
-}
-
-/**
- * Where the verifier lists every public record of a record's subject. A record whose
- * address is not the usual one is left linking to itself.
- */
-function subjectUrl(e: Evidence): string {
-  const url = new URL(e.evidenceUrl);
-  const path = url.pathname.replace(/\/connections\/[^/]+$/, '/published');
-
-  if (path === url.pathname) return e.evidenceUrl;
-
-  url.pathname = path;
-  url.search = `site=${encodeURIComponent(e.siteName)}&reference=${encodeURIComponent(e.local.reference)}`;
-
-  return url.href;
 }
 
 /**

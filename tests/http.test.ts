@@ -338,6 +338,22 @@ test('the public listing is a page where one is asked for, showing the accounts 
   assert.match(await other.text(), /No public connections/);
   assert.deepEqual(await (await f.request('/published?site=Site&reference=nobody')).json(), []);
 
+  // How the holder lists the account is a pill in its card's corner, as in the dialog.
+  await f.request(`/connections/${id}/mark`, {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ as: 'preferred' }),
+  });
+
+  assert.match(
+    await (await f.request(`/published?${mine}`, page)).text(),
+    /<div class="listing preferred">Preferred<\/div>/,
+  );
+
   // Two records of one account are one line, as they are one card in the badge's dialog.
   await f.connect('public');
 
