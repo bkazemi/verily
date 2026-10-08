@@ -19,6 +19,7 @@ import {
   dnsProvider,
   emailProvider,
   generateSigningKey,
+  pgpProvider,
   resendSender,
   youtubeProvider,
   githubLinkProvider,
@@ -362,6 +363,9 @@ export class VerilyStore {
         // file method reads a host the holder names, and a Worker cannot check where that
         // resolves, so it is not offered here.
         dnsProvider(),
+        // A key needs no registration and no secret. A Worker cannot read a web key
+        // directory safely, so an address on a key is shown only when the keyserver confirms it.
+        pgpProvider(),
         ...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET
           ? [
               discordProvider({
