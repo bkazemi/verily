@@ -160,9 +160,12 @@ class Browser {
 
   /** Runs a GitHub sign-in flow from its first request to its approval page's path. */
   async signIn(start: string) {
-    const begun = start.startsWith('/sessions?')
-      ? await this.fetch(start)
-      : await this.post('/sessions', start);
+    // A new link is started as the form on `/verify` starts one: posted, and held to its
+    // approval.
+    const begun = await this.post(
+      '/sessions',
+      start.startsWith('/sessions?') ? `${start.slice('/sessions?'.length)}&unattended=1` : start,
+    );
 
     assert.equal(begun.status, 303, await begun.text());
     const state = new URL(begun.headers.get('location')!).searchParams.get('state')!;
@@ -353,7 +356,11 @@ test('a site holder connects, returns with a signed result, and manages from a s
     const binding = () => [...a.cookies].find(([name]) => name.startsWith('verily_flow_'))!;
 
     // Two more flows from the same handoff: one left at the provider, one at its approval page.
-    const early = await a.fetch('/sessions?kind=connect&provider=github&method=oauth');
+    const early = await a.post(
+      '/sessions',
+      'kind=connect&provider=github&method=oauth&unattended=1',
+    );
+
     const earlyState = new URL(early.headers.get('location')!).searchParams.get('state')!;
     const earlyBinding = binding();
 
@@ -421,7 +428,7 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     // The return closed the session: nothing new starts from that handoff.
     assert.equal((await a.fetch('/verify')).status, 404);
-    assert.equal((await a.fetch('/sessions?kind=connect')).status, 404);
+    assert.equal((await a.post('/sessions', 'kind=connect')).status, 404);
     assert.match(await (await a.fetch('/')).text(), /Session ended/);
 
     // A manage handoff lands on the settings page for that subject, without sharing or embeds.
@@ -702,7 +709,7 @@ test('requests are limited per session, per client and per site, GETs that creat
     const forged = browser('198.51.100.1');
 
     forged.cookies.set('verily_owner', 'forged');
-    assert.equal((await forged.fetch('/sessions?kind=connect')).status, 429);
+    assert.equal((await forged.post('/sessions', 'kind=connect')).status, 429);
 
     const real = browser('198.51.100.3');
 
@@ -852,7 +859,7 @@ test('a site that lists its providers has its holders offered those, and held to
 
     // Asking for nothing runs the first one the site lists, not the first one configured.
     for (const start of [
-      await member.fetch('/sessions?kind=connect'),
+      await member.post('/sessions', 'kind=connect&unattended=1'),
       await member.post('/sessions', 'kind=connect'),
     ]) {
       assert.equal(start.status, 303);

@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createVerily, dnsProvider, wellKnownProvider } from '../src/server/index.js';
-import type { ArtifactProvider, Provider } from '../src/core/index.js';
+import {
+  dialogPath,
+  dialogRoute,
+  routeOf,
+  routePath,
+  routes,
+  type ArtifactProvider,
+  type Provider,
+  type RouteName,
+} from '../src/core/index.js';
 import {
   alice,
   bob,
@@ -155,7 +164,16 @@ test('a domain proof is said to name the subject only where it publishes its add
     app.handle(new Request(`https://site.test/api/verily${path}`, options));
 
   const page = async (who: string) => {
-    const start = await request('/sessions?kind=connect', { headers: { cookie: `local=${who}` } });
+    const start = await request('/sessions', {
+      method: 'POST',
+      headers: {
+        origin: 'https://site.test',
+        cookie: `local=${who}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'kind=connect&unattended=1',
+    });
+
     const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=${who}`;
     const path = start.headers.get('location')!.replace('/api/verily', '');
 
@@ -318,7 +336,15 @@ test('a holder-paced proof is published here, submitted here, and approved here'
   const f = fixture([provider]);
 
   // No redirect away: the flow stays on this origin while the holder publishes.
-  const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'kind=connect&unattended=1',
+  });
 
   assert.equal(start.status, 303);
   const location = start.headers.get('location')!;
@@ -385,7 +411,16 @@ test('a refused proof says why where it was handed back, and any other failure d
   const f = fixture([provider]);
 
   async function submit(artifact: string) {
-    const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
+    const start = await f.request('/sessions', {
+      method: 'POST',
+      headers: {
+        origin: 'https://site.test',
+        cookie: 'local=alice',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'kind=connect&unattended=1',
+    });
+
     const cookie = `${start.headers.get('set-cookie')!.split(';')[0]!}; local=alice`;
     const path = start.headers.get('location')!.replace('/api/verily', '');
 
@@ -431,8 +466,14 @@ test('several methods are offered one by one, and a second one joins the record'
   const id = await f.connect('public');
 
   // The same account, shown the other way.
-  const start = await f.request('/sessions?kind=connect&provider=github&method=gist', {
-    headers: { cookie: 'local=alice' },
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'kind=connect&provider=github&method=gist&unattended=1',
   });
 
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
@@ -486,7 +527,16 @@ test('a proof handed over is taken as text, published here, and served as text',
   const provider = fakeDocumentProvider();
   const f = fixture([provider]);
 
-  const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'kind=connect&unattended=1',
+  });
+
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
   const path = start.headers.get('location')!.replace('/api/verily', '');
 
@@ -690,7 +740,17 @@ test('a link in the instructions is a link on the page, and only if it is http(s
   ];
 
   const f = fixture([provider]);
-  const start = await f.request('/sessions?kind=connect', { headers: { cookie: 'local=alice' } });
+
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'kind=connect&unattended=1',
+  });
+
   const cookie = start.headers.get('set-cookie')!.split(';')[0]!;
   const path = start.headers.get('location')!.replace('/api/verily', '');
 
@@ -760,5 +820,176 @@ test('the approval page says a link back was found and will be recorded', async 
   assert.equal(
     view.standingNote,
     'This account already links back to Site. Confirming records that too.',
+  );
+});
+
+test('every route in the shared table is one the handler serves', async () => {
+  const notes = fakeArtifactProvider();
+  const f = fixture([notes]);
+  const called = new Set<RouteName>();
+  let cookie = 'local=alice';
+
+  /** Calls a route as the dialog does, by the address the table gives for it. */
+  const call = async (name: RouteName, id?: string, data?: Record<string, string>) => {
+    called.add(name);
+
+    const response = await f.request(routePath(name, id), {
+      method: routes[name].method,
+      headers: {
+        origin: 'https://site.test',
+        cookie,
+        ...(data ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    });
+
+    assert.equal(response.status, 200, name);
+
+    const bound = response.headers.get('set-cookie')?.split(';')[0];
+
+    if (bound) cookie = `${bound}; local=alice`;
+
+    return (await response.json()) as Record<string, unknown>;
+  };
+
+  await call('methods');
+
+  const flow = (await call('start', undefined, { kind: 'connect' })).id as string;
+  const told = (await call('flow', flow)).instructions as (string | { code: string })[];
+  const expect = told.find((part) => typeof part === 'object')!.code;
+
+  notes.artifacts.set('https://notes.test/alice/1', expect);
+
+  const submitted = await call('submit', flow, { artifact: 'https://notes.test/alice/1' });
+
+  assert.equal(submitted.phase, 'approval');
+
+  const connectionId = (await call('approve', flow, { action: 'approve', visibility: 'unlisted' }))
+    .connectionId as string;
+
+  await call('mark', connectionId, { as: 'unused' });
+  await call('share', connectionId, {});
+  await call('shareRevoke', connectionId, {});
+  await call('disconnect', connectionId, {});
+
+  // A name added to the table with no route behind it would be missed here, and fail.
+  assert.deepEqual([...called].sort(), Object.keys(routes).sort());
+});
+
+test('a request is matched to its route by method and path, and a dialog to its own', () => {
+  const none = new URLSearchParams();
+  const json = new URLSearchParams('format=json');
+
+  assert.equal(routePath('flow', 'a b'), '/flows/a%20b?format=json');
+  assert.equal(routePath('shareRevoke', 'x'), '/connections/x/share-revoke');
+
+  assert.equal(routeOf('POST', '/flows/abc/submit'), 'submit');
+  assert.equal(routeOf('GET', '/flows/abc/submit'), undefined);
+  assert.equal(routeOf('POST', '/flows//submit'), undefined);
+  assert.equal(routeOf('POST', '/flows/abc/submit/more'), undefined);
+
+  // A flow is a page unless JSON is asked for, and only its JSON is the dialog's.
+  assert.equal(dialogRoute('GET', '/flows/abc', json), 'flow');
+  assert.equal(dialogRoute('GET', '/flows/abc', none), undefined);
+  assert.equal(dialogRoute('POST', '/sessions', none), 'start');
+  assert.equal(dialogRoute('GET', '/sessions', none), undefined);
+
+  // Sharing is a route the others know by name, and no dialog's.
+  assert.equal(routeOf('POST', '/connections/abc/share'), 'share');
+  assert.equal(dialogRoute('POST', '/connections/abc/share', none), undefined);
+  assert.ok(dialogPath('/connections/abc/mark') && !dialogPath('/connections/abc/share'));
+  assert.ok(!dialogPath('/mine'));
+});
+
+test('what comes back is chosen by the query, then Accept, then how a POST was sent', async () => {
+  const f = fixture();
+  const id = await f.connect('public');
+  const type = (response: Response) => response.headers.get('content-type')!.split(';')[0];
+
+  const read = (path: string, accept?: string) =>
+    f.request(path, { headers: accept ? { accept } : {} });
+
+  assert.equal(type(await read(`/connections/${id}`)), 'text/html');
+  assert.equal(type(await read(`/connections/${id}?format=json`)), 'application/json');
+  assert.equal(type(await read(`/connections/${id}`, 'application/json')), 'application/json');
+
+  // A browser asking for a page gets one, whatever else it would also take.
+  assert.equal(
+    type(await read(`/connections/${id}`, 'text/html,application/json;q=0.9')),
+    'text/html',
+  );
+
+  assert.equal(type(await read(`/connections/${id}`, '*/*')), 'text/html');
+
+  // The query wins over the header, so a link that names its form is that form anywhere.
+  assert.equal(type(await read(`/connections/${id}?format=json`, 'text/html')), 'application/json');
+
+  // A POST sent as a form can ask for JSON back, and one sent as JSON gets it unasked.
+  const start = (headers: Record<string, string>, body: string) =>
+    f.request('/sessions', {
+      method: 'POST',
+      headers: { origin: 'https://site.test', cookie: 'local=alice', ...headers },
+      body,
+    });
+
+  const form = { 'content-type': 'application/x-www-form-urlencoded' };
+
+  assert.equal((await start(form, 'kind=connect')).status, 303);
+
+  assert.equal(
+    type(await start({ ...form, accept: 'application/json' }, 'kind=connect')),
+    'application/json',
+  );
+
+  assert.equal(
+    type(await start({ 'content-type': 'application/json' }, '{"kind":"connect"}')),
+    'application/json',
+  );
+});
+
+test('a new link starts only from a posted form, and the verify page holds it to an approval', async () => {
+  const provider = fakeProvider();
+  const f = fixture([provider]);
+
+  const flows = () =>
+    [...(f.app.service.options.storage as MemoryStorage).rows.keys()].filter((key) =>
+      key.startsWith('flows:'),
+    );
+
+  // Following an address starts nothing: there is no GET that makes a flow.
+  const followed = await f.request('/sessions?kind=connect', {
+    headers: { cookie: 'local=alice' },
+  });
+
+  assert.equal(followed.status, 404);
+  assert.deepEqual(flows(), []);
+
+  const page = await (await f.request('/verify', { headers: { cookie: 'local=alice' } })).text();
+
+  assert.match(page, /<form method="post" action="\/api\/verily\/sessions">/);
+  assert.match(page, /name="unattended" value="1"/);
+  assert.doesNotMatch(page, /method="get"/);
+
+  // Linked once, then shown again from that page: the same pair, and still asked about.
+  await f.connect();
+
+  const again = await f.request('/sessions', {
+    method: 'POST',
+    headers: {
+      origin: 'https://site.test',
+      cookie: 'local=alice',
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'kind=connect&unattended=1',
+  });
+
+  const cookie = again.headers.get('set-cookie')!.split(';')[0]!;
+  const state = new URL(again.headers.get('location')!).searchParams.get('state')!;
+  const callback = await f.request(`/callback?state=${state}&code=ok`, { headers: { cookie } });
+  const path = callback.headers.get('location')!.replace('/api/verily', '');
+
+  assert.match(
+    await (await f.request(path, { headers: { cookie: `${cookie}; local=alice` } })).text(),
+    /name="action" value="approve"/,
   );
 });

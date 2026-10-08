@@ -544,6 +544,8 @@ export interface Evidence {
 
 export * from './signed.js';
 
+export * from './routes.js';
+
 /**
  * How long a published proof stays good without being read again. An artifact method is
  * only true while the artifact is still there, and the holder can delete it without
