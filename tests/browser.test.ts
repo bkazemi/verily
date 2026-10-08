@@ -1598,7 +1598,7 @@ async function groupHarness(
         options: { connectionIds: string[]; stacked?: boolean; peek?: boolean },
       ): Promise<void>;
     };
-    presentConnections(host: Element, records: unknown): void;
+    presentConnections(host: Element, records: unknown, arrangement?: object): void;
   };
 
   /** Opens the dialog from a host's pill and returns its account cards, in order. */
@@ -2365,6 +2365,78 @@ test('a signature check that never answers gives the card back, says why, and tr
   assert.equal(caution(), undefined);
   // The card was never veiled again to do it.
   assert.equal(card().className, 'account');
+});
+
+test('a retired record whose signature fails opens its group, on a later check as on the first', async () => {
+  const mine = await signer(await generateSigningKey('verifier.test'));
+  const other = await signer(await generateSigningKey('verifier.test'));
+  const at = (name: string) => `https://verifier.test/api/verily/connections/${name}`;
+
+  const old = linked('old', 'erin', 50, {
+    signedUrl: `${at('old')}?format=signed`,
+    status: 'retired',
+    retiredAt: 700,
+    expiresAt: 1,
+  });
+
+  const { signedUrl: _signedUrl, ...rest } = old as typeof old & { signedUrl: string };
+
+  // This record, signed by a key the verifier does not list.
+  const forged = await other.sign({
+    type: 'verily-evidence',
+    version: 2,
+    issuedAt: 1,
+    ...rest,
+  } as never);
+
+  // Its signed record cannot be read at first, so nothing is known of it.
+  const served: Record<string, unknown> = { keys: { keys: [mine.key] } };
+  const { verily, cards, polls } = await groupHarness(served);
+  const host = new Element();
+
+  verily.presentConnections(host, [linked('a', 'alice', 100), old]);
+
+  const { dialog } = await cards(host);
+  const history = () => dialog.find('details')[0]!;
+
+  const alert = () =>
+    history()
+      .all()
+      .find((found) => found.attributes['role'] === 'alert');
+
+  const until = async (met: () => unknown) => {
+    for (let i = 0; i < 100 && !met(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  };
+
+  await until(() =>
+    history()
+      .all()
+      .some((found) => found.className === 'caution'),
+  );
+
+  assert.equal(history().open, false);
+  assert.equal(alert(), undefined);
+
+  // The next read finds it forged. Its status does not change, so no card is drawn again,
+  // and the group opens all the same.
+  served['old'] = forged;
+
+  for (const poll of polls) poll();
+
+  await until(alert);
+  assert.equal(alert()!.textContent, 'invalid signature');
+  assert.equal(history().open, true);
+  dialog.close();
+
+  // Known forged from the start, the group is open as soon as the check comes back.
+  const again = new Element();
+
+  verily.presentConnections(again, [linked('a', 'alice', 100), old]);
+
+  const reopened = (await cards(again)).dialog.find('details')[0]!;
+
+  await until(() => reopened.open);
+  assert.equal(reopened.open, true);
 });
 
 test('a signature mark stands only beside what the signed record says', async () => {
@@ -3279,9 +3351,46 @@ test('the preferred account leads, unused ones follow the rest, and retired ones
   const drawn = opened.dialog.all();
   const group = drawn.find((found) => found.className === 'group')!;
 
-  assert.equal(group.textContent, 'Retired accounts');
+  assert.equal(group.textContent, 'Retired accounts (1)');
   assert.ok(drawn.indexOf(group) > drawn.indexOf(opened.cards[4]!));
   assert.ok(drawn.indexOf(group) < drawn.indexOf(opened.cards[5]!));
+
+  // The group is shut until a reader opens it.
+  assert.equal(group.tagName, 'summary');
+  assert.equal(opened.dialog.find('details')[0]!.open, false);
+
+  // Several accounts fold how each was shown and its dates behind a toggle, together.
+  const fold = (card: Element) => card.find('button').find((b) => b.textContent === 'Details')!;
+  const dates = (card: Element) => (card.find('dl')[0] as Element & { hidden?: boolean }).hidden;
+  const carol = opened.cards[2]!;
+
+  const method = (card: Element) =>
+    (
+      card.all().find((found) => found.className === 'muted method') as Element & {
+        hidden?: boolean;
+      }
+    ).hidden;
+
+  assert.equal(dates(carol), true);
+  assert.equal(method(carol), true);
+  assert.equal(fold(carol).attributes['aria-expanded'], 'false');
+
+  // Its state and its verifier are read without opening anything.
+  assert.deepEqual(
+    carol.children.map((child) => child.className || child.tagName),
+    ['h3', 'a', 'muted reference', 'summary', 'bar', 'muted method', 'dl'],
+  );
+
+  fold(carol).listeners['click']![0]!({});
+  assert.equal(dates(carol), false);
+  assert.equal(method(carol), false);
+  assert.equal(fold(carol).attributes['aria-expanded'], 'true');
+  fold(carol).listeners['click']![0]!({});
+  assert.equal(dates(carol), true);
+  assert.equal(method(carol), true);
+
+  // The one retired account has its group to itself, and so shows its dates.
+  assert.equal(fold(opened.cards[5]!), undefined);
 
   const retired = opened.cards[5]!;
 
@@ -3528,6 +3637,86 @@ test('the order holds once a signed record checks, and follows a mark changed si
   assert.doesNotMatch(card.textContent, /Preferred/);
 });
 
+test('a page may start the details of several accounts open, and a reader may still shut them', async () => {
+  const { verily, cards, polls } = await groupHarness({});
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const records = [linked('a', 'alice', 100), linked('b', 'bob', 200)];
+  const host = new Element();
+
+  verily.presentConnections(host, records, { detailsOpen: true });
+
+  const { dialog } = await cards(host);
+  const accounts = () => dialog.all().filter((e) => e.className.includes('account'));
+  const fold = (card: Element) => card.find('button').find((b) => b.textContent === 'Details')!;
+  const hidden = (card: Element) => (card.find('dl')[0] as Element & { hidden?: boolean }).hidden;
+
+  assert.deepEqual(accounts().slice(1).map(hidden), [false, false]);
+  assert.equal(fold(accounts()[1]!).attributes['aria-expanded'], 'true');
+
+  // Shut by the reader, it stays shut when the cards are drawn again, and the other stays open.
+  fold(accounts()[1]!).listeners['click']![0]!({});
+  assert.deepEqual(accounts().slice(1).map(hidden), [true, false]);
+
+  const before = accounts()[1];
+
+  verily.presentConnections(host, [{ ...records[0]!, mark: 'unused' }, records[1]], {
+    detailsOpen: true,
+  });
+
+  for (const poll of polls) poll();
+
+  await settle();
+  await settle();
+  assert.notEqual(accounts()[2], before);
+  assert.deepEqual(handles(accounts()), ['bob', 'alice']);
+  assert.deepEqual(accounts().slice(1).map(hidden), [false, true]);
+  dialog.close();
+
+  // Without the choice, the same accounts start shut.
+  const plain = new Element();
+
+  verily.presentConnections(plain, records);
+  assert.deepEqual((await cards(plain)).cards.slice(1).map(hidden), [true, true]);
+});
+
+test('the retired group starts open where no account in use is left to read', async () => {
+  const { verily, cards, polls } = await groupHarness({});
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const past = { status: 'retired', retiredAt: 5, expiresAt: 1 };
+  const host = new Element();
+
+  verily.presentConnections(host, [linked('a', 'alice', 100, past)]);
+
+  const { dialog } = await cards(host);
+  const history = () => dialog.find('details')[0]!;
+
+  // The one account is all there is, so it is in view, under what says it is retired.
+  assert.equal(history().open, true);
+  assert.equal(history().find('summary')[0]!.textContent, 'Retired accounts (1)');
+  assert.equal(history().find('dl').length, 1);
+
+  // Beside an account in use the group is shut again, having never been pressed.
+  verily.presentConnections(host, [linked('a', 'alice', 100, past), linked('b', 'bob', 200)]);
+
+  for (const poll of polls) poll();
+
+  await settle();
+  await settle();
+  assert.equal(history().open, false);
+
+  // Shut by the reader, it stays shut even once it is all there is.
+  history().open = true;
+  history().find('summary')[0]!.listeners['click']![0]!({});
+  history().open = false;
+  verily.presentConnections(host, [linked('a', 'alice', 100, past)]);
+
+  for (const poll of polls) poll();
+
+  await settle();
+  await settle();
+  assert.equal(history().open, false);
+});
+
 test("a holder's own dialog lists an account another way, and retires it only once asked again", async () => {
   const { defined, asked, cards } = await groupHarness({
     handoff: { token: 'vouched' },
@@ -3587,19 +3776,55 @@ test("a holder's own dialog lists an account another way, and retires it only on
   assert.deepEqual(handles(accounts()), ['alice', 'bob', 'carol', 'dave']);
 
   // An ordinary account can be listed either way or retired, beside Renew and Remove.
+  // Renew stays a button, and the rest sit in a menu its neighbour opens.
   assert.deepEqual(labels(accounts()[1]!), [
+    'Details',
     'Renew',
+    '',
     'Mark as preferred',
     'Mark as unused',
     'Retire',
     'Remove',
   ]);
 
-  // A removed account has nothing left to do, and a retired one only Renew and Remove.
-  assert.deepEqual(labels(accounts()[3]!), []);
+  const more = accounts()[1]!.find('button')[2]! as Element & { popoverTargetElement?: Element };
+  const menu = more.popoverTargetElement!;
+
+  assert.equal(more.attributes['aria-label'], 'More actions');
+  assert.equal(more.attributes['aria-haspopup'], 'menu');
+  assert.equal(menu.attributes['popover'], 'auto');
+  assert.equal(menu.attributes['role'], 'menu');
+
+  // Removing is last in the menu, and set apart from the rest of it.
+  assert.deepEqual(
+    menu.children.map((child) => child.textContent || child.tagName),
+    ['Mark as preferred', 'Mark as unused', 'Retire', 'hr', 'Remove'],
+  );
+
+  assert.ok(menu.find('button').every((choice) => choice.attributes['role'] === 'menuitem'));
+
+  // A removed account has nothing left to do, and a retired one only Renew and Remove,
+  // which are two buttons and no menu.
+  assert.deepEqual(labels(accounts()[3]!), ['Details']);
   assert.deepEqual(labels(accounts()[4]!), ['Renew', 'Remove']);
 
+  // What a reader opens stays open when the cards are drawn again under them.
+  const hidden = (card: Element) => (card.find('dl')[0] as Element & { hidden?: boolean }).hidden;
+  const history = () => dialog.find('details')[0]!;
+  const bob = accounts()[2]!;
+
+  await press(bob, 'Details');
+  assert.equal(hidden(bob), false);
+  // Pressing the heading opens the group, as the browser then does.
+  history().find('summary')[0]!.listeners['click']![0]!({});
+  history().open = true;
+
   await press(accounts()[2]!, 'Mark as preferred');
+
+  assert.notEqual(accounts()[1], bob);
+  assert.equal(hidden(accounts()[1]!), false);
+  assert.equal(hidden(accounts()[2]!), true);
+  assert.equal(history().open, true);
 
   assert.deepEqual(asked.slice(-3), ['handoff', 'session', 'mark']);
 
@@ -3613,7 +3838,9 @@ test("a holder's own dialog lists an account another way, and retires it only on
   assert.match(accounts()[1]!.textContent, /Preferred/);
 
   assert.deepEqual(labels(accounts()[1]!), [
+    'Details',
     'Renew',
+    '',
     'Mark as unused',
     'Mark as current',
     'Retire',
@@ -3644,7 +3871,7 @@ test("a holder's own dialog lists an account another way, and retires it only on
     /Retiring keeps this record as history\. It will no longer read as verified, and who can read it cannot be changed afterwards\./,
   );
 
-  assert.deepEqual(labels(accounts()[2]!), ['Cancel', 'Retire']);
+  assert.deepEqual(labels(accounts()[2]!), ['Details', 'Cancel', 'Retire']);
   assert.equal(asked.filter((id) => id === 'mark').length, marked);
 
   await press(accounts()[2]!, 'Cancel');
@@ -3670,7 +3897,8 @@ test("a holder's own dialog lists an account another way, and retires it only on
     'Retired',
   );
 
-  assert.deepEqual(labels(accounts()[3]!), ['Renew', 'Remove']);
+  // Two retired accounts fold their dates as any two accounts do.
+  assert.deepEqual(labels(accounts()[3]!), ['Details', 'Renew', 'Remove']);
 });
 
 test("Renew in a holder's own dialog renews the record its card is drawn from", async () => {

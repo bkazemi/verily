@@ -40,7 +40,9 @@ export const styles = `
   .all:hover { background: #f2f5f1; }
   .all svg { width: 16px; height: 16px; }
   a { color: #245f43; text-underline-offset: 3px; overflow-wrap: anywhere; }
-  a:focus-visible, button:focus-visible { outline: 2px solid #357ce5; outline-offset: 3px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid #357ce5; outline-offset: 3px; }
+  /* An element given its own display would otherwise go on showing while hidden. */
+  [hidden] { display: none !important; }
   .summary { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
   .mark { width: 36px; height: 36px; flex-shrink: 0; }
   .provider { width: 14px; height: 14px; }
@@ -70,6 +72,15 @@ export const styles = `
   .account.retired > a, .account.retired > strong { color: #6b786f; }
   .account.retired .mark { opacity: .45; }
   .group { margin: 20px 0 0; color: #6b786f; font-size: 11px; font-weight: 550; }
+  summary.group { display: flex; align-items: center; gap: 4px; width: fit-content; border-radius: 4px; list-style: none; cursor: pointer; }
+  summary::-webkit-details-marker { display: none; }
+  .fold { display: flex; align-items: center; gap: 4px; width: auto; height: auto; padding: 2px 8px 2px 4px; margin-left: -4px; border: 0; background: none; font: 550 12px/1.6 system-ui, sans-serif; }
+  .fold svg, summary svg { width: 12px; height: 12px; }
+  .fold[aria-expanded="true"] svg, details[open] > summary svg { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: no-preference) { .fold svg, summary svg { transition: transform .15s; } }
+  /* The fold and what the holder may do share a line, until a question needs the whole of it. */
+  .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .account .bar .row { margin: 0 0 0 auto; }
   .additional { margin-top: 2px; padding-left: 12px; }
   .joiner { display: block; width: 20px; height: 20px; margin: 8px auto -4px; color: #90a096; }
   dl { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid #e5e9e3; display: grid; grid-template-columns: auto 1fr; gap: 5px 16px; font-size: 11px; }
@@ -84,6 +95,14 @@ export const styles = `
   .row { display: flex; justify-content: end; gap: 8px; margin-top: 16px; }
   .account .row { align-items: center; justify-content: start; flex-wrap: wrap; margin-top: 12px; }
   .account .action { padding: 5px 10px; font-size: 12px; }
+  .account .action.dots { display: grid; place-items: center; align-self: stretch; width: 30px; padding: 0; }
+  .dots svg { width: 16px; height: 16px; }
+  /* Placed under its button each time it opens, above the dialog and clipped by none of it. */
+  .menu { position: fixed; inset: auto; margin: 0; min-width: 170px; padding: 6px; border: 1px solid #dce2de; border-radius: 10px; background: #fff; color: #23312b; box-shadow: 0 12px 40px #10201930; }
+  .menu:popover-open { display: grid; }
+  .account .menu .action { border: 0; border-radius: 6px; padding: 6px 10px; font-weight: 550; }
+  .menu .danger { color: #b3261e; }
+  .menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid #e5e9e3; }
   footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin: 20px 0 -8px; color: #9aa9a0; font-size: 11px; }
   footer a { display: flex; color: inherit; }
   .logo { display: block; height: 13px; }
@@ -155,6 +174,36 @@ function awayMark(): SVGSVGElement {
 
   return svg;
 }
+
+/** A small mark of plain strokes, in the surrounding colour. */
+function strokes(box: number, width: number, paths: string[]): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+
+  svg.setAttribute('viewBox', `0 0 ${box} ${box}`);
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  for (const d of paths) {
+    const path = document.createElementNS(namespace, 'path');
+
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', String(width));
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+  }
+
+  return svg;
+}
+
+/** Points at what is folded away, and turns to point down once it is open. */
+const foldMark = () => strokes(16, 1.8, ['M6 3.5 10.5 8 6 12.5']);
+
+/** Three dots: there is more to do here than the buttons beside it. */
+const moreMark = () => strokes(16, 2.4, ['M3 8h.01', 'M8 8h.01', 'M13 8h.01']);
 
 /** Joins the two cards: the link itself, drawn rather than described. */
 export function linkMark(): SVGSVGElement {
@@ -306,11 +355,92 @@ const removable = (evidence: Account) =>
   evidence.links ?? (evidence.status === 'revoked' ? [] : [evidence.id]);
 
 /**
+ * Everything a holder may do to an account besides renewing it, behind one button. The
+ * menu is a popover, so it is drawn above the dialog and the dialog's scrolling cannot
+ * clip it, the browser shuts it on Escape or a press elsewhere, and its button opens and
+ * shuts it. Nothing where the browser has no popovers, and the choices are then laid out.
+ */
+function actionsMenu(more: HTMLButtonElement, choices: HTMLElement[]): HTMLElement | undefined {
+  const menu = node('div', '', 'menu');
+
+  if (typeof menu.showPopover !== 'function') return undefined;
+
+  const label = 'More actions';
+
+  more.className = 'action dots';
+  more.title = label;
+  more.setAttribute('aria-label', label);
+  more.setAttribute('aria-haspopup', 'menu');
+  more.append(moreMark());
+  more.popoverTargetElement = menu;
+
+  menu.setAttribute('popover', 'auto');
+  menu.setAttribute('role', 'menu');
+
+  for (const choice of choices) choice.setAttribute('role', 'menuitem');
+
+  // Whatever removes the account sits last and apart from the rest.
+  menu.append(...choices.slice(0, -1), node('hr'), choices.at(-1)!);
+
+  const shut = () => {
+    try {
+      if (menu.matches(':popover-open')) menu.hidePopover();
+    } catch {
+      // Gone from the page with its card.
+    }
+  };
+
+  const gap = 4;
+  const edge = 8;
+
+  // Under the button and ending where it ends, before it is first painted.
+  menu.addEventListener('beforetoggle', (event) => {
+    if ((event as ToggleEvent).newState !== 'open') return;
+
+    const at = more.getBoundingClientRect();
+
+    menu.style.top = `${at.bottom + gap}px`;
+    menu.style.right = `${document.documentElement.clientWidth - at.right}px`;
+  });
+
+  menu.addEventListener('toggle', (event) => {
+    if ((event as ToggleEvent).newState !== 'open') return;
+
+    // Over the button where the window ends before the menu does.
+    const { height, bottom } = menu.getBoundingClientRect();
+
+    if (bottom > innerHeight - edge)
+      menu.style.top = `${Math.max(edge, more.getBoundingClientRect().top - gap - height)}px`;
+
+    // It does not follow its button, so it does not stay open once the button moves.
+    menu.closest('dialog')?.addEventListener('scroll', shut, { once: true });
+    choices[0]!.focus();
+  });
+
+  menu.addEventListener('click', shut);
+
+  menu.addEventListener('keydown', (event) => {
+    const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+
+    if (!step) return;
+
+    event.preventDefault();
+
+    const at = choices.indexOf(event.target as HTMLElement);
+
+    choices[(at + step + choices.length) % choices.length]!.focus();
+  });
+
+  return menu;
+}
+
+/**
  * Under a holder's own account: renewing it, which is showing the same account again, and
  * removing it, which asks once more before it does. A removed link has nothing left to do.
  *
  * An account still in use can also be listed another way, or retired, which asks first as
- * removing does. A retired one is renewed or removed and nothing else.
+ * removing does. Those and removing it are then kept in a menu beside Renew, so the row
+ * stays one line. A retired one is renewed or removed and nothing else.
  */
 function manageRow(evidence: Account, manage: Manage) {
   const row = node('div', '', 'row');
@@ -380,7 +510,13 @@ function manageRow(evidence: Account, manage: Manage) {
       );
     }
 
-    row.replaceChildren(renew, ...listing, remove, ...(note ? [node('span', note, 'muted')] : []));
+    const said = note ? [node('span', note, 'muted')] : [];
+    const more = act('');
+    // Two buttons need no menu between them.
+    const menu = listing.length ? actionsMenu(more, [...listing, remove]) : undefined;
+
+    if (menu) row.replaceChildren(renew, more, menu, ...said);
+    else row.replaceChildren(renew, ...listing, remove, ...said);
   };
 
   const retiring = () => {
@@ -448,9 +584,10 @@ function signatures(evidence: Account): Promise<Signature[]> {
  * own page for the record at what it says of the signature, where the signed record is to be
  * had: nothing is downloaded from the card. The signed record is checked here against the
  * verifier's keys: a tick once it has checked, and a warning in the word's place if it
- * fails, the one thing on a card that is a warning.
+ * fails, the one thing on a card that is a warning. `warned` is told each time that warning
+ * is drawn, on the first check or on a later one, so whatever folds the card away opens.
  */
-function signedMark(evidence: Account, later: Later) {
+function signedMark(evidence: Account, later: Later, warned: () => void) {
   const mark = node('span');
   const link = outward(node('a', 'signed'), `${evidence.evidenceUrl}#signed`);
   const see = 'See the signature (opens in a new tab)';
@@ -465,6 +602,7 @@ function signedMark(evidence: Account, later: Later) {
       // What it means, for a reader who has never met a signature, kept off the card.
       warning.title = `This record does not match the signature ${evidence.verifierName} put on it, so it may have been altered. Do not rely on it.`;
       mark.replaceChildren(document.createTextNode(' · '), warning);
+      warned();
 
       return;
     }
@@ -537,12 +675,57 @@ function cautionMark(): SVGSVGElement {
  */
 type Later = (retry: () => void) => void;
 
+/** A card's dates folded away: whether they start open, and who to tell once that changes. */
+interface Fold {
+  open: boolean;
+  toggle(open: boolean): void;
+}
+
+/**
+ * Opens and shuts what a card folds away: how its account was shown, every method of it
+ * together so that none is put ahead of another, and its dates.
+ */
+function foldToggle(folded: HTMLElement[], fold: Fold) {
+  const toggle = node('button', '', 'fold');
+  let shown = fold.open;
+
+  const set = (open: boolean) => {
+    shown = open;
+
+    for (const part of folded) part.hidden = !open;
+
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+
+  toggle.type = 'button';
+  toggle.append(foldMark(), document.createTextNode('Details'));
+  set(fold.open);
+
+  toggle.onclick = () => {
+    set(!shown);
+    fold.toggle(shown);
+  };
+
+  return toggle;
+}
+
 /**
  * One linked account: its state, how it was shown and when, on a card of its own. A
  * subject with several accounts gets one of these each, since a provider authenticates and
  * expires on its own terms and none of that may be read across to another's card.
+ *
+ * Given a `fold`, the card is one of several, read first as a list of accounts: it keeps
+ * how it was shown and its dates behind a toggle, which shares a line with what the holder
+ * may do. Its state, its verifier and what is said of its signature are never folded.
+ * Alone, it shows everything.
  */
-function externalCard(evidence: Account, manage?: Manage, later: Later = () => {}) {
+function externalCard(
+  evidence: Account,
+  manage?: Manage,
+  later: Later = () => {},
+  fold?: Fold,
+  warned: () => void = () => {},
+) {
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
   const status = statusLabel(evidence, Date.now());
   const provider = evidence.providerName;
@@ -563,7 +746,7 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
     attribution.append(verifier);
   } else attribution.append(document.createTextNode(evidence.verifierName));
 
-  if (evidence.signedUrl) attribution.append(signedMark(evidence, later));
+  if (evidence.signedUrl) attribution.append(signedMark(evidence, later, warned));
 
   copy.append(node('div', status, 'state'), attribution);
 
@@ -601,6 +784,16 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
   }
 
   const names = { site: evidence.siteName, provider };
+  const row = manage && removable(evidence).length ? [manageRow(evidence, manage)] : [];
+  const bar = node('div', '', 'bar');
+
+  const methods = [
+    ...attestationNote(main, names),
+    ...evidence.attestations.external.slice(1).flatMap((a) => attestationNote(a, names, true)),
+  ];
+
+  if (fold) bar.append(foldToggle([...methods, dates], fold), ...row);
+
   const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
   const card = accountCard(
@@ -614,8 +807,7 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
     // Status first, then how it was shown, then when. The proof explains the state
     // above it, so it cannot sit before that state has been given.
     summary,
-    ...attestationNote(main, names),
-    ...evidence.attestations.external.slice(1).flatMap((a) => attestationNote(a, names, true)),
+    ...(fold ? [] : methods),
     // How the holder lists the account, in their words and apart from how it was shown:
     // nothing checked it, so it is never among the methods above it.
     ...(evidence.status === 'revoked' || retired
@@ -625,8 +817,7 @@ function externalCard(evidence: Account, manage?: Manage, later: Later = () => {
         : evidence.mark === 'unused'
           ? [node('div', 'No longer used', 'listing')]
           : []),
-    dates,
-    ...(manage && removable(evidence).length ? [manageRow(evidence, manage)] : []),
+    ...(fold ? [bar, ...methods, dates] : [dates, ...row]),
   );
 
   const surface = retired ? 'account retired' : 'account';
@@ -673,11 +864,31 @@ function addRow(manage: Manage) {
 }
 
 /**
- * The subject once, then each account linked to it on its own card, in the order given.
- * Retired accounts sit in a group of their own at the foot, under what says they are.
- * Every record given is of the one subject, which the caller has checked.
+ * What a reader has opened in a dialog, kept apart from its cards: they are drawn afresh
+ * whenever a record changes, and would otherwise shut under whoever was reading them.
  */
-function render(content: HTMLElement, records: Account[], manage?: Manage, later?: Later) {
+interface Folds {
+  /** Whether a card starts open, which the page that drew the badge may ask for. */
+  open: boolean;
+  /** The accounts a reader has turned the other way, each named by its provider and id. */
+  cards: Set<string>;
+  /** Whether the retired group is open, once a reader has opened or shut it. */
+  retired?: boolean;
+}
+
+/**
+ * The subject once, then each account linked to it on its own card, in the order given.
+ * Retired accounts sit in a group of their own at the foot, under what says they are,
+ * shut until it is opened unless no other account is left to read. Every record given is
+ * of the one subject, which the caller has checked.
+ */
+function render(
+  content: HTMLElement,
+  records: Account[],
+  manage?: Manage,
+  later?: Later,
+  folds: Folds = { open: false, cards: new Set() },
+) {
   const [first] = records as [Account, ...Account[]];
 
   // Each card says what it is. Without that the pair is two unlabelled boxes.
@@ -698,20 +909,57 @@ function render(content: HTMLElement, records: Account[], manage?: Manage, later
   );
 
   const retired = records.filter((record) => record.status === 'retired');
+  const listed = records.filter((record) => record.status !== 'retired');
+
+  // A card alone in its group has room for its dates. Among others it folds them.
+  const cards = (among: Account[], warned?: () => void) =>
+    among.map((record) => {
+      const key = `${record.provider}\n${record.external.id}`;
+
+      return externalCard(
+        record,
+        manage,
+        later,
+        among.length > 1
+          ? {
+              open: folds.cards.has(key) !== folds.open,
+              toggle: (open) =>
+                void (open === folds.open ? folds.cards.delete(key) : folds.cards.add(key)),
+            }
+          : undefined,
+        warned,
+      );
+    });
+
+  const history = node('details', '', 'history');
+  const count = node('summary', '', 'group');
+
+  count.append(foldMark(), document.createTextNode(`Retired accounts (${retired.length})`));
+
+  // A signature that fails is a warning, and a warning is not left behind a fold.
+  history.append(
+    count,
+    ...cards(retired, () => {
+      history.open = true;
+    }),
+  );
+
+  // Shut to keep history out of the way of the accounts in use. With none of those there
+  // is nothing else to read, so it starts open.
+  history.open = folds.retired ?? !listed.length;
+
+  // Pressing the heading is the reader's choice, and is kept. It is heard before the
+  // group turns, so what it will be is the opposite of what it is.
+  count.addEventListener('click', () => {
+    folds.retired = !history.open;
+  });
 
   content.replaceChildren(
     localCard,
     linkMark(),
-    ...records
-      .filter((record) => record.status !== 'retired')
-      .map((record) => externalCard(record, manage, later)),
+    ...cards(listed),
     ...(manage ? [addRow(manage)] : []),
-    ...(retired.length
-      ? [
-          node('h3', 'Retired accounts', 'group'),
-          ...retired.map((record) => externalCard(record, manage, later)),
-        ]
-      : []),
+    ...(retired.length ? [history] : []),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
     // the card they came from, and a second provider on this subject gets its own card.
     node(
@@ -744,6 +992,11 @@ export function openEvidenceDialog(
    * removal under it, and the dialog offers to connect another.
    */
   manage?: Manage,
+  /**
+   * Whether the cards of several accounts start with their details open. They start shut
+   * unless the page asked otherwise, and a reader may turn each either way from there.
+   */
+  detailsOpen = false,
 ): void {
   const existing = openDialogs.get(opener);
 
@@ -805,6 +1058,9 @@ export function openEvidenceDialog(
     new Map([given].flat().map((record) => [record.id, listing(record)]));
 
   let held: Evidence | Evidence[] | undefined;
+
+  /** What has been opened in this dialog, which outlasts every redraw of its cards. */
+  const folds: Folds = { open: detailsOpen, cards: new Set() };
 
   /** A record as the listings made here leave it, each applied as the backend applies it. */
   const relisted = (evidence: Evidence): Evidence => {
@@ -927,7 +1183,7 @@ export function openEvidenceDialog(
     drawn = key;
     // The cards are new, and what the old ones were waiting to try again went with them.
     retries.clear();
-    render(content, records, actions, (retry) => retries.add(retry));
+    render(content, records, actions, (retry) => retries.add(retry), folds);
   };
 
   /**
