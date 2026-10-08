@@ -645,10 +645,12 @@ test('a public record is served signed as of now, and checks against the publish
   // What stands now is asked of the instance, so the signed record does not claim it.
   assert.ok(!('status' in checked) && !('signedUrl' in checked));
 
-  assert.match(
-    await (await f.request(`/connections/${id}`)).text(),
-    new RegExp(
-      `<p class="signed" id="signed"><strong>Signed by verifier\\.test</strong> with OpenPGP key <a href="/api/verily/keys\\.asc">${await signedBy(signed)}</a>\\. <a [^>]*>Download the signed record`,
+  const by = (await signedBy(signed))!;
+
+  // The key by its last sixteen digits, with the whole fingerprint behind them.
+  assert.ok(
+    (await (await f.request(`/connections/${id}`)).text()).includes(
+      `<p class="signed" id="signed"><strong>Signed by verifier.test</strong><br>Key <a href="/api/verily/keys.asc" title="${by}">${by.slice(-16).match(/.{4}/g)!.join(' ')}</a><br><a href="https://site.test/api/verily/connections/${id}?format=signed">Download signed record</a> · <a href="/api/verily/check">Check a record</a></p>`,
     ),
   );
 });
@@ -685,15 +687,15 @@ test('a key the verifier domain names in DNS is shown with the lookup that found
   });
 
   const named =
-    /, which <a href="https:\/\/dns\.google\/resolve\?name=_verily\.site\.test&amp;type=TXT" rel="noreferrer">site\.test names in its DNS<\/a>, validated by DNSSEC\./;
+    /<\/a> · <a href="https:\/\/dns\.google\/resolve\?name=_verily\.site\.test&amp;type=TXT" rel="noreferrer" title="View the lookup for site\.test">confirmed in DNS \(DNSSEC\)<\/a>/;
 
   // Not published, so nothing is claimed.
-  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /names in its DNS/);
+  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /confirmed in DNS/);
 
   // Published. The first answer is kept a while, so it is asked again only once that passes.
   // In lower case, which `dnsKeys()` reads as the same key, so the page does too.
   records = [`verily-key=${by.toLowerCase()}`];
-  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /names in its DNS/);
+  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /confirmed in DNS/);
   f.advance(600000);
   assert.match(await (await f.request(`/connections/${id}`)).text(), named);
   assert.match(await (await f.check(signed)).text(), named);
@@ -705,7 +707,7 @@ test('a key the verifier domain names in DNS is shown with the lookup that found
 
   assert.doesNotMatch(
     await (await quiet.request(`/connections/${other}`)).text(),
-    /names in its DNS/,
+    /confirmed in DNS/,
   );
 });
 
@@ -744,10 +746,10 @@ test('a record signed on another domain is told which domain was asked about its
 
   assert.match(
     page,
-    /name=_verily\.moved\.test&amp;type=TXT" rel="noreferrer">moved\.test names in its DNS/,
+    /name=_verily\.moved\.test&amp;type=TXT" rel="noreferrer" title="View the lookup for moved\.test">confirmed in DNS/,
   );
 
-  assert.doesNotMatch(page, /site\.test names in its DNS/);
+  assert.doesNotMatch(page, /lookup for site\.test/);
   // The record's own address is still the one it was signed with.
   assert.match(page, /https:\/\/site\.test\/api\/verily\/connections\//);
 });
@@ -808,7 +810,7 @@ test('the check page reads a signed record back, and refuses one it did not sign
 
   assert.match(page, /verifier\.test signed this record/);
   assert.match(page, /alice@example\.test/);
-  assert.match(page, new RegExp(`Signing key <a [^>]*>${await signedBy(signed)}</a>`));
+  assert.match(page, new RegExp(`Key <a [^>]*title="${await signedBy(signed)}">[0-9A-F ]{19}</a>`));
   assert.match(page, new RegExp(`href="https://site\\.test/api/verily/connections/${id}"`));
 
   const forged = await (
