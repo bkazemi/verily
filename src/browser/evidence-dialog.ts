@@ -35,6 +35,10 @@ export const styles = `
   h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
   button { width: 32px; height: 32px; border: 1px solid #dce2de; border-radius: 8px; background: #fff; color: #52645a; font: 20px system-ui, sans-serif; cursor: pointer; }
   button:hover { background: #f2f5f1; }
+  .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .all { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #52645a; }
+  .all:hover { background: #f2f5f1; }
+  .all svg { width: 16px; height: 16px; }
   a { color: #245f43; text-underline-offset: 3px; overflow-wrap: anywhere; }
   a:focus-visible, button:focus-visible { outline: 2px solid #357ce5; outline-offset: 3px; }
   .summary { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
@@ -106,6 +110,50 @@ export function outward(anchor: HTMLAnchorElement, url: string): HTMLAnchorEleme
   anchor.target = '_blank';
 
   return anchor;
+}
+
+/**
+ * Where the verifier lists every public record of a record's subject. A record whose
+ * address is not the usual one is left linking to itself.
+ */
+export function subjectUrl(e: Evidence): string {
+  const url = new URL(e.evidenceUrl);
+  const path = url.pathname.replace(/\/connections\/[^/]+$/, '/published');
+
+  if (path === url.pathname) return e.evidenceUrl;
+
+  url.pathname = path;
+  url.search = `site=${encodeURIComponent(e.siteName)}&reference=${encodeURIComponent(e.local.reference)}`;
+
+  return url.href;
+}
+
+/** Opens somewhere else, in a tab of its own: a box with an arrow leaving it. */
+function awayMark(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(namespace, 'svg');
+
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+
+  for (const d of [
+    'M14 5h5v5',
+    'M19 5l-8 8',
+    'M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4',
+  ]) {
+    const path = document.createElementNS(namespace, 'path');
+
+    path.setAttribute('d', d);
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+  }
+
+  return svg;
 }
 
 /** Joins the two cards: the link itself, drawn rather than described. */
@@ -714,6 +762,10 @@ export function openEvidenceDialog(
   const dialog = node('dialog');
   const heading = node('h2', 'Verification details');
   const close = node('button', '×');
+  // Every account on a page of its own, on the verifier. It sits by the heading it widens,
+  // and only where there is more than one account to list.
+  const all = node('a', '', 'all');
+  const title = node('div', '', 'title');
   const header = node('header');
   // What drew the record, under it. The record is about the pair, not about us.
   const stamp = node('footer');
@@ -725,7 +777,11 @@ export function openEvidenceDialog(
   close.setAttribute('aria-label', 'Close verification details');
   content.setAttribute('aria-live', 'polite');
   stamp.append(stampLink(), node('span', version));
-  header.append(heading, close);
+  all.append(awayMark());
+  // The close was the first thing in the dialog to take the focus, and still is.
+  close.autofocus = true;
+  title.append(heading);
+  header.append(title, close);
   dialog.append(header, content, stamp);
 
   /** Links removed from this dialog, shown as removed before the page hands over new records. */
@@ -850,6 +906,19 @@ export function openEvidenceDialog(
             : relisted(standing(e)),
         ),
     );
+
+    const listable = records.filter((e) => e.visibility === 'public' && e.status !== 'revoked');
+
+    // In the header only while it leads somewhere: an anchor with no address is not a link.
+    title.replaceChildren(heading, ...(listable.length > 1 ? [all] : []));
+
+    if (listable.length > 1) {
+      const label = `View all on ${listable[0]!.verifierName} (opens in a new tab)`;
+
+      outward(all, subjectUrl(listable[0]!));
+      all.title = label;
+      all.setAttribute('aria-label', label);
+    }
 
     const key = JSON.stringify(records.map((e) => [e, statusLabel(e, Date.now())]));
 

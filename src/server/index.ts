@@ -571,10 +571,6 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
     externalId(e.external),
     `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? ` · <a href="${record}#signed">signed</a>` : ''}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
-    // The holder's own word on the account, which nothing checked, so it follows the methods.
-    retired || !e.mark
-      ? ''
-      : `<p class="how">${e.mark === 'preferred' ? 'Preferred' : 'No longer used'}</p>`,
     times(
       retired
         ? [
@@ -588,6 +584,13 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
             ['Last checked', external[0].artifactUrl ? external[0].confirmedAt : undefined],
           ],
     ),
+    // The holder's own word on the account, which nothing checked, so it sits apart from
+    // the methods, in the card's corner as the dialog has it.
+    retired || !e.mark
+      ? ''
+      : e.mark === 'preferred'
+        ? '<div class="listing preferred">Preferred</div>'
+        : '<div class="listing">No longer used</div>',
   );
 }
 

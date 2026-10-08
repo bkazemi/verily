@@ -147,11 +147,26 @@ main:has(.accounts) { max-width: 54rem; }
   margin-bottom: .75rem;
 }
 
-.accounts .side { display: flex; flex-direction: column; margin-bottom: 0; }
+.accounts .side { position: relative; display: flex; flex-direction: column; margin-bottom: 0; }
+
+/* How the holder lists the account, in the card's corner and out of the lines below. */
+.listing {
+  position: absolute;
+  top: .75rem;
+  right: .875rem;
+  padding: .0625rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: .6875rem;
+  font-weight: 550;
+}
+
+.listing.preferred { border-color: var(--accent); color: var(--accent); }
 
 /* The times sit at the foot of the card, so they line up along a row of uneven cards. */
 .accounts .side dl { margin-top: auto; }
-.accounts .side > :nth-last-child(2) { margin-bottom: .625rem; }
+.accounts .side p:last-of-type { margin-bottom: .625rem; }
 
 /* Between a subject and its accounts on the page that lists them. */
 .joiner { display: block; width: 1.25rem; height: 1.25rem; margin: 0 auto .75rem; color: var(--muted); }

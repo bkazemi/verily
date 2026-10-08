@@ -2745,6 +2745,12 @@ test('a badge that goes from one record to several opens its dialog on all of th
   assert.match(opened.cards[1]!.textContent, /\+ Published a proof on GitHub/);
   assert.match(opened.cards[2]!.textContent, /@bob.*Expired/s);
 
+  // With more than one account, the header links to all of them on the verifier.
+  const all = 'https://verifier.test/api/verily/published?site=site.test&reference=member-1';
+
+  assert.equal(opened.dialog.links()[0]!.href, all);
+  assert.match(opened.dialog.links()[0]!.attributes['aria-label']!, /^View all on /);
+
   // And back to one: the dialog follows that too.
   const back = await groupHarness({
     a: linked('a', 'alice', 100),
@@ -2756,7 +2762,11 @@ test('a badge that goes from one record to several opens its dialog on all of th
 
   await again.mountBadges(other, { connectionIds: ['a', 'b'] });
   await again.mountBadges(other, { connectionIds: ['a'] });
-  assert.equal((await back.cards(other)).cards.length, 2);
+  const one = await back.cards(other);
+
+  assert.equal(one.cards.length, 2);
+  // One account has its own page behind "via:", so there is nothing more to view.
+  assert.ok(one.dialog.links().every((link) => !link.href.includes('/published')));
 });
 
 test('records taken away while the dialog is open stop being shown in it', async () => {
