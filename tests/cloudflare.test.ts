@@ -508,6 +508,12 @@ test('no path the worker answers itself is one the library serves', async () => 
     authenticate: async () => alice,
   });
 
+  // By definition first: no path of the worker's is a route in the library's own table.
+  const { routeOf } = await import('../src/core/index.js');
+
+  for (const path of own)
+    for (const method of ['GET', 'POST']) assert.equal(routeOf(method, path), undefined, path);
+
   // A route the library does serve answers, so a 404 below means the path is unknown to it.
   assert.equal(
     (await app.handle(new Request(`${base}/methods`, { headers: { origin: base } }))).status,

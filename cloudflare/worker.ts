@@ -1,8 +1,12 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
 import {
+  dialogPath,
+  dialogRoute,
   externalName,
   lastProved,
   localSide,
+  routeOf,
+  routes,
   statusLabel,
   type Evidence,
 } from '../src/core/index.js';
@@ -131,22 +135,21 @@ function dailyMail(configured: string | number | undefined): number | undefined 
   return Number.isSafeInteger(count) && count > 0 ? count : undefined;
 }
 
-/** The library's own management routes, which a site session does not get. */
-const management = /^\/connections\/[^/]+\/(disconnect|mark|share|share-revoke)$/;
+/**
+ * Whether a request is for one of the library's own management routes, which a site
+ * session does not get. Which routes those are is the library's to say.
+ */
+const manages = (method: string, path: string) => {
+  const name = routeOf(method, path);
+
+  return name !== undefined && 'manages' in routes[name];
+};
 
 /** GETs that create state, and so are limited like every POST. */
-const limitedGets = ['/handoff/request', '/handoff/accept', '/sessions', '/callback'];
+const limitedGets = ['/handoff/request', '/handoff/accept', '/callback'];
 
 /** Matches the library's own bound: large enough for a pasted key, small enough to buffer. */
 const maxBodyBytes = 65536;
-
-/**
- * What the dialogs on a registered site's own page may ask for: the methods, a connect
- * flow's start, state, proof and approval, and the removal or the listing of one of the
- * holder's own accounts. Everything else stays same-origin.
- */
-const dialogPaths =
-  /^\/(methods|sessions|flows\/[^/]+(\/(submit|approve))?|connections\/[^/]+\/(disconnect|mark))$/;
 
 /** How a holder may have an account listed, as the library's mark route takes it. */
 const listings: readonly Listing[] = ['preferred', 'current', 'unused', 'retired'];
@@ -283,7 +286,7 @@ export default {
     // Asked by a browser before a page on another origin may send the dialog's headers.
     if (
       request.method === 'OPTIONS' &&
-      (dialogPaths.test(url.pathname) || url.pathname === '/site/session')
+      (dialogPath(url.pathname) || url.pathname === '/site/session')
     )
       return preflight(request);
 
@@ -505,7 +508,7 @@ export class VerilyStore {
 
     // The connect dialog on a site's own page, which counts its requests once it knows
     // whose they are.
-    if (request.headers.has('authorization') && dialogPaths.test(url.pathname))
+    if (request.headers.has('authorization') && dialogPath(url.pathname))
       return shared(await this.dialog(request, url), request);
 
     if (!(await this.allowed(request, url)))
@@ -602,11 +605,7 @@ export class VerilyStore {
       // A site session removes a link, or lists an account another way, through this
       // worker, which reports it back to the site, and has no sharing links. The library's
       // routes would do neither.
-      if (
-        request.method === 'POST' &&
-        management.test(url.pathname) &&
-        (await this.sites.open(request))
-      )
+      if (manages(request.method, url.pathname) && (await this.sites.open(request)))
         return html('Unavailable', '', 404);
 
       // Some browsers omit Origin on native same-origin form posts. The request
@@ -686,7 +685,13 @@ export class VerilyStore {
 
     if (!opaque.test(session) || (binding && !opaque.test(binding))) return unavailable();
 
-    // A GET of a flow is its page unless JSON is asked for, and a GET of /sessions starts one.
+    // What the dialogs on a registered site's own page may ask for is the library's to say:
+    // the methods, a flow's start, state, proof and approval, and the removal or the
+    // listing of one of the holder's own accounts. Everything else stays same-origin.
+    const route = dialogRoute(request.method, url.pathname, url.searchParams);
+
+    if (!route) return unavailable();
+
     if (post) {
       if (!request.headers.get('content-type')?.startsWith('application/json'))
         return unavailable();
@@ -694,16 +699,9 @@ export class VerilyStore {
       // The dialog connects an account or renews one. Every other kind of flow has a page
       // of its own here. Parsed as the library parses it, so the kind checked is the kind
       // it will run.
-      if (
-        url.pathname === '/sessions' &&
-        !['connect', 'renew'].includes(String(parsed(body!)?.kind))
-      )
+      if (route === 'start' && !['connect', 'renew'].includes(String(parsed(body!)?.kind)))
         return unavailable();
-    } else if (
-      url.pathname !== '/methods' &&
-      !(/^\/flows\/[^/]+$/.test(url.pathname) && url.searchParams.get('format') === 'json')
-    )
-      return unavailable();
+    }
 
     const inner = new Request(request.url, {
       method: request.method,

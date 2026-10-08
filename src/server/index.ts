@@ -145,6 +145,28 @@ const headers = {
     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
 };
 
+/**
+ * What a request wants back, by one rule for every route that has more than one answer.
+ * The query says so first, where a route has that form. Then `Accept`, when it asks for
+ * JSON and not for a page. Then, for a POST, how the request itself was sent: a JSON body
+ * is answered in JSON, which is all a badge script published before `Accept` was read can
+ * say. Anything else is a page.
+ */
+function wants(request: Request, url: URL): 'json' | 'signed' | 'page' {
+  const format = url.searchParams.get('format');
+
+  if (format === 'json' || format === 'signed') return format;
+
+  const accept = request.headers.get('accept') ?? '';
+
+  if (/\bapplication\/json\b/i.test(accept) && !/\btext\/html\b/i.test(accept)) return 'json';
+
+  return request.method === 'POST' &&
+    request.headers.get('content-type')?.startsWith('application/json')
+    ? 'json'
+    : 'page';
+}
+
 const html = (body: string, status = 200) =>
   new Response(body, {
     status,
@@ -969,10 +991,13 @@ export function createVerily(options: ServerOptions) {
           if (kind === 'visibility' && visibilities(user!).length < 2) throw new Unavailable();
 
           // One form per method. With one on offer the provider is all there is to name.
+          // A new link started from this page always ends on its approval, as it did when
+          // this form was a GET, so it says so: `/verify` is an address any site can send a
+          // browser to, and the approval is where the holder sees what they are linking.
           const forms = offered
             .map(
               (p) =>
-                `<form method="${kind === 'connect' ? 'get' : 'post'}" action="${escape(prefix)}/sessions"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="connectionId" value="${escape(id)}"><input type="hidden" name="provider" value="${escape(p.id)}"><input type="hidden" name="method" value="${escape(providerMethod(p))}"><button>${escape(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`)}</button></form>`,
+                `<form method="post" action="${escape(prefix)}/sessions"><input type="hidden" name="kind" value="${kind}">${kind === 'connect' ? '<input type="hidden" name="unattended" value="1">' : ''}<input type="hidden" name="connectionId" value="${escape(id)}"><input type="hidden" name="provider" value="${escape(p.id)}"><input type="hidden" name="method" value="${escape(providerMethod(p))}"><button>${escape(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`)}</button></form>`,
             )
             .join('');
 
@@ -1011,23 +1036,6 @@ export function createVerily(options: ServerOptions) {
           return redirect(`${prefix}/flows/${id}`);
         }
 
-        if (path === '/sessions' && url.searchParams.get('kind') === 'connect') {
-          const user = await local(request);
-
-          const flow = await service.start(
-            user,
-            undefined,
-            'connect',
-            await choose(user, undefined, {
-              provider: url.searchParams.get('provider') ?? undefined,
-              method: url.searchParams.get('method') ?? undefined,
-            }),
-            await context(request, 'connect'),
-          );
-
-          return redirect(entry(flow), flowCookie(flow.binding));
-        }
-
         // What the in-page dialog offers: every method the signed-in holder may use.
         if (path === '/methods') {
           const user = await local(request);
@@ -1047,7 +1055,7 @@ export function createVerily(options: ServerOptions) {
           });
         }
 
-        if (path.startsWith('/flows/') && url.searchParams.get('format') === 'json')
+        if (path.startsWith('/flows/') && wants(request, url) === 'json')
           return json(await flowView(await ownFlow(request, path.slice(7))));
 
         if (path.startsWith('/flows/')) {
@@ -1230,7 +1238,7 @@ export function createVerily(options: ServerOptions) {
         if (path.startsWith('/s/')) {
           const evidence = await service.shared(path.slice(3));
 
-          return url.searchParams.get('format') === 'json'
+          return wants(request, url) === 'json'
             ? json(evidence)
             : html(evidencePage(evidence, prefix, options.reportUrl));
         }
@@ -1243,7 +1251,7 @@ export function createVerily(options: ServerOptions) {
         if (path.startsWith('/connections/')) {
           const id = path.slice(13);
 
-          if (url.searchParams.get('format') === 'signed') {
+          if (wants(request, url) === 'signed') {
             const response = plain(await service.signed(id));
 
             // Kept as a file, which is what `gpg --verify` is given.
@@ -1255,7 +1263,7 @@ export function createVerily(options: ServerOptions) {
           // Canonical routes and widgets never use local-session privileges.
           const evidence = await service.read(id);
 
-          if (url.searchParams.get('format') === 'json') {
+          if (wants(request, url) === 'json') {
             const response = json(evidence);
 
             // Public evidence can be embedded on static sites without credentials.
@@ -1282,7 +1290,7 @@ export function createVerily(options: ServerOptions) {
       } else {
         const data = await body(request);
         // The in-page dialog asks in JSON and is answered in JSON; a form gets its page.
-        const asJson = request.headers.get('content-type')?.startsWith('application/json');
+        const asJson = wants(request, url) === 'json';
 
         if (path === '/check' && signs) {
           try {
@@ -1337,7 +1345,8 @@ export function createVerily(options: ServerOptions) {
             }),
             await context(request, kind),
             // Posted from this origin, which the check on every POST has already held it to.
-            true,
+            // A form may still ask to be held to an approval, which only ever adds one.
+            !data.unattended,
           );
 
           if (asJson && ['connect', 'renew'].includes(kind))

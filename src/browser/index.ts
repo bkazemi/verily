@@ -1,4 +1,5 @@
 import type { Evidence } from '../core/index.js';
+import { routePath } from '../core/routes.js';
 import {
   badgeShown,
   quietBadge,
@@ -383,6 +384,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       cache: 'no-store',
       method: data ? 'POST' : 'GET',
       headers: {
+        Accept: 'application/json',
         Authorization: `Bearer ${await (session ??= openSession())}`,
         ...(binding ? { 'X-Verily-Flow': binding } : {}),
         ...(data ? { 'Content-Type': 'application/json' } : {}),
@@ -405,13 +407,13 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     const response = await fetch(`${root}${path}`, {
       credentials: 'same-origin',
       cache: 'no-store',
-      ...(data
-        ? {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-          }
-        : {}),
+      // Says what is wanted back, whatever is sent. A header any page may send to another
+      // origin without asking first, so a badge on a static site reads as it did.
+      headers: {
+        Accept: 'application/json',
+        ...(data ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(data ? { method: 'POST', body: JSON.stringify(data) } : {}),
     });
 
     if (!response.ok) throw new Error('Verily request unavailable');
@@ -422,7 +424,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
   /** The connect flow as the dialog drives it, every answer checked before it is drawn. */
   const flows: ConnectApi = {
     async methods() {
-      const data = await ask('/methods');
+      const data = await ask(routePath('methods'));
 
       if (!record(data) || !record(data.local) || !Array.isArray(data.methods))
         throw new Error('Invalid methods response');
@@ -434,19 +436,17 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     start: async (provider, method, renew) =>
       flowView(
         await ask(
-          '/sessions',
+          routePath('start'),
           renew
             ? { kind: 'renew', connectionId: renew, provider, method }
             : { kind: 'connect', provider, method },
         ),
       ),
-    read: async (id) =>
-      flowView(await ask(`/flows/${encodeURIComponent(id)}?format=json`, undefined, id)),
-    submit: async (id, artifact) =>
-      flowView(await ask(`/flows/${encodeURIComponent(id)}/submit`, { artifact }, id)),
+    read: async (id) => flowView(await ask(routePath('flow', id), undefined, id)),
+    submit: async (id, artifact) => flowView(await ask(routePath('submit', id), { artifact }, id)),
     async approve(id, visibility, cancel) {
       const data = await ask(
-        `/flows/${encodeURIComponent(id)}/approve`,
+        routePath('approve', id),
         { action: cancel ? 'cancel' : 'approve', visibility },
         id,
       );
@@ -712,7 +712,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
       // On another origin this is vouched for afresh, as each opening of the dialog is.
       if (remote) session = undefined;
 
-      return ask(`/connections/${encodeURIComponent(id)}/disconnect`, {});
+      return ask(routePath('disconnect', id), {});
     },
     /**
      * Says how the holder would have an account listed, or retires it. Names one record
@@ -721,10 +721,10 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     mark(id: string, as: Listing) {
       if (remote) session = undefined;
 
-      return ask(`/connections/${encodeURIComponent(id)}/mark`, { as });
+      return ask(routePath('mark', id), { as });
     },
-    issueShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share`, {}),
-    revokeShare: (id: string) => request(`/connections/${encodeURIComponent(id)}/share-revoke`, {}),
+    issueShare: (id: string) => request(routePath('share', id), {}),
+    revokeShare: (id: string) => request(routePath('shareRevoke', id), {}),
   };
 
   return client;
