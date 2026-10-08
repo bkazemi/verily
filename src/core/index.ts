@@ -613,6 +613,64 @@ export function statusLabel(evidence: Pick<Evidence, 'status' | 'expiresAt'>, no
 }
 
 /**
+ * Where an account is listed among a subject's others, before the order they were
+ * connected in. This is all there is to preferring an account: there is no separate pin.
+ */
+export function place(account: Pick<Evidence, 'status' | 'mark'>): number {
+  if (account.status === 'retired') return 3;
+
+  return account.mark === 'preferred' ? 0 : account.mark === 'unused' ? 2 : 1;
+}
+
+/**
+ * One subject's records as its accounts, in the order they are listed everywhere: the
+ * preferred one, then the rest as first connected, then those unused, then those retired.
+ * Records are not accounts: the same account can stand on several. `held` is every record
+ * of the account, earliest first, and `verified` those of them that stand now. `lead`
+ * speaks for the account: the earliest that stands, or else the latest approved, which
+ * says what became of it. `external` is how the account was shown: the lead's methods,
+ * then any other its standing records add.
+ *
+ * A record from a backend older than `connectedAt` is placed by when it was approved.
+ */
+export function accountsOf(
+  records: Evidence[],
+  now: number,
+): {
+  lead: Evidence;
+  held: Evidence[];
+  verified: Evidence[];
+  external: Attestations['external'];
+  connectedAt: number;
+}[] {
+  const when = (e: Evidence) => e.connectedAt ?? e.approvedAt;
+  const byAccount = new Map<string, Evidence[]>();
+
+  for (const record of records) {
+    const key = JSON.stringify([record.provider, record.external.id]);
+
+    byAccount.set(key, [...(byAccount.get(key) ?? []), record]);
+  }
+
+  return [...byAccount.values()]
+    .map((unsorted) => {
+      const held = [...unsorted].sort((a, b) => when(a) - when(b));
+      const verified = held.filter((e) => e.status === 'verified' && e.expiresAt > now);
+      const lead = verified[0] ?? held.reduce((a, b) => (b.approvedAt > a.approvedAt ? b : a));
+
+      const external = [...lead.attestations.external] as Attestations['external'];
+
+      for (const other of verified.slice(1))
+        for (const attestation of other.attestations.external)
+          if (!external.some((shown) => shown.method === attestation.method))
+            external.push(attestation);
+
+      return { lead, held, verified, external, connectedAt: when(held[0]!) };
+    })
+    .sort((a, b) => place(a.lead) - place(b.lead) || a.connectedAt - b.connectedAt);
+}
+
+/**
  * What to call a link's local side, and what to write as its value. When the site itself is
  * what was linked there is no subject on it to name, so the site is the value rather than a
  * label above some other thing. An absent kind means the site did not say, so nothing is

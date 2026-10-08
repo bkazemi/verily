@@ -197,11 +197,13 @@ function renderKey(
   linked: boolean,
   rows: Evidence[],
   peek: boolean,
+  href: string,
 ): string {
   return JSON.stringify([
     more,
     linked,
     peek,
+    href,
     rows.map((row) => [row.provider, row.providerName, externalName(row.external)]),
     evidence.provider,
     evidence.providerName,
@@ -274,6 +276,8 @@ export function renderBadgeMessage(element: HTMLElement, message: string): void 
  * `more` is how many other accounts of the same subject stand behind the one shown, said
  * as a count beside it. `linked` is whether the record has a page of its own a reader can
  * open: an unlisted one has none, so its pill is a button and never a link to nowhere.
+ * `href` is that page, where it is not the record's own: a pill standing for several
+ * accounts links to all of them.
  *
  * `rows` are those of the other accounts to name, in order. Stacked, each has a row of
  * its own in the pill, which is then as tall as its rows. Otherwise the pill stays short
@@ -288,7 +292,8 @@ export function renderBadge(
     linked = true,
     rows = [],
     peek = false,
-  }: { more?: number; linked?: boolean; rows?: Evidence[]; peek?: boolean } = {},
+    href = evidence.evidenceUrl,
+  }: { more?: number; linked?: boolean; rows?: Evidence[]; peek?: boolean; href?: string } = {},
 ): HTMLElement | null {
   const provider = evidence.providerName;
   const current = evidence.status === 'verified' && evidence.expiresAt > Date.now();
@@ -304,7 +309,7 @@ export function renderBadge(
 
   const label = statusLabel(evidence, Date.now());
 
-  const key = renderKey(evidence, current, label, more, linked, rows, peek);
+  const key = renderKey(evidence, current, label, more, linked, rows, peek, href);
 
   if (intact(element) && shown.get(element) === key) return null;
 
@@ -320,7 +325,7 @@ export function renderBadge(
   paintMark(mark, current ? 'current' : retired ? 'pending' : 'inactive');
 
   if (linked) {
-    (badge as HTMLAnchorElement).href = evidence.evidenceUrl;
+    (badge as HTMLAnchorElement).href = href;
     (badge as HTMLAnchorElement).rel = 'noreferrer';
   } else (badge as HTMLButtonElement).type = 'button';
 

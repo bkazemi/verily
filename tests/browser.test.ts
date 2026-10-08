@@ -1683,7 +1683,12 @@ test('several accounts of one subject are one pill: the first connected, then ho
   // not be read is left out and takes nothing else down with it.
   assert.equal(pillText(host), '@alice+2');
   assert.equal(host.links().length, 1);
-  assert.equal(host.links()[0]!.href, 'https://verifier.test/api/verily/connections/first');
+
+  // Its link is to all of the subject's accounts, which is what a plain click opens.
+  assert.equal(
+    host.links()[0]!.href,
+    'https://verifier.test/api/verily/published?site=site.test&reference=member-1',
+  );
 
   // Read aloud, the pill names the accounts its number stands for.
   assert.match(
