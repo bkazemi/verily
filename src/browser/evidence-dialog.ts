@@ -35,6 +35,8 @@ export const styles = `
   h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
   button { width: 32px; height: 32px; border: 1px solid #dce2de; border-radius: 8px; background: #fff; color: #52645a; font: 20px system-ui, sans-serif; cursor: pointer; }
   button:hover { background: #f2f5f1; }
+  .icon { display: grid; place-items: center; padding: 0; }
+  .icon svg { width: 16px; height: 16px; }
   .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .all { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #52645a; }
   .all:hover { background: #f2f5f1; }
@@ -54,7 +56,7 @@ export const styles = `
   .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .caution { display: inline-block; margin-left: 4px; color: #a15c00; cursor: help; vertical-align: middle; }
+  .caution { display: inline-block; margin-left: 4px; color: #a15c00; cursor: help; vertical-align: -1.5px; }
   .caution svg { display: block; width: 12px; height: 12px; }
   .bad { color: #b3261e; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
   .account { padding: 14px 16px; border: 1px solid #e0e6df; border-radius: 10px; margin-top: 12px; }
@@ -204,6 +206,12 @@ const foldMark = () => strokes(16, 1.8, ['M6 3.5 10.5 8 6 12.5']);
 
 /** Three dots: there is more to do here than the buttons beside it. */
 const moreMark = () => strokes(16, 2.4, ['M3 8h.01', 'M8 8h.01', 'M13 8h.01']);
+
+/** A cross drawn in a square, so it sits in the middle of its button in any font. */
+export const closeMark = () => strokes(16, 1.8, ['M4 4l8 8', 'M12 4l-8 8']);
+
+/** Points back the way the reader came, drawn for the same reason the cross is. */
+export const backMark = () => strokes(16, 1.8, ['M10 3.5 5.5 8 10 12.5']);
 
 /** Joins the two cards: the link itself, drawn rather than described. */
 export function linkMark(): SVGSVGElement {
@@ -1014,7 +1022,7 @@ export function openEvidenceDialog(
   root.adoptedStyleSheets = [sheet];
   const dialog = node('dialog');
   const heading = node('h2', 'Verification details');
-  const close = node('button', '×');
+  const close = node('button', '', 'icon');
   // Every account on a page of its own, on the verifier. It sits by the heading it widens,
   // and only where there is more than one account to list.
   const all = node('a', '', 'all');
@@ -1031,6 +1039,7 @@ export function openEvidenceDialog(
   content.setAttribute('aria-live', 'polite');
   stamp.append(stampLink(), node('span', version));
   all.append(awayMark());
+  close.append(closeMark());
   // The close was the first thing in the dialog to take the focus, and still is.
   close.autofocus = true;
   title.append(heading);

@@ -1,6 +1,15 @@
 import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
 import { externalId, externalLink, externalName } from '../core/index.js';
-import { accountCard, linkMark, node, outward, stampLink, styles } from './evidence-dialog.js';
+import {
+  accountCard,
+  backMark,
+  closeMark,
+  linkMark,
+  node,
+  outward,
+  stampLink,
+  styles,
+} from './evidence-dialog.js';
 import { providerMark } from './provider-mark.js';
 import { version } from '../version.js';
 import type { Result } from './index.js';
@@ -92,6 +101,8 @@ const connectStyles = `
   fieldset { margin: 16px 0 0; padding: 10px 14px; border: 1px solid #e0e6df; border-radius: 10px; }
   legend { padding: 0 4px; color: #6b786f; font-size: 11px; font-weight: 550; }
   fieldset label { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; font-weight: 500; }
+  /* A radio has no baseline to speak of, so it is set in the middle of the label's first line. */
+  fieldset input { flex-shrink: 0; align-self: flex-start; width: 13px; height: 13px; font: inherit; margin-top: 4px; margin-top: calc((1lh - 13px) / 2); margin-bottom: 0; }
   .error { color: #9b2c33; }
 `;
 
@@ -199,7 +210,7 @@ export function openConnectDialog(
   root.adoptedStyleSheets = [sheet];
   const dialog = node('dialog');
   const heading = node('h2', 'Verify an account');
-  const close = node('button', '×');
+  const close = node('button', '', 'icon');
   const header = node('header');
   const stamp = node('footer');
   const content = node('div', 'Loading…', 'steps');
@@ -208,6 +219,7 @@ export function openConnectDialog(
   dialog.setAttribute('aria-labelledby', heading.id);
   close.type = 'button';
   close.setAttribute('aria-label', 'Close');
+  close.append(closeMark());
   content.setAttribute('aria-live', 'polite');
   stamp.append(stampLink(), node('span', version));
   header.append(heading, close);
@@ -219,10 +231,11 @@ export function openConnectDialog(
   let returning = false;
 
   if (back) {
-    const before = node('button', '‹');
+    const before = node('button', '', 'icon');
 
     before.type = 'button';
     before.setAttribute('aria-label', 'Back');
+    before.append(backMark());
     header.className = 'backed';
     header.replaceChildren(before, heading, close);
 
