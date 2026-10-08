@@ -184,6 +184,8 @@ Add `stacked` to name the accounts in the badge itself, one to a row:
 
 It lists up to four verified accounts in the order they were connected, then counts the rest as `+2 more`. It is still one badge that opens the one set of details. It is as tall as its rows, so give it a line of its own. With one verified account it is the ordinary badge. `mountBadges` and `presentConnections` take the same choices as `{ stacked: true }` and `{ peek: false }`.
 
+In the details of several accounts, each account is a short card: its name, its status and who verified it. How it was shown and its dates sit behind a Details toggle on the card, and retired accounts are folded into a group at the foot. Add `details-open` to the badge, or pass `{ detailsOpen: true }`, to start every card open where your readers come for the proof. A reader can still open or shut each one. A single account always shows everything.
+
 The badge refreshes every 30 seconds, and only ever reads public evidence. The client can also start and end connections, and draw a badge into an element of your own:
 
 ```js

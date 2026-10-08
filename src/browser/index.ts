@@ -136,6 +136,7 @@ function details(element: HTMLElement) {
       latestGroup.get(element),
       accounts,
       managers.get(element),
+      openHosts.has(element),
     );
   }
 }
@@ -149,14 +150,22 @@ export interface Arrangement {
    * the keyboard is on it. On unless this is false. A stacked pill has nothing to open.
    */
   peek?: boolean;
+  /**
+   * Whether the dialog's cards start with their details open: how each account was shown,
+   * and its dates. With several accounts they start shut unless this is true. A reader may
+   * open or shut each either way.
+   */
+  detailsOpen?: boolean;
 }
 
 /**
- * Hosts whose pill is stacked, and hosts whose pill opens no panel, where the page asked
- * for either. Kept here so every later refresh of the host draws it the same way.
+ * Hosts whose pill is stacked, hosts whose pill opens no panel, and hosts whose dialog
+ * starts with its details open, where the page asked for any of them. Kept here so every
+ * later refresh of the host draws it the same way.
  */
 const stackedHosts = new WeakSet<HTMLElement>();
 const quietHosts = new WeakSet<HTMLElement>();
+const openHosts = new WeakSet<HTMLElement>();
 
 /**
  * How many accounts a pill names before it counts the rest. A stacked pill pays for each
@@ -167,7 +176,10 @@ const stackedAccounts = 4;
 const peekedAccounts = 8;
 
 /** Records how a host's pill is arranged, from what the page last said. */
-function arrange(element: HTMLElement, { stacked, peek }: Arrangement) {
+function arrange(element: HTMLElement, { stacked, peek, detailsOpen }: Arrangement) {
+  if (detailsOpen) openHosts.add(element);
+  else openHosts.delete(element);
+
   if (stacked) stackedHosts.add(element);
   else stackedHosts.delete(element);
 
@@ -914,6 +926,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('verily-badge')
         'connect',
         'stacked',
         'peek',
+        'details-open',
       ];
 
       private handed?: unknown;
@@ -990,6 +1003,7 @@ if (typeof customElements !== 'undefined' && !customElements.get('verily-badge')
         const arrangement = {
           stacked: this.getAttribute('stacked') !== null,
           peek: this.getAttribute('peek') !== 'off',
+          detailsOpen: this.getAttribute('details-open') !== null,
         };
 
         // The holder's own badge, where the page says so: its dialog connects another
