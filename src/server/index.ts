@@ -54,7 +54,13 @@ export { linkProvider, githubLinkProvider, type LinkProviderOptions } from './li
 export {
   dnsProvider,
   wellKnownProvider,
+  dnsKeys,
+  dnsVerifiers,
+  keyRecord,
+  verifierRecord,
+  type DnsOptions,
   type DomainProviderOptions,
+  type Published,
   type WellKnownProviderOptions,
 } from './domain.js';
 
@@ -204,7 +210,7 @@ function attestationNote(
   names: { site: string; provider: string },
   additional = false,
 ) {
-  const label = attestationLabel(attestation.method, names);
+  const label = attestationLabel(attestation.method, names, attestation);
 
   if (!label) return '';
 
@@ -448,6 +454,7 @@ function evidencePage(
   base: string,
   report: string,
   keyId?: string,
+  named?: Named,
 ) {
   const names = { site: e.siteName, provider: e.providerName };
 
@@ -504,12 +511,26 @@ function evidencePage(
             ],
       ) +
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
-    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with OpenPGP key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
+    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? ` with OpenPGP key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>${keyNamed(named)}` : ''}. <a href="${escape(safeUrl(e.signedUrl))}">Download the signed record</a>, which <a href="${escape(base)}/check">can be checked</a> without this page.</p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
     <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p>`,
   );
+}
+
+/** Where a verifier's domain was read naming a signing key, and how far that read goes. */
+type Named = { domain: string; lookup: string; dnssec: boolean };
+
+/**
+ * Says a key is named in a domain's DNS, as a link to the lookup that found it: a second
+ * place to learn whose the key is, which is not this server. The domain written is the one
+ * that was asked, whatever address the record beside it gives for its verifier.
+ */
+function keyNamed(named?: Named) {
+  return named
+    ? `, which <a href="${escape(named.lookup)}" rel="noreferrer">${escape(named.domain)} names in its DNS</a>${named.dnssec ? ', validated by DNSSEC' : ''}`
+    : '';
 }
 
 const checkForm =
@@ -520,7 +541,7 @@ const checkForm =
  * keys. It is a record of the past: the page says when, and sends the reader to the live
  * record for whether it still stands.
  */
-function checkedPage(d: SignedDocument, keyId: string, base: string) {
+function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Named) {
   const names = { site: d.siteName, provider: d.providerName };
   const local = localSide(d.local, d.siteName);
 
@@ -559,7 +580,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string) {
               ['Valid until', d.expiresAt],
             ],
       ) +
-      `<p class="fine">Signing key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>.</p>
+      `<p class="fine">Signing key <a href="${escape(base)}/keys.asc">${escape(keyId)}</a>${keyNamed(named)}.</p>
     <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
   );
 }
@@ -1176,7 +1197,10 @@ export function createVerily(options: ServerOptions) {
 
         // The keys a signed record is checked against. Public, like the records they sign.
         if (path === '/keys') {
-          const response = json({ keys: await service.keys() });
+          const dns = await service.keyRecords();
+
+          // With them, the records that name these keys in the DNS of this verifier's domain.
+          const response = json({ keys: await service.keys(), ...(dns ? { dns } : {}) });
 
           response.headers.set('Access-Control-Allow-Origin', '*');
 
@@ -1234,8 +1258,16 @@ export function createVerily(options: ServerOptions) {
             return response;
           }
 
+          const keyId = (await service.keys())[0]?.id;
+
           return html(
-            evidencePage(evidence, prefix, options.reportUrl, (await service.keys())[0]?.id),
+            evidencePage(
+              evidence,
+              prefix,
+              options.reportUrl,
+              keyId,
+              keyId && evidence.signedUrl ? await service.keyNamed(keyId) : undefined,
+            ),
           );
         }
 
@@ -1251,7 +1283,10 @@ export function createVerily(options: ServerOptions) {
             const signed = data.record ?? '';
             const document = await service.checked(signed);
 
-            if (document) return html(checkedPage(document, (await signedBy(signed))!, prefix));
+            const by = (await signedBy(signed))!;
+
+            if (document)
+              return html(checkedPage(document, by, prefix, await service.keyNamed(by)));
           } catch {
             // A record this build cannot draw is not one it can vouch for.
           }

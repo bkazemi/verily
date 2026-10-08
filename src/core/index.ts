@@ -93,8 +93,16 @@ export interface Attestation {
    */
   minted?: boolean;
   /**
+   * Set where the proof was read from DNS and the resolver said it had validated the answer
+   * with DNSSEC. Without it the answer is only as good as the resolver's own lookup, which
+   * somebody on the path between it and the domain's name servers could have answered.
+   */
+  dnssec?: boolean;
+  /**
    * When this side was last confirmed. For `declared` and `oauth` that is the moment it
    * was established; artifact methods drift out of date and are reconfirmed on a schedule.
+   * A `declared` side that carries a proof is the site's own DNS naming this verifier, and
+   * is reconfirmed like any other.
    */
   confirmedAt: number;
 }
@@ -164,6 +172,13 @@ export interface Flow {
   expect?: string;
   /** Whether `expect` was minted for a method that had nothing of the subject's to state. */
   minted?: boolean;
+  /** Whether the proof was read from a DNS answer the resolver validated with DNSSEC. */
+  dnssec?: boolean;
+  /**
+   * How the local side is recorded once the flow is approved, where the site's own DNS was
+   * found to name this verifier. Absent means the site's word alone.
+   */
+  stated?: Attestation;
   /**
    * What the holder handed back: an address to read, or the proof itself. On a flow still
    * waiting it is what they last handed back and had refused, kept so they can put it right.
@@ -253,12 +268,27 @@ export interface Limit {
   expiresAt: number;
 }
 
+/**
+ * When a site's DNS was last asked whether it names this verifier, by the maintenance run
+ * and nothing else. It is what orders the sites in a run, so it is kept for as long as the
+ * site has a record here and never expires by itself: an order that could lapse would
+ * start again from the same few sites.
+ */
+export interface SiteRead {
+  /** The site's domain. */
+  id: string;
+  readAt: number;
+  /** Whether that read got an answer. One that did not is asked again sooner. */
+  answered: boolean;
+}
+
 export interface Records {
   connections: Connection;
   flows: Flow;
   shares: Share;
   audit: Audit;
   limits: Limit;
+  sites: SiteRead;
 }
 
 export interface Transaction {
@@ -365,11 +395,23 @@ export interface ArtifactProvider {
    */
   verify(input: { artifact: string; expect: string }): Promise<ExternalAccount>;
   /**
+   * The same check, for a method that learns more than whose the proof is. Where a method
+   * has one, this is what the backend calls, and `verify` gives the account it found.
+   */
+  prove?(input: { artifact: string; expect: string }): Promise<Proved>;
+  /**
    * Whether the holder has since withdrawn the identity itself, wherever such a statement
    * is published. This revokes the connection, so it must be something the holder stated
    * and this provider verified, never something a third party merely asserted.
    */
   withdrawn?(account: ExternalAccount, artifact: string): Promise<boolean>;
+}
+
+/** Whose a proof is, with what the method learned of how far the read can be trusted. */
+export interface Proved {
+  account: ExternalAccount;
+  /** Whether the DNS answer the proof was read from was validated with DNSSEC. */
+  dnssec?: boolean;
 }
 
 /**
@@ -610,18 +652,25 @@ export function externalName(external: ExternalAccount): string {
  * judgement, which is the reason for publishing it rather than a verdict about it.
  *
  * An unrecognised method returns nothing, so a renderer omits the line instead of
- * describing a proof it does not understand.
+ * describing a proof it does not understand. Given the attestation, the words also say
+ * what its proof adds: that a DNS answer was validated, or that a site's DNS was read.
  */
 export function attestationLabel(
   method: string,
   names: { site: string; provider: string },
+  proof: Pick<Attestation, 'artifactUrl' | 'dnssec'> = {},
 ): string | undefined {
+  const dnssec = proof.dnssec ? ', validated by DNSSEC' : '';
+
   return {
-    declared: `Stated by ${names.site}`,
+    // A site's word carries a proof only where its own DNS was read naming this verifier.
+    declared: proof.artifactUrl
+      ? `Stated by ${names.site}, whose DNS names this verifier${dnssec}`
+      : `Stated by ${names.site}`,
     oauth: `Signed in with ${names.provider}`,
     gist: `Published a proof on ${names.provider}`,
     backlink: `Linked back to ${names.site}`,
-    dns: 'Published a proof in its DNS',
+    dns: `Published a proof in its DNS${dnssec}`,
     wellknown: 'Published a proof in a file it serves',
     signature: 'Proved with a signature',
     code: 'Entered a code sent to this address',

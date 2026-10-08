@@ -148,7 +148,7 @@ function attestationNote(
   names: { site: string; provider: string },
   additional = false,
 ): HTMLElement[] {
-  const label = attestationLabel(attestation.method, names);
+  const label = attestationLabel(attestation.method, names, attestation);
 
   if (!label) return [];
 

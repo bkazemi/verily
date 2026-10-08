@@ -21,6 +21,7 @@ import {
   type LocalAccount,
   type Mark,
   type Method,
+  type Proved,
   type Provider,
   type Records,
   type RedirectProvider,
@@ -33,6 +34,15 @@ import {
   type Visibility,
   verifySigned,
 } from '../core/index.js';
+import {
+  domainOf,
+  keyRecord,
+  namedKeys,
+  namedVerifiers,
+  published,
+  type DnsOptions,
+  type Published,
+} from './domain.js';
 import { signer } from './signing.js';
 
 export const secret = () => randomBytes(32).toString('base64url');
@@ -83,6 +93,17 @@ export interface ServiceOptions {
   signingKey?: string | (() => Promise<string>);
   /** Public keys this instance signed with before, so what they signed still checks. */
   retiredKeys?: VerifierKey[];
+  /**
+   * Reads what DNS says of this verifier, through the one resolver `dnsProvider()` asks.
+   * Two statements are looked for, both TXT records at `_verily.<domain>`. On this
+   * verifier's own domain, `verily-key=<fingerprint>` names a signing key, and the pages
+   * that name the key then link to that lookup. On the domain of a subject's `profileUrl`,
+   * `verily-verifier=<this verifier's host>` names this verifier as the site's own, and
+   * the record's local side then carries that lookup as its proof. That one is read when a
+   * link is approved and again by `recheck()`, and is not looked for where this verifier
+   * is on the site's domain or a subdomain of it. Unset reads nothing.
+   */
+  dns?: boolean | DnsOptions;
   now?: () => number;
 }
 
@@ -160,6 +181,96 @@ export class VerilyService {
     const current = await this.signer();
 
     return [...(current ? [current.key] : []), ...(this.options.retiredKeys ?? [])];
+  }
+
+  /**
+   * What this verifier's domain publishes to name its keys: one TXT record for each, all
+   * under the one name. Nothing where it signs nothing, or is not on a domain at all.
+   */
+  async keyRecords(): Promise<{ name: string; values: string[] } | undefined> {
+    const domain = domainOf(this.baseUrl);
+    const keys = await this.keys();
+
+    return domain && keys.length
+      ? { name: `_verily.${domain}`, values: keys.map((key) => keyRecord(key.id)) }
+      : undefined;
+  }
+
+  /**
+   * Where a reader can see this verifier's domain name a key, if it was read doing so, and
+   * which domain that was. It is always the domain this instance is on now: a record it
+   * signed while on another names that one, and nothing here was asked about it. The
+   * answer is kept for ten minutes, so a page that asks on every view costs one lookup.
+   */
+  async keyNamed(
+    id: string,
+  ): Promise<(Pick<Published, 'lookup' | 'dnssec'> & { domain: string }) | undefined> {
+    const domain = domainOf(this.baseUrl);
+    const found = domain && this.options.dns ? await this.lookedUp(domain, 600000) : undefined;
+
+    // Read as `dnsKeys()` reads it, so a fingerprint published in lower case counts here too.
+    return found && namedKeys(found.values).includes(id.toUpperCase())
+      ? { domain: domain!, lookup: found.lookup, dnssec: found.dnssec }
+      : undefined;
+  }
+
+  /** What each domain was last read publishing, and when. Nothing found is a failed read. */
+  private readonly lookups = new Map<string, { at: number; found?: Published }>();
+
+  /**
+   * What a domain publishes for Verily, read again once the last read is older than
+   * `maxAgeMs`. Nothing where it could not be read, which is never the same as nothing
+   * published.
+   */
+  private async lookedUp(domain: string, maxAgeMs: number): Promise<Published | undefined> {
+    const held = this.lookups.get(domain);
+
+    if (held && this.now() - held.at < maxAgeMs) return held.found;
+
+    const found = await this.deadline(
+      published(domain, this.options.dns === true ? {} : this.options.dns || {}),
+    ).catch(() => undefined);
+
+    this.lookups.set(domain, { at: this.now(), found });
+
+    return found;
+  }
+
+  /**
+   * The domain whose DNS can say a subject's site chose this verifier, or nothing where
+   * there is nothing to ask: no address, or a site this verifier shares a domain with,
+   * since whoever holds a domain already holds every name beneath it.
+   */
+  private siteDomain(local: LocalAccount): string | undefined {
+    const site = this.options.dns && local.profileUrl ? domainOf(local.profileUrl) : undefined;
+    const own = new URL(this.baseUrl).hostname.toLowerCase();
+
+    return site && site !== own && !own.endsWith(`.${site}`) && !site.endsWith(`.${own}`)
+      ? site
+      : undefined;
+  }
+
+  /**
+   * The local side as a site's DNS bears it out: the site's word, with the lookup that
+   * found the site naming this verifier. Nothing where it does not, or could not be read.
+   */
+  private stated(found: Published | undefined): Attestation | undefined {
+    const own = new URL(this.baseUrl).host.toLowerCase();
+
+    // Read as `dnsVerifiers()` reads it: a host is the same host in any case. What is kept
+    // is the record as published, since that is what a reader finds at the lookup.
+    const named = found && namedVerifiers(found.values).find(({ host }) => host === own);
+
+    return found && named
+      ? {
+          by: 'backend',
+          method: 'declared',
+          confirmedAt: this.now(),
+          artifactUrl: found.lookup,
+          expect: named.record,
+          ...(found.dnssec ? { dnssec: true } : {}),
+        }
+      : undefined;
   }
 
   /** The same keys as one armored text, which is what `gpg --import` takes. */
@@ -480,7 +591,7 @@ export class VerilyService {
   ) {
     try {
       const handed = provider.resolve?.(suggested) ?? suggested;
-      const external = await this.deadline(provider.verify({ artifact: handed, expect }));
+      const found = await this.deadline(read(provider, { artifact: handed, expect }));
 
       await this.transaction(async (tx) => {
         const flow = await this.bound(tx, id, binding);
@@ -489,7 +600,7 @@ export class VerilyService {
         await tx.put('flows', id, flow);
       });
 
-      await this.established(id, binding, external, handed);
+      await this.established(id, binding, found.account, handed, found.dnssec);
     } catch {
       await this.transaction(async (tx) => {
         const flow = await tx.get('flows', id);
@@ -575,9 +686,9 @@ export class VerilyService {
       // Kept as the address that was read, never as the shorthand that named it: it is
       // where a reader is sent, and what is read again later.
       const handed = provider.resolve?.(artifact) ?? artifact;
-      const external = await provider.verify({ artifact: handed, expect });
+      const found = await read(provider, { artifact: handed, expect });
 
-      await this.established(id, binding, external, handed);
+      await this.established(id, binding, found.account, handed, found.dnssec);
     } catch (error) {
       await this.refused(id, error, artifact);
     }
@@ -868,6 +979,7 @@ export class VerilyService {
     binding: string | undefined,
     external: ExternalAccount,
     artifact?: string,
+    dnssec = false,
   ) {
     if (
       typeof external.id !== 'string' ||
@@ -913,7 +1025,13 @@ export class VerilyService {
     // without the holder choosing that method or handing anything back. Read while the
     // flow is still exchanging: approval is shown once, and must show all it will record.
     const shown = await this.transaction(accepted);
-    const standing = ['connect', 'renew'].includes(shown.kind) ? await this.standing(shown) : [];
+    const recorded = ['connect', 'renew'].includes(shown.kind);
+    const standing = recorded ? await this.standing(shown) : [];
+
+    // The site's own DNS is read here for the same reason: outside a transaction, and
+    // before the approval that records what it said. A read a few minutes old will do.
+    const site = recorded ? this.siteDomain(shown.local!) : undefined;
+    const stated = site ? this.stated(await this.lookedUp(site, 300000)) : undefined;
 
     await this.transaction(async (tx) => {
       const flow = await accepted(tx);
@@ -921,6 +1039,8 @@ export class VerilyService {
       flow.artifact = artifact;
       flow.reason = undefined;
       flow.authenticatedAt = this.now();
+      flow.dnssec = dnssec || undefined;
+      flow.stated = stated;
 
       if (standing.length) flow.standing = standing;
 
@@ -962,7 +1082,10 @@ export class VerilyService {
         if (!known || expect === undefined) continue;
 
         const handed = provider.resolve?.(known) ?? known;
-        const external = await this.deadline(provider.verify({ artifact: handed, expect }));
+
+        const { account: external, dnssec } = await this.deadline(
+          read(provider, { artifact: handed, expect }),
+        );
 
         if (!sameAccount(flow.external!, external)) continue;
 
@@ -972,6 +1095,7 @@ export class VerilyService {
           confirmedAt: this.now(),
           artifactUrl: handed,
           expect,
+          ...(dnssec ? { dnssec } : {}),
         });
       } catch {
         continue;
@@ -1110,7 +1234,7 @@ export class VerilyService {
           connectedAt: this.now(),
           expiresAt: this.now() + (this.options.validityMs ?? 30 * 86400000),
           attestations: {
-            local: this.declared(),
+            local: this.declared(flow),
             external: [this.attestation(flow, provider, connectionId)],
           },
           proof: hosted(provider) ? flow.artifact : undefined,
@@ -1239,8 +1363,13 @@ export class VerilyService {
     // A retired record is as it stood when it was retired, and nothing is read after that.
     const at = connection.retiredAt ?? this.now();
 
+    const { local } = connection.attestations;
+
     return {
-      ...connection.attestations,
+      // A site's DNS that has gone unread no longer bears its word out, and the word stands.
+      local: fresh(local, at, this.freshness)
+        ? local
+        : { by: local.by, method: local.method, confirmedAt: local.confirmedAt },
       external: [main, ...rest.filter((a) => fresh(a, at, this.freshness))],
     };
   }
@@ -1344,7 +1473,7 @@ export class VerilyService {
       // case names the same profile under a different id.
       connection.external = flow.external!;
 
-      connection.attestations = { local: this.declared(), external: [attestation, ...rest] };
+      connection.attestations = { local: this.declared(flow), external: [attestation, ...rest] };
     } else {
       // A proof that named the subject's old address proves nothing about its new one,
       // and rereading it would go on confirming a link to where the subject used to be.
@@ -1355,7 +1484,7 @@ export class VerilyService {
       if (at < 0) others.push(attestation);
       else others[at] = attestation;
 
-      connection.attestations = { local: this.declared(), external: [main, ...others] };
+      connection.attestations = { local: this.declared(flow), external: [main, ...others] };
     }
 
     if (hosted(provider)) connection.proof = flow.artifact;
@@ -1385,9 +1514,12 @@ export class VerilyService {
     }
   }
 
-  /** The site is the only authority on its own namespace, so it declares the local subject. */
-  private declared(): Attestation {
-    return { by: 'backend', method: 'declared', confirmedAt: this.now() };
+  /**
+   * The site is the only authority on its own namespace, so it declares the local subject.
+   * Where the flow read the site's DNS naming this verifier, that goes with it.
+   */
+  private declared(flow: Flow): Attestation {
+    return flow.stated ?? { by: 'backend', method: 'declared', confirmedAt: this.now() };
   }
 
   /** How the provider established the external account, by whatever method the flow ran. */
@@ -1412,6 +1544,8 @@ export class VerilyService {
       external.expect = flow.expect;
 
       if (flow.minted) external.minted = true;
+
+      if (flow.dnssec) external.dnssec = true;
 
       if (hosted) external.hosted = true;
     }
@@ -1727,7 +1861,91 @@ export class VerilyService {
     // open across a fetch would stall every other request behind the slowest provider.
     for (const item of due) confirmed += await this.reread(item);
 
+    await this.restate(budget);
+
     return confirmed;
+  }
+
+  /**
+   * Asks each site's DNS again whether it names this verifier, and writes the answer to
+   * every record of that site. One lookup answers for all of a site's records, and
+   * `budget` bounds the sites asked in a run, longest unread first. A site that could not
+   * be read is left as it was: its records lose the proof only once it has gone unread
+   * past `freshnessMs`, or once an answer comes back without the statement.
+   *
+   * When each site was last asked is kept in storage, as a record of its own that `prune()`
+   * removes only with the site's last record. It is apart from the lookups a flow makes
+   * and from anything that expires: an instance restarted or pruned between runs must not
+   * start again from the same few sites, and a site whose holders connect often must
+   * still have its older records rewritten.
+   */
+  private async restate(budget: number): Promise<void> {
+    if (!this.options.dns) return;
+
+    const interval = this.options.recheckMs ?? 86400000;
+    const now = this.now();
+
+    const live = (c: Connection | undefined): c is Connection =>
+      !!c?.attestations &&
+      c.revokedAt === undefined &&
+      c.retiredAt === undefined &&
+      c.expiresAt > this.now();
+
+    const due = await this.transaction(async (tx) => {
+      const sites = new Set(
+        (await tx.list('connections'))
+          .filter(live)
+          .map((c) => this.siteDomain(c.local))
+          .filter((site) => site !== undefined),
+      );
+
+      const reads = new Map((await tx.list('sites')).map((read) => [read.id, read]));
+
+      // A site never asked about goes first, then the rest by how long ago they were. A
+      // site that gave no answer is due again sooner, and still waits behind every site
+      // asked before it, so a zone that never answers cannot hold up the others.
+      const at = (site: string) => reads.get(site)?.readAt ?? -Infinity;
+
+      const wait = (site: string) =>
+        reads.get(site)?.answered === false ? Math.ceil(interval / 4) : interval;
+
+      return [...sites]
+        .filter((site) => at(site) + wait(site) <= now)
+        .sort((a, b) => at(a) - at(b))
+        .slice(0, budget);
+    });
+
+    for (const site of due) {
+      // Always asked afresh: a read some flow made says nothing of the records before it.
+      const found = await this.lookedUp(site, 0);
+
+      await this.transaction((tx) =>
+        tx.put('sites', site, { id: site, readAt: this.now(), answered: !!found }),
+      );
+
+      if (!found) continue;
+
+      const stated = this.stated(found);
+
+      await this.transaction(async (tx) => {
+        for (const connection of await tx.list('connections')) {
+          if (!live(connection) || this.siteDomain(connection.local) !== site) continue;
+
+          const { local } = connection.attestations!;
+
+          // Nothing was stated before and nothing is now, so there is nothing to write.
+          if (!stated && !local.artifactUrl) continue;
+
+          connection.attestations!.local = stated ?? {
+            by: local.by,
+            method: local.method,
+            confirmedAt: local.confirmedAt,
+          };
+
+          await tx.put('connections', connection.id, connection);
+        }
+      });
+    }
   }
 
   /**
@@ -1754,6 +1972,7 @@ export class VerilyService {
     const { artifactUrl, expect, method } = attestation;
     const main = attestation === connection.attestations!.external[0];
     let withdrawn = false;
+    let dnssec = false;
 
     try {
       if (provider.artifact === 'document')
@@ -1761,9 +1980,13 @@ export class VerilyService {
           provider.withdrawn!(connection.external, connection.proof!),
         );
       else {
-        const external = await this.deadline(
-          provider.verify({ artifact: artifactUrl!, expect: expect! }),
+        const found = await this.deadline(
+          read(provider, { artifact: artifactUrl!, expect: expect! }),
         );
+
+        const external = found.account;
+
+        dnssec = found.dnssec === true;
 
         // The proof must still be the same holder's. An account that changed hands has
         // not reproved anything, whatever is published at the old address.
@@ -1809,6 +2032,10 @@ export class VerilyService {
 
       held.confirmedAt = this.now();
 
+      // A zone can start or stop being signed, so the flag is as the last read found it.
+      if (dnssec) held.dnssec = true;
+      else delete held.dnssec;
+
       await tx.put('connections', connection.id, current);
 
       return 1;
@@ -1845,6 +2072,8 @@ export class VerilyService {
         if (limit.expiresAt <= now) await tx.delete('limits', limit.id);
 
       const audit = await tx.list('audit');
+      // The sites that still have a record here, whose place in the recheck order is kept.
+      const sites = new Set<string>();
 
       for (const connection of await tx.list('connections')) {
         const ended =
@@ -1854,7 +2083,15 @@ export class VerilyService {
         if (ended + retentionMs <= now) {
           await tx.delete('connections', connection.id);
           await tx.delete('shares', connection.id);
-        } else if (connection.connectedAt === undefined) {
+
+          continue;
+        }
+
+        const site = this.siteDomain(connection.local);
+
+        if (site) sites.add(site);
+
+        if (connection.connectedAt === undefined) {
           // A record from before its first connection was kept. The audit trail still has
           // the moment, for as long as it retains it, and that is the answer. Only past
           // that is the earliest time left on the record used, which is a guess: a sign-in
@@ -1868,6 +2105,11 @@ export class VerilyService {
           await tx.put('connections', connection.id, connection);
         }
       }
+
+      // When a site was last asked goes only with its last record, never by age: it is
+      // what orders the sites `recheck()` asks, and losing it would put the site first again.
+      for (const read of await tx.list('sites'))
+        if (!sites.has(read.id)) await tx.delete('sites', read.id);
 
       for (const event of audit)
         if (event.at + retentionMs <= now) await tx.delete('audit', event.id);
@@ -1935,6 +2177,14 @@ function revives(connection: Connection, provider: Provider): boolean {
 }
 
 /** One proof waiting to be read again, and the method that reads it. */
+/** Whose a proof is and what else its method learned, whichever of the two it offers. */
+async function read(
+  provider: ArtifactProvider,
+  input: { artifact: string; expect: string },
+): Promise<Proved> {
+  return provider.prove ? provider.prove(input) : { account: await provider.verify(input) };
+}
+
 interface Due {
   connection: Connection;
   attestation: Attestation;

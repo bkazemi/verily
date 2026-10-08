@@ -195,7 +195,11 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
       `${keys[0]!.publicKey.trim()}\n`,
     );
 
-    assert.deepEqual(await (await request('/api/verily/keys')).json(), { keys });
+    // With the record this origin's DNS would carry to name the key.
+    assert.deepEqual(await (await request('/api/verily/keys')).json(), {
+      keys,
+      dns: { name: '_verily.verifier.test', values: [`verily-key=${keys[0]!.id}`] },
+    });
 
     const signed = await (await request(`/api/verily/connections/${id}?format=signed`)).text();
     const checked = (await verifySigned(signed, keys))!;
@@ -225,7 +229,10 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.match(await (await request(evidencePath)).text(), /"status":"verified"/);
 
     // The key is kept with the records, so a signed record saved before a restart still checks.
-    assert.deepEqual(await (await request('/.well-known/verily-keys.json')).json(), { keys });
+    assert.deepEqual(await (await request('/.well-known/verily-keys.json')).json(), {
+      keys,
+      dns: { name: '_verily.verifier.test', values: [`verily-key=${keys[0]!.id}`] },
+    });
 
     assert.equal((await post(`/api/verily/connections/${id}/disconnect`, '', cookie)).status, 200);
     assert.equal((await request(`/api/verily/connections/${id}?format=signed`)).status, 404);

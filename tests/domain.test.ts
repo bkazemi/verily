@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dnsProvider, wellKnownProvider } from '../src/server/domain.js';
+import {
+  dnsKeys,
+  dnsProvider,
+  dnsVerifiers,
+  keyRecord,
+  verifierRecord,
+  wellKnownProvider,
+} from '../src/server/domain.js';
 import { VerilyService } from '../src/server/service.js';
 import { attestationLabel, externalName } from '../src/core/index.js';
 import { alice, bob, MemoryStorage, written } from './helpers.js';
@@ -491,4 +498,404 @@ test('a proof of an address the subject no longer has is not kept as a minted on
       ['dns', again.expect],
     ],
   );
+});
+
+test('an answer the resolver validated with DNSSEC says so, and one it did not says nothing', async () => {
+  const signed = dns([expect], { AD: true }).instance;
+
+  assert.deepEqual(await signed.prove!({ artifact: lookup, expect }), {
+    account: shown,
+    dnssec: true,
+  });
+
+  // The account is the same either way: the flag is about the read, not about whose it is.
+  assert.deepEqual(await signed.verify({ artifact: lookup, expect }), shown);
+
+  for (const answer of [{}, { AD: false }, { AD: 'true' }])
+    assert.deepEqual(await dns([expect], answer).instance.prove!({ artifact: lookup, expect }), {
+      account: shown,
+    });
+
+  const names = { site: 'Site', provider: 'Domain' };
+
+  assert.equal(
+    attestationLabel('dns', names, { dnssec: true }),
+    'Published a proof in its DNS, validated by DNSSEC',
+  );
+});
+
+/** A resolver answering by name, counting what it was asked. */
+function resolver(zone: () => Record<string, { records: string[]; AD?: boolean } | 'down'>) {
+  const asked: string[] = [];
+
+  const request = ((url: string) => {
+    const name = new URL(String(url)).searchParams.get('name')!;
+    const held = zone()[name];
+
+    asked.push(name);
+
+    if (held === 'down') return Promise.reject(new Error('unreachable'));
+
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({
+          Status: held ? 0 : 3,
+          AD: held?.AD ?? false,
+          Answer: (held?.records ?? []).map((data) => ({ type: 16, data })),
+        }),
+      ),
+    );
+  }) as unknown as typeof fetch;
+
+  return { request, asked };
+}
+
+test('a domain names its signing keys and its verifier in records of their own', async () => {
+  const id = 'EFE310EA3C1EED9D97878F4B5B705BB469C9C8DA';
+
+  assert.equal(keyRecord(id), `verily-key=${id}`);
+  assert.equal(verifierRecord('Verifier.Test'), 'verily-verifier=verifier.test');
+
+  const { request, asked } = resolver(() => ({
+    '_verily.example.test': {
+      AD: true,
+      records: [
+        'v=spf1 -all',
+        expect,
+        `"verily-key=${id.toLowerCase()}"`,
+        'verily-key=',
+        'verily-verifier=Verifier.test',
+        'verily-proof=abc',
+      ],
+    },
+  }));
+
+  // Only the records that say so, whatever else the name carries.
+  assert.deepEqual(await dnsKeys('https://Example.test/', { fetch: request }), {
+    lookup,
+    dnssec: true,
+    ids: [id],
+  });
+
+  assert.deepEqual(await dnsVerifiers('example.test', { fetch: request }), {
+    lookup,
+    dnssec: true,
+    hosts: ['verifier.test'],
+  });
+
+  // A name with no records is an answer, and names nothing.
+  assert.deepEqual((await dnsKeys('other.test', { fetch: request })).ids, []);
+  assert.deepEqual(asked, ['_verily.example.test', '_verily.example.test', '_verily.other.test']);
+
+  // Not a domain, so nothing is asked.
+  await assert.rejects(dnsKeys('localhost', { fetch: request }));
+  await assert.rejects(dnsKeys('example.test/path', { fetch: request }));
+  assert.equal(asked.length, 3);
+});
+
+test('the DNSSEC flag is kept with the proof, and follows what the last read found', async () => {
+  let now = 1000000;
+  let AD = true;
+
+  const { request } = resolver(() => ({
+    '_verily.example.test': { AD, records: [alice.profileUrl] },
+  }));
+
+  const service = new VerilyService({
+    storage: new MemoryStorage(),
+    providers: [dnsProvider({ fetch: request })],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test'],
+    now: () => now,
+    recheckMs: 1000,
+    freshnessMs: 5000,
+  });
+
+  const flow = await service.start(alice, undefined, 'connect');
+
+  await service.submit(flow.flowId, flow.binding, 'example.test');
+
+  const id = (await service.approve(flow.flowId, flow.binding, alice, 'public'))!;
+  const main = async () => (await service.read(id)).attestations.external[0];
+
+  assert.equal((await main()).dnssec, true);
+
+  // The zone stops being signed: the proof still reads, and no longer says it validated.
+  AD = false;
+  now += 2000;
+  assert.equal(await service.recheck(), 1);
+  assert.ok(!('dnssec' in (await main())));
+  assert.equal((await service.read(id)).status, 'verified');
+
+  AD = true;
+  now += 2000;
+  assert.equal(await service.recheck(), 1);
+  assert.equal((await main()).dnssec, true);
+});
+
+test('a site whose DNS names the verifier has its word borne out by that lookup', async () => {
+  let now = 1000000;
+
+  let zone: Parameters<typeof resolver>[0] = () => ({
+    '_verily.site.test': { AD: true, records: ['verily-verifier=verifier.test'] },
+    '_verily.example.test': { records: [alice.profileUrl] },
+  });
+
+  const { request, asked } = resolver(() => zone());
+  const storage = new MemoryStorage();
+
+  const options = {
+    storage,
+    providers: [dnsProvider({ fetch: request })],
+    baseUrl: 'https://verifier.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'verifier.test',
+    profileOrigins: ['https://site.test'],
+    now: () => now,
+    recheckMs: 1000,
+    freshnessMs: 5000,
+    dns: { fetch: request },
+  };
+
+  const service = new VerilyService(options);
+
+  const connect = async (on: VerilyService) => {
+    const flow = await on.start(alice, undefined, 'connect');
+
+    await on.submit(flow.flowId, flow.binding, 'example.test');
+
+    return (await on.approve(flow.flowId, flow.binding, alice, 'public'))!;
+  };
+
+  const id = await connect(service);
+  const local = async () => (await service.read(id)).attestations.local;
+  const site = 'https://dns.google/resolve?name=_verily.site.test&type=TXT';
+
+  const stated = {
+    by: 'backend',
+    method: 'declared',
+    confirmedAt: now,
+    artifactUrl: site,
+    expect: 'verily-verifier=verifier.test',
+    dnssec: true,
+  };
+
+  assert.deepEqual(await local(), stated);
+
+  assert.equal(
+    attestationLabel('declared', { site: 'Site', provider: 'Domain' }, stated),
+    'Stated by Site, whose DNS names this verifier, validated by DNSSEC',
+  );
+
+  // The resolver is down: the site's records keep what was last read.
+  zone = () => ({
+    '_verily.site.test': 'down',
+    '_verily.example.test': { records: [alice.profileUrl] },
+  });
+
+  now += 2000;
+  await service.recheck();
+  assert.deepEqual(await local(), stated);
+
+  // Read again, and still stated: the lookup is as fresh as that read.
+  zone = () => ({
+    '_verily.site.test': { records: ['verily-verifier=verifier.test'] },
+    '_verily.example.test': { records: [alice.profileUrl] },
+  });
+
+  now += 2000;
+  await service.recheck();
+  const { dnssec: _dnssec, ...unsigned } = stated;
+
+  assert.deepEqual(await local(), { ...unsigned, confirmedAt: now });
+
+  // Left unread past the freshness window, it is the site's word alone again.
+  zone = () => ({
+    '_verily.site.test': 'down',
+    '_verily.example.test': { records: [alice.profileUrl] },
+  });
+
+  const read = now;
+
+  now += 6000;
+  await service.recheck();
+  assert.deepEqual(await local(), { by: 'backend', method: 'declared', confirmedAt: read });
+
+  // Only shown that way: the record still holds the lookup, for when it reads again.
+  const kept = () =>
+    (storage.rows.get(`connections:${id}`) as { attestations: { local: object } }).attestations
+      .local;
+
+  assert.deepEqual(kept(), { ...unsigned, confirmedAt: read });
+
+  // The site names another verifier: an answer, so the proof is taken off the record.
+  zone = () => ({
+    '_verily.site.test': { records: ['verily-verifier=other.test'] },
+    '_verily.example.test': { records: [alice.profileUrl] },
+  });
+
+  now += 2000;
+  await service.recheck();
+  assert.deepEqual(kept(), { by: 'backend', method: 'declared', confirmedAt: read });
+
+  // An instance not told to read DNS asks nothing about the site.
+  asked.length = 0;
+
+  const quiet = new VerilyService({ ...options, storage: new MemoryStorage(), dns: undefined });
+  const other = await connect(quiet);
+
+  assert.deepEqual((await quiet.read(other)).attestations.local, {
+    by: 'backend',
+    method: 'declared',
+    confirmedAt: now,
+  });
+
+  assert.deepEqual(asked, ['_verily.example.test']);
+
+  // Nor does one on the site's own domain or beneath it, where the name already says so.
+  for (const baseUrl of ['https://site.test/api/verily', 'https://verify.site.test']) {
+    asked.length = 0;
+
+    const own = new VerilyService({ ...options, storage: new MemoryStorage(), baseUrl });
+
+    await connect(own);
+    now += 2000;
+    await own.recheck();
+    assert.ok(!asked.includes('_verily.site.test'), baseUrl);
+  }
+});
+
+test('a site record is read in any case, and kept as it is published', async () => {
+  const { request } = resolver(() => ({
+    '_verily.site.test': { records: ['verily-verifier=Verifier.TEST'] },
+    '_verily.example.test': { records: [alice.profileUrl] },
+  }));
+
+  const service = new VerilyService({
+    storage: new MemoryStorage(),
+    providers: [dnsProvider({ fetch: request })],
+    baseUrl: 'https://verifier.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'verifier.test',
+    profileOrigins: ['https://site.test'],
+    dns: { fetch: request },
+  });
+
+  const flow = await service.start(alice, undefined, 'connect');
+
+  await service.submit(flow.flowId, flow.binding, 'example.test');
+
+  const id = (await service.approve(flow.flowId, flow.binding, alice, 'public'))!;
+  const { local } = (await service.read(id)).attestations;
+
+  // The same host `dnsVerifiers()` gives, and the text a reader finds at the lookup.
+  assert.deepEqual((await dnsVerifiers('site.test', { fetch: request })).hosts, ['verifier.test']);
+  assert.equal(local.expect, 'verily-verifier=Verifier.TEST');
+  assert.equal(local.artifactUrl, 'https://dns.google/resolve?name=_verily.site.test&type=TXT');
+});
+
+test('every site takes its turn at a recheck, across restarts and whatever flows have read', async () => {
+  let now = 1000000;
+  let stated = false;
+  const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((name) => `${name}.test`);
+
+  const { request, asked } = resolver(() => ({
+    ...Object.fromEntries(
+      names.map((name) => [
+        `_verily.${name}`,
+        { records: stated ? ['verily-verifier=verifier.test'] : [] },
+      ]),
+    ),
+    '_verily.example.test': {
+      records: names.map((name) => `https://${name}/users/1`),
+    },
+  }));
+
+  const storage = new MemoryStorage();
+
+  // Made anew for every run, as an instance that was put to sleep between them is.
+  const service = () =>
+    new VerilyService({
+      storage,
+      providers: [dnsProvider({ fetch: request })],
+      baseUrl: 'https://verifier.test/api/verily',
+      siteName: 'Site',
+      verifierName: 'verifier.test',
+      profileOrigins: names.map((name) => `https://${name}`),
+      now: () => now,
+      validityMs: 30 * 86400000,
+      recheckMs: 100000,
+      freshnessMs: 10000000,
+      dns: { fetch: request },
+    });
+
+  const connect = async (name: string) => {
+    const local = { ...alice, id: `local-${name}`, profileUrl: `https://${name}/users/1` };
+    const on = service();
+    const flow = await on.start(local, undefined, 'connect');
+
+    await on.submit(flow.flowId, flow.binding, 'example.test');
+
+    return (await on.approve(flow.flowId, flow.binding, local, 'public'))!;
+  };
+
+  const ids: string[] = [];
+
+  for (const name of names) ids.push(await connect(name));
+
+  const sitesAsked = () => asked.filter((name) => name !== '_verily.example.test');
+
+  const proved = async () =>
+    (await Promise.all(ids.map((id) => service().read(id)))).filter(
+      (e) => e.attestations.local.artifactUrl,
+    ).length;
+
+  assert.equal(await proved(), 0);
+
+  // The sites start naming the verifier. Two runs of two reach four of them, not two twice.
+  stated = true;
+  asked.length = 0;
+  await service().recheck(2);
+  await service().recheck(2);
+  assert.equal(new Set(sitesAsked()).size, 4);
+  assert.equal(await proved(), 4);
+
+  // A flow on a site already read asks its DNS again, and puts off nobody's turn.
+  asked.length = 0;
+  ids.push(await connect(names[0]!));
+  await service().recheck(2);
+  await service().recheck(2);
+  assert.equal(await proved(), 8);
+
+  // Nothing is due again until the interval has passed, and then all of it is.
+  asked.length = 0;
+  await service().recheck(10);
+  assert.deepEqual(sitesAsked(), []);
+
+  now += 100000;
+  await service().recheck(10);
+  assert.equal(new Set(sitesAsked()).size, 7);
+
+  // Runs a whole interval apart, each after a prune, with room for two of seven sites: all
+  // are due every time, and the order they were last asked in still decides who goes.
+  asked.length = 0;
+
+  for (let run = 0; run < 4; run++) {
+    now += 100000;
+    await service().prune();
+    await service().recheck(2);
+  }
+
+  assert.equal(sitesAsked().length, 8);
+  assert.equal(new Set(sitesAsked()).size, 7);
+
+  // A site's place is kept for as long as it has a record, and goes with its last one.
+  const kept = () => [...storage.rows.keys()].filter((key) => key.startsWith('sites:')).length;
+
+  assert.equal(kept(), 7);
+  now += 400 * 86400000;
+  await service().prune();
+  assert.equal(kept(), 0);
 });

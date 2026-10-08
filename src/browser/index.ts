@@ -825,6 +825,7 @@ function validAttestation(attestation: unknown): boolean {
     typeof attestation.confirmedAt === 'number' &&
     Number.isFinite(attestation.confirmedAt) &&
     (attestation.expect === undefined || typeof attestation.expect === 'string') &&
+    (attestation.dnssec === undefined || typeof attestation.dnssec === 'boolean') &&
     // Rendered as a link later, so only http(s) may ever reach an href.
     (attestation.artifactUrl === undefined || httpUrl(attestation.artifactUrl))
   );
