@@ -652,6 +652,17 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // The owner's own record is unchanged: no site of its own, so the instance's name.
     assert.equal(ownerRecords[0]!.siteName, 'shirkadeh.test');
     assert.match(await (await owner.fetch('/')).text(), /Owner settings/);
+
+    // The operator sees every record on the instance, the sites' holders' among them.
+    const records = await (await owner.fetch('/records')).text();
+
+    assert.match(records, /shirkadeh\.test · public · Verified/);
+    assert.match(records, /Partner · (public|unlisted) · /);
+    assert.match(records, /\d+ on this instance: \d+ public, \d+ unlisted\./);
+
+    // Nobody else does: a site's holder and a stranger are told nothing is there.
+    assert.equal((await a.fetch('/records')).status, 404);
+    assert.equal((await browser('192.0.2.99').fetch('/records')).status, 404);
     assert.equal((await a.post('/disconnect', `connection=${ownerRecords[0]!.id}`)).status, 404);
 
     // The owner, having gone through a site's handoff that has since returned, is the
