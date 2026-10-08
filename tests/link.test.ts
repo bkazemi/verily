@@ -16,7 +16,7 @@ const githubOptions = () => ({
 });
 
 import { VerilyService } from '../src/server/service.js';
-import { attestationLabel, externalName } from '../src/core/index.js';
+import { attestationLabel, externalIdGroups, externalName } from '../src/core/index.js';
 import { alice, bob, MemoryStorage, written } from './helpers.js';
 
 const expect = 'https://site.test/u/alice';
@@ -936,6 +936,29 @@ test('only a path shaped like a profile is one', async () => {
     assert.equal(external.kind, 'page', `named ${artifact} an account`);
     assert.equal(externalName(external), external.handle);
   }
+});
+
+test('only a key has its id written in groups of four', () => {
+  const key = {
+    id: '05975AC2F819C57438C06248E7E21D206C283B44',
+    handle: 'k',
+    profileUrl: 'https://k.test',
+  };
+
+  assert.deepEqual(externalIdGroups({ ...key, kind: 'key' }), [
+    '0597',
+    '5AC2',
+    'F819',
+    'C574',
+    '38C0',
+    '6248',
+    'E7E2',
+    '1D20',
+    '6C28',
+    '3B44',
+  ]);
+
+  assert.equal(externalIdGroups(key), undefined);
 });
 
 test('a handle is only awarded inside a namespace the deployment named', () => {

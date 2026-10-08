@@ -1,5 +1,5 @@
 import type { ExternalAccount, Inline, Instruction } from '../core/index.js';
-import { externalId, externalLink, externalName } from '../core/index.js';
+import { externalId, externalIdGroups, externalLink, externalName } from '../core/index.js';
 import {
   accountCard,
   backMark,
@@ -664,7 +664,7 @@ export function openConnectDialog(
         ? [logo, document.createTextNode(flow.provider.name)]
         : [document.createTextNode(flow.provider.name)],
       externalName(flow.external!),
-      externalId(flow.external!),
+      externalIdGroups(flow.external!) ?? externalId(flow.external!),
       externalLink(flow.external!),
     );
 
