@@ -35,12 +35,34 @@ const path = '/.well-known/verily.txt';
 /** The TXT record type, as the resolver numbers it. */
 const txt = 16;
 
-export interface DomainProviderOptions {
-  /** Shown as "Verify with …". */
-  name?: string;
-  /** Replaces the transport. For `dnsProvider()` that is only ever the resolver. */
+/** What a signing key's record says, before the key's fingerprint. */
+const keyPrefix = 'verily-key=';
+
+/** What a site's record says, before the host of the verifier it chose. */
+const verifierPrefix = 'verily-verifier=';
+
+export interface DnsOptions {
+  /** Replaces the transport, which is only ever asked for the resolver. */
   fetch?: typeof fetch;
   timeoutMs?: number;
+}
+
+export interface DomainProviderOptions extends DnsOptions {
+  /** Shown as "Verify with …". */
+  name?: string;
+}
+
+/** What a domain publishes for Verily, as one lookup found it. */
+export interface Published {
+  /** The lookup that was run, which is also a link a reader can open. */
+  lookup: string;
+  /** The text of every TXT record at `_verily.<domain>` that could be read. */
+  values: string[];
+  /**
+   * Whether the resolver validated the answer with DNSSEC. Only a domain that signs its
+   * zone gets this, and without it the answer is as good as the resolver's own lookup.
+   */
+  dnssec: boolean;
 }
 
 export interface WellKnownProviderOptions extends DomainProviderOptions {
@@ -75,7 +97,15 @@ export interface WellKnownProviderOptions extends DomainProviderOptions {
  * unread, never absent.
  */
 export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvider {
-  const request = options.fetch ?? fetch;
+  const prove = async ({ artifact, expect }: { artifact: string; expect: string }) => {
+    const domain = looked(artifact);
+    const { values, dnssec } = await published(domain, options);
+
+    if (!values.includes(expect))
+      throw new Refused(`No TXT record at ${label}.${domain} has this value`);
+
+    return { account: account(domain), ...(dnssec ? { dnssec } : {}) };
+  };
 
   return {
     ...shared(options),
@@ -94,54 +124,147 @@ export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvid
       return domain ? lookup(domain) : artifact;
     },
 
-    async verify({ artifact, expect }): Promise<ExternalAccount> {
-      const domain = looked(artifact);
+    verify: async (input) => (await prove(input)).account,
 
-      // Why the resolver could not be asked is about the network this runs in.
-      const response = await request(lookup(domain), {
-        redirect: 'manual',
-        headers: { Accept: 'application/dns-json', 'User-Agent': 'Verily-V0' },
-        signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
-      }).catch(() => {
-        throw new Refused('DNS could not be read');
-      });
-
-      let answer: unknown;
-
-      try {
-        if (!response.ok) throw new Refused('DNS could not be read');
-
-        const { bytes, truncated } = await readBounded(response, 64 * 1024);
-
-        if (truncated) throw new Refused('DNS could not be read');
-
-        answer = parsed(new TextDecoder().decode(bytes));
-      } finally {
-        await discard(response);
-      }
-
-      // A cut-off answer may have left out the record that would have matched.
-      if (!isRecord(answer) || answer.TC === true) throw new Refused('DNS could not be read');
-
-      // The name not existing is an answer; anything else that is not success is no answer.
-      if (answer.Status !== 0 && answer.Status !== 3) throw new Refused('DNS could not be read');
-
-      const records = Array.isArray(answer.Answer) ? answer.Answer : [];
-
-      if (
-        !records.some(
-          (record) =>
-            isRecord(record) &&
-            record.type === txt &&
-            typeof record.data === 'string' &&
-            text(record.data) === expect,
-        )
-      )
-        throw new Refused(`No TXT record at ${label}.${domain} has this value`);
-
-      return account(domain);
-    },
+    // The resolver says whether it validated the answer, which is worth keeping with it.
+    prove,
   };
+}
+
+/**
+ * Everything a domain publishes at `_verily.<domain>`, and whether the resolver validated
+ * it. One name carries every statement a domain makes here, told apart by how each begins:
+ * a subject's address or a minted proof, a signing key, a verifier.
+ *
+ * Throws `Refused` where the lookup gave no answer. A name with no records is an answer.
+ */
+export async function published(domain: string, options: DnsOptions = {}): Promise<Published> {
+  if (!valid(domain)) throw new Refused('Not a domain this can look up');
+
+  // Why the resolver could not be asked is about the network this runs in.
+  const response = await (options.fetch ?? fetch)(lookup(domain), {
+    redirect: 'manual',
+    headers: { Accept: 'application/dns-json', 'User-Agent': 'Verily-V0' },
+    signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
+  }).catch(() => {
+    throw new Refused('DNS could not be read');
+  });
+
+  let answer: unknown;
+
+  try {
+    if (!response.ok) throw new Refused('DNS could not be read');
+
+    const { bytes, truncated } = await readBounded(response, 64 * 1024);
+
+    if (truncated) throw new Refused('DNS could not be read');
+
+    answer = parsed(new TextDecoder().decode(bytes));
+  } finally {
+    await discard(response);
+  }
+
+  // A cut-off answer may have left out the record that would have matched.
+  if (!isRecord(answer) || answer.TC === true) throw new Refused('DNS could not be read');
+
+  // The name not existing is an answer; anything else that is not success is no answer.
+  if (answer.Status !== 0 && answer.Status !== 3) throw new Refused('DNS could not be read');
+
+  const records = Array.isArray(answer.Answer) ? answer.Answer : [];
+
+  return {
+    lookup: lookup(domain),
+    values: records
+      .map((record) =>
+        isRecord(record) && record.type === txt && typeof record.data === 'string'
+          ? text(record.data)
+          : undefined,
+      )
+      .filter((value) => value !== undefined),
+    // The resolver sets this only where every record in the answer validated.
+    dnssec: answer.AD === true,
+  };
+}
+
+/**
+ * What a verifier publishes at `_verily.<its host>` to name a signing key: one record for
+ * each key. A reader holding a signed record and nothing else can then ask the verifier's
+ * domain, and not the verifier's server, whether the key that signed it is the domain's.
+ */
+export function keyRecord(fingerprint: string): string {
+  return `${keyPrefix}${fingerprint}`;
+}
+
+/** What a site publishes at `_verily.<its host>` to name the verifier that speaks for it. */
+export function verifierRecord(host: string): string {
+  return `${verifierPrefix}${host.toLowerCase()}`;
+}
+
+/**
+ * The fingerprints of the signing keys a domain names in its DNS. A signed record names the
+ * key that signed it and the verifier's address, so a key found here is one the domain in
+ * that address answers for, for as long as the domain is kept and whatever became of the
+ * server. Check the signature with `verifySigned()` first: this says whose a key is, and
+ * nothing about what it signed.
+ */
+export async function dnsKeys(
+  domain: string,
+  options: DnsOptions = {},
+): Promise<Omit<Published, 'values'> & { ids: string[] }> {
+  const { values, ...found } = await published(named(domain) ?? domain, options);
+
+  return { ...found, ids: namedKeys(values) };
+}
+
+/**
+ * The hosts of the verifiers a site's domain names in its DNS. A record's local side is
+ * the verifier's word for what the site told it, so a verifier named here is one the site
+ * itself chose, which a reader can find out without visiting the site.
+ */
+export async function dnsVerifiers(
+  domain: string,
+  options: DnsOptions = {},
+): Promise<Omit<Published, 'values'> & { hosts: string[] }> {
+  const { values, ...found } = await published(named(domain) ?? domain, options);
+
+  return { ...found, hosts: namedVerifiers(values).map(({ host }) => host) };
+}
+
+/**
+ * The fingerprints a domain's records name, in the upper case a key's id is kept in. A
+ * fingerprint is hexadecimal, so however it was typed it names the same key.
+ */
+export function namedKeys(values: string[]): string[] {
+  return stated(values, keyPrefix).map((id) => id.toUpperCase());
+}
+
+/**
+ * The verifier hosts a domain's records name, lowercase as a host compares, each with the
+ * record as it is published: that text is what a reader finds at the lookup.
+ */
+export function namedVerifiers(values: string[]): { host: string; record: string }[] {
+  return values
+    .filter((value) => value.startsWith(verifierPrefix))
+    .map((record) => ({ host: record.slice(verifierPrefix.length).trim().toLowerCase(), record }))
+    .filter(({ host }) => host);
+}
+
+/** What follows a prefix in each record that begins with it. */
+function stated(values: string[], prefix: string): string[] {
+  return values
+    .filter((value) => value.startsWith(prefix))
+    .map((value) => value.slice(prefix.length).trim())
+    .filter(Boolean);
+}
+
+/**
+ * The name a URL's host is looked up under, or nothing where it is not a public domain: an
+ * address literal, a single label, a name inside the network.
+ */
+export function domainOf(url: string): string | undefined {
+  const host = URL.parse(url)?.hostname.toLowerCase().replace(/\.$/, '');
+
+  return host !== undefined && valid(host) ? host : undefined;
 }
 
 /**

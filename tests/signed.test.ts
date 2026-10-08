@@ -24,14 +24,20 @@ const newKey = () => generateSigningKey('verifier.test');
 
 const codeIn = (message: EmailMessage) => /^[0-9A-Z]{4}-[0-9A-Z]{4}$/m.exec(message.text)![0];
 
-function fixture(signing: { signingKey?: string | (() => Promise<string>) } = {}) {
+function fixture(
+  signing: {
+    signingKey?: string | (() => Promise<string>);
+    dns?: { fetch: typeof fetch };
+  } = {},
+  origin = 'https://site.test',
+) {
   let now = 1000000;
   const outbox: EmailMessage[] = [];
 
   const app = createVerily({
     storage: new MemoryStorage(),
     providers: [emailProvider({ send: async (message) => void outbox.push(message) })],
-    baseUrl: 'https://site.test/api/verily',
+    baseUrl: `${origin}/api/verily`,
     siteName: 'Site',
     verifierName: 'verifier.test',
     profileOrigins: ['https://site.test'],
@@ -51,13 +57,13 @@ function fixture(signing: { signingKey?: string | (() => Promise<string>) } = {}
   }
 
   const request = (path: string, options: RequestInit = {}) =>
-    app.handle(new Request(`https://site.test/api/verily${path}`, options));
+    app.handle(new Request(`${origin}/api/verily${path}`, options));
 
   const check = (record: string) =>
     request('/check', {
       method: 'POST',
       headers: {
-        origin: 'https://site.test',
+        origin,
         'content-type': 'application/x-www-form-urlencoded',
       },
       body: new URLSearchParams({ record }),
@@ -645,6 +651,105 @@ test('a public record is served signed as of now, and checks against the publish
       `<p class="signed" id="signed"><strong>Signed by verifier\\.test</strong> with OpenPGP key <a href="/api/verily/keys\\.asc">${await signedBy(signed)}</a>\\. <a [^>]*>Download the signed record`,
     ),
   );
+});
+
+test('a key the verifier domain names in DNS is shown with the lookup that found it', async () => {
+  let records: string[] = [];
+  let asked = 0;
+
+  const dns = {
+    fetch: (() => {
+      asked++;
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            Status: 0,
+            AD: true,
+            Answer: records.map((data) => ({ type: 16, data })),
+          }),
+        ),
+      );
+    }) as unknown as typeof fetch,
+  };
+
+  const f = fixture({ signingKey: await newKey(), dns });
+  const id = await f.connect();
+  const signed = await (await f.request(`/connections/${id}?format=signed`)).text();
+  const by = (await signedBy(signed))!;
+
+  // What the domain is to publish is listed with the keys, whether or not it has.
+  assert.deepEqual(((await (await f.request('/keys')).json()) as { dns: unknown }).dns, {
+    name: '_verily.site.test',
+    values: [`verily-key=${by}`],
+  });
+
+  const named =
+    /, which <a href="https:\/\/dns\.google\/resolve\?name=_verily\.site\.test&amp;type=TXT" rel="noreferrer">site\.test names in its DNS<\/a>, validated by DNSSEC\./;
+
+  // Not published, so nothing is claimed.
+  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /names in its DNS/);
+
+  // Published. The first answer is kept a while, so it is asked again only once that passes.
+  // In lower case, which `dnsKeys()` reads as the same key, so the page does too.
+  records = [`verily-key=${by.toLowerCase()}`];
+  assert.doesNotMatch(await (await f.request(`/connections/${id}`)).text(), /names in its DNS/);
+  f.advance(600000);
+  assert.match(await (await f.request(`/connections/${id}`)).text(), named);
+  assert.match(await (await f.check(signed)).text(), named);
+  assert.equal(asked, 2);
+
+  // Without the option nothing is asked, and nothing is said.
+  const quiet = fixture({ signingKey: await newKey() });
+  const other = await quiet.connect();
+
+  assert.doesNotMatch(
+    await (await quiet.request(`/connections/${other}`)).text(),
+    /names in its DNS/,
+  );
+});
+
+test('a record signed on another domain is told which domain was asked about its key', async () => {
+  const signingKey = await newKey();
+  const asked: string[] = [];
+  let by = '';
+
+  const dns = {
+    fetch: ((url: string) => {
+      asked.push(new URL(String(url)).searchParams.get('name')!);
+
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ Status: 0, AD: true, Answer: [{ type: 16, data: `verily-key=${by}` }] }),
+        ),
+      );
+    }) as unknown as typeof fetch,
+  };
+
+  // Signed while the verifier was on one domain, and checked once it has moved to another
+  // with the same key.
+  const old = fixture({ signingKey });
+
+  const signed = await (
+    await old.request(`/connections/${await old.connect()}?format=signed`)
+  ).text();
+
+  by = (await signedBy(signed))!;
+
+  const moved = fixture({ signingKey, dns }, 'https://moved.test');
+  const page = await (await moved.check(signed)).text();
+
+  // Only the new domain was asked, so only it is said to name the key.
+  assert.deepEqual(asked, ['_verily.moved.test']);
+
+  assert.match(
+    page,
+    /name=_verily\.moved\.test&amp;type=TXT" rel="noreferrer">moved\.test names in its DNS/,
+  );
+
+  assert.doesNotMatch(page, /site\.test names in its DNS/);
+  // The record's own address is still the one it was signed with.
+  assert.match(page, /https:\/\/site\.test\/api\/verily\/connections\//);
 });
 
 test('a key read from storage is read once', async () => {

@@ -386,6 +386,9 @@ export class VerilyStore {
       ...(env.SIGNING === 'off'
         ? {}
         : { signingKey: env.SIGNING_KEY ?? (() => this.signingKey()) }),
+      // Whether this origin's DNS names its signing key, and whether a site's names this
+      // instance as its verifier. Both go to the resolver the domain method already asks.
+      dns: true,
       baseUrl: `${env.PUBLIC_ORIGIN}/api/verily`,
       // The owner's own site. A registered site's subjects carry their site's name instead.
       siteName: env.SITE_NAME,
@@ -602,13 +605,19 @@ export class VerilyStore {
 
     // Where a reader who has only this domain's name finds the keys its records are signed by.
     if (request.method === 'GET' && url.pathname === '/.well-known/verily-keys.json')
-      return new Response(JSON.stringify({ keys: await this.app.service.keys() }), {
-        headers: {
-          ...safeHeaders,
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
+      return new Response(
+        JSON.stringify({
+          keys: await this.app.service.keys(),
+          dns: await this.app.service.keyRecords(),
+        }),
+        {
+          headers: {
+            ...safeHeaders,
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
         },
-      });
+      );
 
     if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
 

@@ -243,7 +243,7 @@ Proving the same account a second way adds that proof to the existing record ins
 
 **Link-backs.** Many people already have one, since GitHub and Mastodon mark profile links `rel="me"`. By default the page may be on any public host, and the account is named by the page's address. This mode needs Node, because Verily checks every connection it makes to stop the page's address from pointing inside your network. Pass `hosts` to read only certain hosts (required on Cloudflare Workers), and `profile` to name the account by handle, as `githubLinkProvider()` does for github.com. If you pass your own `fetch`, it replaces that network check, so it must enforce the same rule itself. Only real `<a>` and `<link>` elements in HTML pages, or a `Link:` header, count; [`src/server/link.ts`](src/server/link.ts) has the exact rules.
 
-**Domains.** `dnsProvider()` proves a domain that serves no page of its own, or only forwards elsewhere. The user adds a TXT record named `_verily` whose value is their `profileUrl`, and enters the domain. Verily looks up `_verily.<domain>` through `https://dns.google/resolve`, a fixed resolver, so it runs on Cloudflare Workers, and the evidence links to that lookup for a reader to repeat. `wellKnownProvider()` reads `https://<domain>/.well-known/verily.txt` instead and looks for the `profileUrl` on a line of its own. It fetches a host the user names, so it follows the link-back's rules: Node, or `hosts`. Both name the account by the exact domain entered, and say nothing about its subdomains. A local account with no `profileUrl` has no address to publish, so the user is given a random value, `verily-proof=…`, instead. It names neither the account nor your site, since DNS is public, and a renewal asks for the same value, so the record is added once. List both and a domain proved one way picks up the other if it is already there.
+**Domains.** `dnsProvider()` proves a domain that serves no page of its own, or only forwards elsewhere. The user adds a TXT record named `_verily` whose value is their `profileUrl`, and enters the domain. Verily looks up `_verily.<domain>` through `https://dns.google/resolve`, a fixed resolver, so it runs on Cloudflare Workers, and the evidence links to that lookup for a reader to repeat. `wellKnownProvider()` reads `https://<domain>/.well-known/verily.txt` instead and looks for the `profileUrl` on a line of its own. It fetches a host the user names, so it follows the link-back's rules: Node, or `hosts`. Both name the account by the exact domain entered, and say nothing about its subdomains. Where the resolver validated the DNS answer with DNSSEC, the proof records it and the evidence says so; a domain that does not sign its zone is proved all the same, on the resolver's own lookup. `recheck()` updates the flag at each read. A local account with no `profileUrl` has no address to publish, so the user is given a random value, `verily-proof=…`, instead. It names neither the account nor your site, since DNS is public, and a renewal asks for the same value, so the record is added once. List both and a domain proved one way picks up the other if it is already there.
 
 **Your own method.** A provider is an object, and [`src/core/index.ts`](src/core/index.ts) documents each shape. An artifact provider may also set `field` and `input` to name what it asks for, `resolve` to turn something short such as a username into the address to read, and `known` to say where to look for an account already on record, which is what lets a proof be found without asking. A sign-in provider's `authorizationUrl` is passed `account` on a renewal or visibility change, so it can ask for that account by name.
 
@@ -468,6 +468,43 @@ A signed record proves what the verifier claimed and when (`issuedAt`). It does 
 
 The Cloudflare Worker signs by default, with a key it makes and stores itself. Set the `SIGNING_KEY` secret to supply your own, or `SIGNING` to `off` to sign nothing.
 
+## What DNS says of the verifier
+
+Two TXT records let a reader check the verifier against DNS instead of taking its word. Both sit at `_verily.<domain>`, the name the domain method uses, and neither is required.
+
+| Record                                  | Published on          | Says                                                    |
+| --------------------------------------- | --------------------- | ------------------------------------------------------- |
+| `verily-key=<fingerprint>`              | the verifier's domain | this OpenPGP key signs the verifier's records.          |
+| `verily-verifier=<the verifier's host>` | a site's domain       | this verifier speaks for the site's accounts and pages. |
+
+**The signing key.** A signed record is checked against keys the verifier's own server lists, so a reader has nowhere else to confirm them and nothing once the server is gone. Publish one `verily-key=` record for each key, current and retired, on the host in `baseUrl`. `GET <baseUrl>/keys` returns the exact records under `dns`. A reader then confirms the key against the domain, for as long as the domain is kept:
+
+```ts
+import { dnsKeys, signedBy, verifySigned } from '@bkazemi/verily';
+
+const record = await verifySigned(file, keys); // keys saved with the file, or from /keys
+const named = await dnsKeys(new URL(record.evidenceUrl).hostname);
+
+named.ids.includes(await signedBy(file)); // the verifier's domain names the key that signed it
+named.dnssec; // whether the resolver validated that answer
+```
+
+**The site's verifier.** A record's local side is the verifier's statement of what the site told it. On the site's own pages that is enough, since the site put the badge there. On a shared evidence link or a saved signed record, nothing shows the site chose this verifier. A site whose verifier is on another domain publishes `verily-verifier=<host>` on the domain of its `profileUrl`, with the port if `baseUrl` has one. `dnsVerifiers(domain)` reads it back. A verifier on the site's own domain, or a subdomain of it, needs no record and none is looked for.
+
+Set `dns: true` and the instance reads both through `https://dns.google/resolve`, the resolver the domain method asks:
+
+```ts
+createVerily({
+  // ...
+  dns: true, // or { fetch, timeoutMs }
+});
+```
+
+- The evidence page and `<baseUrl>/check` say the signing key is named in the verifier's DNS, with a link to the lookup, once it is. The answer is kept for ten minutes.
+- When a link is approved, the site's domain is looked up. If it names this verifier, the record's local side carries the lookup as `artifactUrl` and the record as `expect`, the evidence reads "Stated by … whose DNS names this verifier" and links to the lookup, and the signed record includes it. `recheck()` reads each site again every `recheckMs`, one lookup for all of a site's records. A record loses the proof when the site stops naming the verifier, or when the lookup has gone unread for `freshnessMs`; its status is unaffected either way.
+
+The Cloudflare Worker sets `dns: true`.
+
 ## Operations
 
 Verification lasts 30 days, flows 10 minutes, and sharing links 7 days. Change them with `validityMs`, `flowTtlMs` and `shareTtlMs`. Evidence is never cached.
@@ -489,7 +526,7 @@ setInterval(
 ```
 
 - **`prune()`** deletes expired flows, and deletes expired or revoked records after 90 days. A retired record is kept until it is removed.
-- **`recheck()`** re-reads gists and link-backs that are due, up to 5 per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`) and stays current for 7 days after its last successful read (`freshnessMs`); after that it shows as unconfirmed until a read succeeds. A failed read changes nothing. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
+- **`recheck()`** re-reads gists, link-backs, DNS records and files that are due, up to 5 per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`) and stays current for 7 days after its last successful read (`freshnessMs`); after that it shows as unconfirmed until a read succeeds. A failed read changes nothing. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
 
 **If you never call `recheck()`, set `freshnessMs: Infinity`.** Otherwise connections proved by gist, link-back or PGP lapse after a week.
 
