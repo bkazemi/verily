@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  expired,
   fresh,
   freshnessMs,
   isArtifactProvider,
@@ -921,7 +922,7 @@ export class VerilyService {
 
     if (
       !flow ||
-      flow.expiresAt <= this.now() ||
+      expired(flow, this.now()) ||
       flow.phase !== 'pending' ||
       flow.sent?.linkHash !== hash(token)
     )
@@ -977,7 +978,7 @@ export class VerilyService {
   private async bound(tx: Transaction, id: string, binding: string): Promise<Flow> {
     const flow = await tx.get('flows', id);
 
-    if (!flow || flow.bindingHash !== hash(binding) || flow.expiresAt <= this.now())
+    if (!flow || flow.bindingHash !== hash(binding) || expired(flow, this.now()))
       throw new Unavailable();
 
     return flow;
@@ -1875,7 +1876,7 @@ export class VerilyService {
     return this.transaction(async (tx) => {
       const share = (await tx.list('shares')).find((s) => s.tokenHash === hash(token));
 
-      if (!share || share.revokedAt !== undefined || share.expiresAt <= this.now())
+      if (!share || share.revokedAt !== undefined || expired(share, this.now()))
         throw new Unavailable();
 
       const connection = await tx.get('connections', share.connectionId);
@@ -2157,13 +2158,13 @@ export class VerilyService {
       const now = this.now();
 
       for (const flow of await tx.list('flows'))
-        if (flow.expiresAt <= now) await tx.delete('flows', flow.id);
+        if (expired(flow, now)) await tx.delete('flows', flow.id);
 
       for (const draft of await tx.list('dnsDrafts'))
-        if (draft.expiresAt <= now) await tx.delete('dnsDrafts', draft.id);
+        if (expired(draft, now)) await tx.delete('dnsDrafts', draft.id);
 
       for (const limit of await tx.list('limits'))
-        if (limit.expiresAt <= now) await tx.delete('limits', limit.id);
+        if (expired(limit, now)) await tx.delete('limits', limit.id);
 
       const audit = await tx.list('audit');
       // The sites that still have a record here, whose place in the recheck order is kept.

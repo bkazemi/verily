@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
+import { expired } from '../src/core/index.js';
 import { hash, secret } from '../src/server/service.js';
 
 const sessionMs = 8 * 3600000;
@@ -98,7 +99,7 @@ export class OwnerAuth {
 
     await this.storage.transaction(async (tx) => {
       for (const [key, session] of await tx.list<Session>({ prefix: 'owner/session/' })) {
-        if (session.expiresAt <= Date.now() || session.keyHash !== hash(this.ownerKey))
+        if (expired(session, Date.now()) || session.keyHash !== hash(this.ownerKey))
           await tx.delete(key);
       }
     });
