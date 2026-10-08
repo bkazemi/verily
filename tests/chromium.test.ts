@@ -204,9 +204,9 @@ test(
 
       // The site's button, the handoff, the provider, and the approval page.
       await page.click('text=Verify an account');
-      await page.waitForURL(`${verifier}/api/verily/verify`);
+      await page.waitForURL(`${verifier}/verify`);
       await page.click('text=Sign in with GitHub');
-      await page.waitForURL(/\/api\/verily\/flows\//);
+      await page.waitForURL(/\/flows\//);
       assert.match(await page.content(), /Partner receives the result/);
 
       // The approval form's POST is redirected on to the site, which form-action allows.

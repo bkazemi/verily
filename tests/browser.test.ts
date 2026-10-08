@@ -1458,6 +1458,7 @@ async function groupHarness(
   const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
   const body = new Element();
   const asked: string[] = [];
+  const urls: string[] = [];
   /** What each request that carried a body said, in the order they were sent. */
   const sent: Record<string, string>[] = [];
   const defined: Record<string, new () => Element> = {};
@@ -1569,6 +1570,7 @@ async function groupHarness(
       const id = new URL(url).pathname.split('/').at(-1)!;
 
       asked.push(id);
+      urls.push(String(url));
 
       if (init?.body) sent.push(JSON.parse(init.body) as Record<string, string>);
 
@@ -1627,7 +1629,7 @@ async function groupHarness(
     (context as { innerHeight: number }).innerHeight = height;
   };
 
-  return { verily, asked, sent, cards, defined, polls, upgrade, body, heard, resize };
+  return { verily, asked, urls, sent, cards, defined, polls, upgrade, body, heard, resize };
 }
 
 /** One of a subject's linked accounts, as evidence. */
@@ -1651,6 +1653,17 @@ const linked = (id: string, handle: string, connectedAt: number, overrides: obje
     external: [{ by: 'provider', method: 'oauth', confirmedAt: 1 }],
   },
   ...overrides,
+});
+
+test('a backend at the root of its origin is asked at its own paths', async () => {
+  const { verily, urls } = await groupHarness({ first: linked('first', 'alice', 100) });
+
+  // Written with a slash or without, the origin is the whole base: nothing sits under `//`.
+  for (const backendUrl of ['https://verifier.test', 'https://verifier.test/']) {
+    urls.length = 0;
+    await verily.init({ backendUrl }).mountBadges(new Element(), { connectionIds: ['first'] });
+    assert.deepEqual(urls, ['https://verifier.test/connections/first?format=json'], backendUrl);
+  }
 });
 
 test('several accounts of one subject are one pill: the first connected, then how many more', async () => {

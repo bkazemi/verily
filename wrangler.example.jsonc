@@ -6,7 +6,7 @@
 //   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, OWNER_KEY
 // and, to offer Discord or YouTube sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
 // or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Each app needs
-// <PUBLIC_ORIGIN>/api/verily/callback as a redirect.
+// <PUBLIC_ORIGIN>/callback as a redirect.
 // To offer email, RESEND_API_KEY, with EMAIL_FROM set in vars below.
 // Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
 //

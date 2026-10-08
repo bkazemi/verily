@@ -27,8 +27,12 @@ const now = () => Math.floor(Date.now() / 1000);
 test('a site client signs a handoff the instance can check', async () => {
   const client = createSiteClient({ instance, site: 'partner', key });
 
-  assert.equal(client.beginUrl(), `${instance}/begin?site=partner&purpose=connect`);
-  assert.equal(client.beginUrl('manage'), `${instance}/begin?site=partner&purpose=manage`);
+  assert.equal(client.beginUrl(), `${instance}/handoff/request?site=partner&purpose=connect`);
+
+  assert.equal(
+    client.beginUrl('manage'),
+    `${instance}/handoff/request?site=partner&purpose=manage`,
+  );
 
   const { url, txn } = await client.authorize('the-state', {
     id: 'u-1',
@@ -38,7 +42,7 @@ test('a site client signs a handoff the instance can check', async () => {
 
   const target = new URL(url);
 
-  assert.equal(`${target.origin}${target.pathname}`, `${instance}/start`);
+  assert.equal(`${target.origin}${target.pathname}`, `${instance}/handoff/accept`);
 
   const payload = opened(target.searchParams.get('token')!);
 
@@ -319,7 +323,7 @@ test('the handler serves the authorize, return and handoff endpoints for the sig
 
   const start = new URL(authorized.headers.get('location')!);
 
-  assert.equal(`${start.origin}${start.pathname}`, `${instance}/start`);
+  assert.equal(`${start.origin}${start.pathname}`, `${instance}/handoff/accept`);
 
   const handoff = opened(start.searchParams.get('token')!);
 

@@ -91,7 +91,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
       [],
     );
 
-    assert.equal((await request('/api/verily/mine')).status, 404);
+    assert.equal((await request('/mine')).status, 404);
     assert.match(await (await request('/')).text(), /<h1>Sign in<\/h1>/);
     assert.equal((await post('/login', 'key=wrong')).status, 403);
     // Bounded before anything reads it. The bound is large enough for a pasted key.
@@ -123,11 +123,11 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
 
     assert.match(await settings.text(), /Verify an account/);
 
-    const start = await post('/api/verily/sessions', 'kind=connect', cookie);
+    const start = await post('/sessions', 'kind=connect', cookie);
 
     assert.equal(start.status, 303);
 
-    const noOriginStart = await request('/api/verily/sessions', {
+    const noOriginStart = await request('/sessions', {
       method: 'POST',
       headers: { cookie },
       body: 'kind=connect',
@@ -135,7 +135,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
 
     assert.equal(noOriginStart.status, 303);
 
-    const nullOriginStart = await request('/api/verily/sessions', {
+    const nullOriginStart = await request('/sessions', {
       method: 'POST',
       headers: { cookie, origin: 'null' },
       body: 'kind=connect',
@@ -144,7 +144,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.equal(nullOriginStart.status, 303);
     const flowCookie = start.headers.get('set-cookie')!.split(';')[0]!;
     const state = new URL(start.headers.get('location')!).searchParams.get('state')!;
-    const callbackPath = `/api/verily/callback?state=${state}&code=fixture`;
+    const callbackPath = `/callback?state=${state}&code=fixture`;
     const callback = await request(callbackPath, { headers: { cookie: flowCookie } });
 
     assert.equal(callback.status, 303);
@@ -161,13 +161,13 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
 
     assert.ok(approvals.every((r) => r.status === 200));
 
-    const records = (await (await request('/api/verily/mine', { headers: { cookie } })).json()) as {
+    const records = (await (await request('/mine', { headers: { cookie } })).json()) as {
       id: string;
     }[];
 
     assert.equal(records.length, 1);
     const id = records[0]!.id;
-    const evidencePath = `/api/verily/connections/${id}?format=json`;
+    const evidencePath = `/connections/${id}?format=json`;
     const evidence = await request(evidencePath, { headers: { origin: 'https://site.test' } });
 
     assert.equal(evidence.headers.get('access-control-allow-origin'), '*');
@@ -190,18 +190,15 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.equal(keys[0]!.alg, 'OpenPGP');
     assert.match(keys[0]!.publicKey, /^-----BEGIN PGP PUBLIC KEY BLOCK-----/);
 
-    assert.equal(
-      await (await request('/api/verily/keys.asc')).text(),
-      `${keys[0]!.publicKey.trim()}\n`,
-    );
+    assert.equal(await (await request('/keys.asc')).text(), `${keys[0]!.publicKey.trim()}\n`);
 
     // With the record this origin's DNS would carry to name the key.
-    assert.deepEqual(await (await request('/api/verily/keys')).json(), {
+    assert.deepEqual(await (await request('/keys')).json(), {
       keys,
       dns: { name: '_verily.verifier.test', values: [`verily-key=${keys[0]!.id}`] },
     });
 
-    const signed = await (await request(`/api/verily/connections/${id}?format=signed`)).text();
+    const signed = await (await request(`/connections/${id}?format=signed`)).text();
     const checked = (await verifySigned(signed, keys))!;
 
     assert.equal(checked.id, id);
@@ -210,7 +207,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
 
     assert.equal(
       (
-        await request(`/api/verily/connections/${id}/disconnect`, {
+        await request(`/connections/${id}/disconnect`, {
           method: 'POST',
           headers: { cookie, origin: 'https://site.test' },
           body: '',
@@ -234,22 +231,19 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
       dns: { name: '_verily.verifier.test', values: [`verily-key=${keys[0]!.id}`] },
     });
 
-    assert.equal((await post(`/api/verily/connections/${id}/disconnect`, '', cookie)).status, 200);
-    assert.equal((await request(`/api/verily/connections/${id}?format=signed`)).status, 404);
+    assert.equal((await post(`/connections/${id}/disconnect`, '', cookie)).status, 200);
+    assert.equal((await request(`/connections/${id}?format=signed`)).status, 404);
     assert.match(await (await request(evidencePath)).text(), /"status":"revoked"/);
     const logout = await request('/logout', { method: 'POST', headers: { cookie }, body: '' });
 
     assert.equal(logout.status, 303);
     assert.match(logout.headers.get('set-cookie')!, /Max-Age=0/);
-    assert.equal((await request('/api/verily/mine', { headers: { cookie } })).status, 404);
+    assert.equal((await request('/mine', { headers: { cookie } })).status, 404);
 
     const secondLogin = await post('/login', `key=${ownerKey}`);
     const secondCookie = secondLogin.headers.get('set-cookie')!.split(';')[0]!;
 
-    assert.equal(
-      (await request('/api/verily/mine', { headers: { cookie: secondCookie } })).status,
-      200,
-    );
+    assert.equal((await request('/mine', { headers: { cookie: secondCookie } })).status, 200);
 
     await mf.dispose();
 
@@ -263,10 +257,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
       resourcePersistencePath: join(directory, 'data'),
     });
 
-    assert.equal(
-      (await request('/api/verily/mine', { headers: { cookie: secondCookie } })).status,
-      404,
-    );
+    assert.equal((await request('/mine', { headers: { cookie: secondCookie } })).status, 404);
 
     // The throttle survives isolate restarts along with sessions and evidence.
     for (let i = 0; i < 10; i++) assert.equal((await post('/login', 'key=wrong')).status, 403);
@@ -349,7 +340,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
     const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
 
     const methods = (await (
-      await mf.dispatchFetch(`${origin}/api/verily/methods`, { headers: { cookie } })
+      await mf.dispatchFetch(`${origin}/methods`, { headers: { cookie } })
     ).json()) as { methods: { provider: string }[] };
 
     return { cookie, providers: methods.methods.map((m) => m.provider) };
@@ -371,7 +362,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
 
     assert.ok(owner.providers.includes('email'));
 
-    const start = await mf.dispatchFetch(`${origin}/api/verily/sessions`, {
+    const start = await mf.dispatchFetch(`${origin}/sessions`, {
       method: 'POST',
       headers: { origin, cookie: owner.cookie },
       body: 'kind=connect&provider=email',
@@ -417,7 +408,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
     await post(`${flow}/approve`, 'visibility=public&action=approve');
 
     const mine = (await (
-      await mf.dispatchFetch(`${origin}/api/verily/mine`, { headers: { cookie } })
+      await mf.dispatchFetch(`${origin}/mine`, { headers: { cookie } })
     ).json()) as { provider: string; status: string; external: { handle: string } }[];
 
     assert.equal(mine.length, 1);
@@ -435,7 +426,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
 
   /** Asks for a code to be mailed to an address, and reports how the flow stands after. */
   const asked = async (worker: Miniflare, session: string, address: string) => {
-    const start = await worker.dispatchFetch(`${origin}/api/verily/sessions`, {
+    const start = await worker.dispatchFetch(`${origin}/sessions`, {
       method: 'POST',
       headers: { origin, cookie: session },
       body: 'kind=connect&provider=email',
@@ -497,4 +488,50 @@ test('the Worker offers email once it can send it, and links a mailbox through R
     await capped.dispose();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('no path the worker answers itself is one the library serves', async () => {
+  const { own } = await import('../cloudflare/routes.js');
+  const { createVerily } = await import('../src/server/index.js');
+  const { MemoryStorage, alice, fakeProvider } = await import('./helpers.js');
+  const base = 'https://verifier.test';
+
+  const app = createVerily({
+    storage: new MemoryStorage(),
+    providers: [fakeProvider()],
+    baseUrl: base,
+    siteName: 'Site',
+    verifierName: 'verifier.test',
+    profileOrigins: ['https://site.test'],
+    reportUrl: 'mailto:reports@site.test',
+    signingKey: await (await import('../src/server/index.js')).generateSigningKey('verifier.test'),
+    authenticate: async () => alice,
+  });
+
+  // A route the library does serve answers, so a 404 below means the path is unknown to it.
+  assert.equal(
+    (await app.handle(new Request(`${base}/methods`, { headers: { origin: base } }))).status,
+    200,
+  );
+
+  // The worker looks at its own paths first, so a library route under one of them would
+  // never be reached. Asked as a signed-in holder from this origin, each is unknown to it.
+  for (const path of own)
+    for (const method of ['GET', 'POST'])
+      assert.equal(
+        (
+          await app.handle(
+            new Request(`${base}${path}`, {
+              method,
+              headers: {
+                origin: base,
+                ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+              },
+              ...(method === 'POST' ? { body: '{}' } : {}),
+            }),
+          )
+        ).status,
+        404,
+        `${method} ${path}`,
+      );
 });

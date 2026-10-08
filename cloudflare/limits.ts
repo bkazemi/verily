@@ -49,7 +49,7 @@ export const client = (request: Request) =>
 
 /**
  * Deletes every record the handoff and the limits leave behind once it has expired:
- * handoffs that never reached `/start`, site sessions, and idle buckets. Each is written
+ * handoffs that never reached `/handoff/accept`, site sessions, and idle buckets. Each is written
  * with its expiry under its own prefix for exactly this.
  */
 export async function prune(storage: DurableObjectStorage): Promise<void> {

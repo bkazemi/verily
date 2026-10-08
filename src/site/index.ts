@@ -186,7 +186,7 @@ export function createSiteClient(options: SiteClientOptions) {
      * have. The instance sends them on to this site's authorize endpoint with a `state`.
      */
     beginUrl(purpose: 'connect' | 'manage' = 'connect'): string {
-      return `${instance.origin}/begin?${new URLSearchParams({ site: options.site, purpose })}`;
+      return `${instance.origin}/handoff/request?${new URLSearchParams({ site: options.site, purpose })}`;
     },
 
     /**
@@ -209,7 +209,7 @@ export function createSiteClient(options: SiteClientOptions) {
         exp: seconds() + 240,
       });
 
-      return { url: `${instance.origin}/start?${new URLSearchParams({ token })}`, txn };
+      return { url: `${instance.origin}/handoff/accept?${new URLSearchParams({ token })}`, txn };
     },
 
     /**
