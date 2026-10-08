@@ -10,6 +10,7 @@ export const own = new Set([
   '/logout',
   '/disconnect',
   '/mark',
+  '/records',
   '/handoff/request',
   '/handoff/accept',
   '/site/connections',

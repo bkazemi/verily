@@ -875,3 +875,32 @@ test('a record keeps when it was first connected, which a renewal never moves', 
   await renew();
   assert.equal((await f.service.read(id)).connectedAt, 1000300);
 });
+
+test('the operator reads every record, public and unlisted, in the order they were made', async () => {
+  const f = fixture();
+  const unlisted = await f.connect('unlisted');
+
+  f.advance(10);
+  f.provider.externalId = '43';
+
+  const flow = await f.pending(bob as typeof alice);
+  const open = (await f.service.approve(flow.flowId, flow.binding, bob, 'public'))!;
+  const all = await f.service.all();
+
+  assert.deepEqual(
+    all.map((e) => [e.id, e.visibility, e.local.label]),
+    [
+      [unlisted.id, 'unlisted', 'Alice'],
+      [open, 'public', 'Bob'],
+    ],
+  );
+
+  // As public-safe as any other evidence: the private local id is never in it.
+  assert.ok(all.every((e) => !('id' in e.local)));
+
+  // Nothing public carries the unlisted one.
+  assert.deepEqual(
+    (await f.service.published()).map((e) => e.id),
+    [open],
+  );
+});

@@ -621,6 +621,12 @@ export class VerilyStore {
       return this.app.handle(request);
     }
 
+    // Every record on the instance, for whoever holds the owner key and nobody else.
+    if (request.method === 'GET' && url.pathname === '/records')
+      return (await this.auth.authenticated(request))
+        ? this.records()
+        : html('Unavailable', '', 404);
+
     if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
 
     const found = await this.sites.session(request);
@@ -962,9 +968,36 @@ export class VerilyStore {
       <p class="name">${escape(local.value)}</p>
       <p class="reference">${escape(subject.reference)}</p></div>
       <p><a href="/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
-      ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p>'}
+      ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p><p><a href="/records">Every connection on this instance</a></p>'}
       ${connections.map((e) => this.connection(e, site)).join('')}
       ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
+    );
+  }
+
+  /**
+   * Every record the instance holds, for its operator: each site's subjects, public and
+   * unlisted alike, with what each is linked to and how it stands. Read-only. A public
+   * record links to its evidence; an unlisted one has no page that is the operator's to open.
+   */
+  private async records() {
+    const all = await this.app.service.all();
+    const now = Date.now();
+    const count = (visibility: string) => all.filter((e) => e.visibility === visibility).length;
+    const day = (time: number) => new Date(time).toISOString().slice(0, 10);
+
+    return html(
+      'All connections',
+      `<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
+      ${all
+        .map((e) => {
+          const name = `${escape(e.local.label)} and ${escape(e.providerName)} ${escape(externalName(e.external))}`;
+
+          return `<div class="side"><p class="who">${escape(e.siteName)} · ${escape(e.visibility)} · ${escape(statusLabel(e, now))}</p>
+      <p class="name">${e.visibility === 'public' ? `<a href="${escape(e.evidenceUrl)}">${name}</a>` : name}</p>
+      <p class="reference">${escape(e.local.reference)} · connected ${escape(day(e.connectedAt))}</p></div>`;
+        })
+        .join('')}
+      <p><a href="/">Back to owner settings</a></p>`,
     );
   }
 

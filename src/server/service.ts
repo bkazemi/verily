@@ -1603,6 +1603,19 @@ export class VerilyService {
     );
   }
 
+  /**
+   * Every record this instance holds, public and unlisted, for whoever runs it. No route
+   * of the library serves this: a deployment that shows it must first know the reader is
+   * its operator, who can read the storage it comes from anyway. Earliest connected first.
+   */
+  async all(): Promise<Evidence[]> {
+    return this.transaction(async (tx) =>
+      (await tx.list('connections'))
+        .map((c) => this.evidence(c))
+        .sort((a, b) => a.connectedAt - b.connectedAt),
+    );
+  }
+
   async mine(local: LocalAccount): Promise<Evidence[]> {
     return this.transaction(async (tx) =>
       (await tx.list('connections'))
