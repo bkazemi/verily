@@ -134,6 +134,28 @@ code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
   background: var(--raised);
 }
 
+/*
+ * A subject's accounts are peers, so where there is room they sit two across. The page
+ * that lists them is wider for it, and a narrow one keeps them in a single column.
+ */
+main:has(.accounts) { max-width: 54rem; }
+
+.accounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: .75rem;
+  margin-bottom: .75rem;
+}
+
+.accounts .side { display: flex; flex-direction: column; margin-bottom: 0; }
+
+/* The times sit at the foot of the card, so they line up along a row of uneven cards. */
+.accounts .side dl { margin-top: auto; }
+.accounts .side > :nth-last-child(2) { margin-bottom: .625rem; }
+
+/* Between a subject and its accounts on the page that lists them. */
+.joiner { display: block; width: 1.25rem; height: 1.25rem; margin: 0 auto .75rem; color: var(--muted); }
+
 .who {
   margin: 0 0 .125rem;
   color: var(--muted);
@@ -178,6 +200,7 @@ dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 /* Inside a card the rule above it is the card's own edge, so the list needs none. */
 section dl { margin: .5rem 0 1rem; padding-top: 0; border-top: 0; }
+.side dl { margin: .625rem 0 0; padding-top: .625rem; }
 
 section {
   margin: 0 0 1.25rem;

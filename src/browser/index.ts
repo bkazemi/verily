@@ -1,4 +1,4 @@
-import type { Evidence } from '../core/index.js';
+import { accountsOf, type Evidence } from '../core/index.js';
 import { routePath } from '../core/routes.js';
 import {
   badgeShown,
@@ -186,51 +186,32 @@ const live = (evidence: Evidence) =>
  * Each entry names every record of the account not yet revoked, shown or not, so removing
  * the account removes them all. One left behind, lapsed or unconfirmed, could be confirmed
  * again later and bring the account back without its holder approving anything.
- *
- * A record from a backend older than `connectedAt` is placed by when it was approved.
  */
 function accounts(records: Evidence[]): Account[] {
-  const when = (e: Evidence) => e.connectedAt ?? e.approvedAt;
-  const byAccount = new Map<string, Evidence[]>();
-
-  for (const record of records) {
-    const key = JSON.stringify([record.provider, record.external.id]);
-
-    byAccount.set(key, [...(byAccount.get(key) ?? []), record]);
-  }
-
-  return [...byAccount.values()]
-    .map((held) => {
-      const sorted = [...held].sort((a, b) => when(a) - when(b));
-      const verified = sorted.filter(live);
-      const base = verified[0] ?? sorted.reduce((a, b) => (b.approvedAt > a.approvedAt ? b : a));
-      const external = [...base.attestations.external] as Evidence['attestations']['external'];
-
-      for (const other of verified.slice(1))
-        for (const attestation of other.attestations.external)
-          if (!external.some((shown) => shown.method === attestation.method))
-            external.push(attestation);
-
-      return {
-        ...base,
-        connectedAt: when(sorted[0]!),
-        attestations: { ...base.attestations, external },
-        links: sorted.filter((e) => e.status !== 'revoked').map((e) => e.id),
-        // Every record the card speaks for, so its signature mark answers for all of them.
-        sources: verified.length ? verified : [base],
-      };
-    })
-    .sort((a, b) => place(a) - place(b) || a.connectedAt - b.connectedAt);
+  return accountsOf(records, Date.now()).map(({ lead, held, verified, external, connectedAt }) => ({
+    ...lead,
+    connectedAt,
+    attestations: { ...lead.attestations, external },
+    links: held.filter((e) => e.status !== 'revoked').map((e) => e.id),
+    // Every record the card speaks for, so its signature mark answers for all of them.
+    sources: verified.length ? verified : [lead],
+  }));
 }
 
 /**
- * Where an account is listed among a subject's others, before the order they were
- * connected in. This is all there is to preferring an account: there is no separate pin.
+ * Where the verifier lists every public record of a record's subject. A record whose
+ * address is not the usual one is left linking to itself.
  */
-function place(account: Evidence): number {
-  if (account.status === 'retired') return 3;
+function subjectUrl(e: Evidence): string {
+  const url = new URL(e.evidenceUrl);
+  const path = url.pathname.replace(/\/connections\/[^/]+$/, '/published');
 
-  return account.mark === 'preferred' ? 0 : account.mark === 'unused' ? 2 : 1;
+  if (path === url.pathname) return e.evidenceUrl;
+
+  url.pathname = path;
+  url.search = `site=${encodeURIComponent(e.siteName)}&reference=${encodeURIComponent(e.local.reference)}`;
+
+  return url.href;
 }
 
 /**
@@ -261,6 +242,8 @@ function presentGroup(element: HTMLElement, records: Evidence[], load: () => Pro
   const badge = renderBadge(element, lead, {
     more: Math.max(verified.length - 1, 0),
     linked: lead.visibility === 'public',
+    // A modified click follows the link, and must reach what a plain one shows: every account.
+    ...(ordered.length > 1 ? { href: subjectUrl(lead) } : {}),
     rows: stacked
       ? verified.slice(1, stackedAccounts)
       : peek

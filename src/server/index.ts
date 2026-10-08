@@ -8,6 +8,7 @@ import {
   isCodeProvider,
   isRedirectProvider,
   lastProved,
+  accountsOf,
   localSide,
   proofTitle,
   providerMethod,
@@ -540,6 +541,88 @@ function evidencePage(
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
     <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p>`,
+  );
+}
+
+/** Joins a subject's card to its accounts: the link itself, drawn as the dialog draws it. */
+const joiner =
+  '<svg class="joiner" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">' +
+  [
+    'M10.5 7.5 13 5a4.95 4.95 0 0 1 7 7l-2.5 2.5',
+    'M13.5 16.5 11 19a4.95 4.95 0 0 1-7-7l2.5-2.5',
+    'M9 15l6-6',
+  ]
+    .map((d) => `<path d="${d}" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`)
+    .join('') +
+  '</svg>';
+
+/**
+ * One account as a badge's dialog draws it: what it is and how it stands, the verifier's
+ * own page for it, how it was shown, how its holder lists it, and its times.
+ */
+function accountCard(e: Evidence, external: Attestations['external'], now: number) {
+  const retired = e.status === 'retired';
+  const record = escape(safeUrl(e.evidenceUrl));
+
+  return card(
+    e.providerName,
+    externalName(e.external),
+    externalLink(e.external),
+    externalId(e.external),
+    `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? ` · <a href="${record}#signed">signed</a>` : ''}</p>`,
+    externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
+    // The holder's own word on the account, which nothing checked, so it follows the methods.
+    retired || !e.mark
+      ? ''
+      : `<p class="how">${e.mark === 'preferred' ? 'Preferred' : 'No longer used'}</p>`,
+    times(
+      retired
+        ? [
+            ['Approved', e.approvedAt],
+            ['Last verified', lastProved(e)],
+            ['Retired', e.retiredAt],
+          ]
+        : [
+            ['Approved', e.approvedAt],
+            [e.expiresAt > now ? 'Valid until' : 'Expired on', e.expiresAt],
+            ['Last checked', external[0].artifactUrl ? external[0].confirmedAt : undefined],
+          ],
+    ),
+  );
+}
+
+/**
+ * The public records given, as a page that shows what a badge's dialog does: a card to a
+ * subject, then one to each of its accounts in the badge's own order.
+ */
+function publishedPage(records: Evidence[], base: string) {
+  const now = Date.now();
+  const subjects = new Map<string, Evidence[]>();
+
+  for (const e of records) {
+    const key = JSON.stringify([e.siteName, e.local.reference]);
+
+    subjects.set(key, [...(subjects.get(key) ?? []), e]);
+  }
+
+  return page(
+    base,
+    'Public connections',
+    records.length
+      ? [...subjects.values()]
+          .map((held) => {
+            const local = localSide(held[0]!.local, held[0]!.siteName);
+
+            return (
+              card(local.heading, local.value, held[0]!.local.profileUrl) +
+              joiner +
+              `<div class="accounts">${accountsOf(held, now)
+                .map(({ lead, external }) => accountCard(lead, external, now))
+                .join('')}</div>`
+            );
+          })
+          .join('')
+      : '<p>No public connections.</p>',
   );
 }
 
@@ -1207,7 +1290,19 @@ export function createVerily(options: ServerOptions) {
 
         // Lets a static embed track current connections without hardcoding an id.
         if (path === '/published') {
-          const response = json(await service.published());
+          const site = url.searchParams.get('site');
+          const reference = url.searchParams.get('reference') ?? undefined;
+          const subject = site === null ? undefined : { site, reference };
+
+          // A page only where one is asked for by name. An embed published before `Accept`
+          // was sent asks for nothing, and must go on getting the list.
+          if (
+            url.searchParams.get('format') !== 'json' &&
+            /\btext\/html\b/i.test(request.headers.get('accept') ?? '')
+          )
+            return html(publishedPage(await service.listed(subject), prefix));
+
+          const response = json(await service.published(subject));
 
           response.headers.set('Access-Control-Allow-Origin', '*');
 

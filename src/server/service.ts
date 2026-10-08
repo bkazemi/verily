@@ -49,6 +49,15 @@ export const secret = () => randomBytes(32).toString('base64url');
 
 export const hash = (value: string) => createHash('sha256').update(value).digest('base64url');
 
+/**
+ * A subject as its public records name it: the site it belongs to and its reference there.
+ * A reference means nothing outside its site, so with none this is everyone on the site.
+ */
+export interface Subject {
+  site: string;
+  reference?: string;
+}
+
 export class Unavailable extends Error {
   constructor() {
     super('Unavailable');
@@ -1594,12 +1603,28 @@ export class VerilyService {
    * hardcoding an id that dies whenever one is revoked and replaced. Unlisted records are
    * never included: they must not appear in any directory listing.
    */
-  async published(): Promise<Evidence[]> {
+  async published(subject?: Subject): Promise<Evidence[]> {
+    return (await this.listed(subject)).filter((e) => e.status === 'verified');
+  }
+
+  /**
+   * Every public record a badge could show, for the page a person reads: one that has lapsed
+   * or been retired is there to be marked, and one removed is not. `subject` narrows it to
+   * one site or one subject, named by what its records already publish. Earliest connected first.
+   */
+  async listed(subject?: Subject): Promise<Evidence[]> {
     return this.transaction(async (tx) =>
       (await tx.list('connections'))
-        .filter((c) => c.visibility === 'public')
+        .filter(
+          (c) =>
+            c.visibility === 'public' &&
+            (!subject ||
+              (this.siteOf(c.local) === subject.site &&
+                (subject.reference === undefined || c.local.reference === subject.reference))),
+        )
         .map((c) => this.evidence(c))
-        .filter((e) => e.status === 'verified'),
+        .filter((e) => e.status !== 'revoked')
+        .sort((a, b) => a.connectedAt - b.connectedAt),
     );
   }
 

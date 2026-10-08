@@ -286,6 +286,80 @@ test('static sites can read public evidence across origins without gaining manag
   }
 });
 
+test('the public listing is a page where one is asked for, showing the accounts a badge would', async () => {
+  const f = fixture(),
+    id = await f.connect('public');
+
+  const page = { headers: { accept: 'text/html,application/xhtml+xml' } };
+  const mine = `site=Site&reference=${encodeURIComponent(alice.reference)}`;
+
+  // Asked for nothing, or for JSON by name, it is the list an embed reads.
+  for (const [path, options] of [
+    ['/published', {}],
+    ['/published?format=json', page],
+  ] as const) {
+    const listed = await f.request(path, options);
+
+    assert.equal(listed.headers.get('content-type'), 'application/json');
+
+    assert.deepEqual(
+      (await listed.json()).map((e: { id: string }) => e.id),
+      [id],
+    );
+  }
+
+  const shown = await f.request(`/published?${mine}`, page);
+  const text = await shown.text();
+
+  assert.match(shown.headers.get('content-type')!, /^text\/html/);
+  assert.equal(shown.headers.get('access-control-allow-origin'), null);
+  assert.match(text, /<h1>Public connections<\/h1>/);
+  assert.match(text, new RegExp(`href="https://site.test/api/verily/connections/${id}"`));
+  assert.match(text, /<\/svg><div class="accounts"><div class="side">/);
+  // The card says how the account stands and how it was shown, as the dialog's does.
+  assert.match(text, /Verified · via: <a href="[^"]*">Self-hosted Site<\/a>/);
+  assert.match(text, /<dt>Approved<\/dt>/);
+  assert.match(text, /<dt>Valid until<\/dt>/);
+
+  // A site alone is everyone on it. A reference means nothing without its site, and is ignored.
+  for (const [path, held] of [
+    ['/published?site=Site', [id]],
+    ['/published?site=Elsewhere', []],
+    ['/published?reference=nobody', [id]],
+  ] as const)
+    assert.deepEqual(
+      (await (await f.request(path)).json()).map((e: { id: string }) => e.id),
+      held,
+    );
+
+  // Another subject's page, and the list narrowed to it, hold none of this one's records.
+  const other = await f.request('/published?site=Site&reference=nobody', page);
+
+  assert.match(await other.text(), /No public connections/);
+  assert.deepEqual(await (await f.request('/published?site=Site&reference=nobody')).json(), []);
+
+  // Two records of one account are one line, as they are one card in the badge's dialog.
+  await f.connect('public');
+
+  const twice = await (await f.request(`/published?${mine}`, page)).text();
+
+  assert.equal((await (await f.request('/published')).json()).length, 2);
+  assert.equal(twice.match(/<dt>Approved<\/dt>/g)!.length, 1);
+
+  // A removed record leaves the page as it leaves the list: a badge would not show it either.
+  for (const e of await f.app.service.mine(alice)) await f.app.service.revoke(e.id, alice);
+
+  assert.deepEqual(await (await f.request('/published')).json(), []);
+  assert.match(await (await f.request(`/published?${mine}`, page)).text(), /No public connections/);
+
+  // An unlisted record is on neither.
+  const quiet = fixture();
+
+  await quiet.connect();
+
+  assert.match(await (await quiet.request('/published', page)).text(), /No public connections/);
+});
+
 test('the evidence page names how each side was established, without ranking them', async () => {
   const f = fixture(),
     id = await f.connect('public');
