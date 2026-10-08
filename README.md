@@ -509,6 +509,8 @@ The Cloudflare Worker sets `dns: true`.
 
 ## Operations
 
+DNS setup is saved for seven days from its first attempt. If propagation takes longer than a flow’s ten minutes, sign in and choose DNS again to restore the same TXT value and the last domain entered (or restart the same renewal). Each return creates a fresh flow and reads the proof again; the saved setup grants no verification on its own. Only the most recent domain entered is remembered for that operation. Keep the TXT record after verification for ongoing checks. A proof covers the exact domain entered; verify parent domains and subdomains separately.
+
 Verification lasts 30 days, flows 10 minutes, and sharing links 7 days. Change them with `validityMs`, `flowTtlMs` and `shareTtlMs`. Evidence is never cached.
 
 Run the upkeep on a schedule, for example hourly:
@@ -527,7 +529,7 @@ setInterval(
 );
 ```
 
-- **`prune()`** deletes expired flows, and deletes expired or revoked records after 90 days. A retired record is kept until it is removed.
+- **`prune()`** deletes expired flows and DNS drafts, and deletes expired or revoked records after 90 days. A retired record is kept until it is removed.
 - **`recheck()`** re-reads gists, link-backs, DNS records and files that are due, up to 5 per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`) and stays current for 7 days after its last successful read (`freshnessMs`); after that it shows as unconfirmed until a read succeeds. A failed read changes nothing. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
 
 **If you never call `recheck()`, set `freshnessMs: Infinity`.** Otherwise connections proved by gist, link-back or PGP lapse after a week.

@@ -899,3 +899,119 @@ test('every site takes its turn at a recheck, across restarts and whatever flows
   await service().prune();
   assert.equal(kept(), 0);
 });
+
+test('DNS drafts survive expired sessions, remain isolated, and require fresh proof and approval', async () => {
+  let now = 1000000;
+  const records: string[] = [];
+  const { instance, calls } = dns(records);
+  const storage = new MemoryStorage();
+
+  const service = new VerilyService({
+    storage,
+    providers: [instance],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test'],
+    now: () => now,
+  });
+
+  const choice = { provider: 'domain', method: 'dns' };
+  const first = await service.start(bob, undefined, 'connect', choice, { tenant: 'a' });
+
+  await service.submit(first.flowId, first.binding, 'example.test');
+  now += 3 * 86400000;
+  await service.prune();
+  await assert.rejects(service.flow(first.flowId, first.binding));
+  const resumed = await service.start(bob, undefined, 'connect', choice, { session: 'new' });
+
+  assert.equal(resumed.expect, first.expect);
+  assert.notEqual(resumed.binding, first.binding);
+
+  assert.deepEqual((await service.flow(resumed.flowId, resumed.binding)).context, {
+    session: 'new',
+  });
+
+  assert.equal((await service.flow(resumed.flowId, resumed.binding)).suggested, 'example.test');
+  await assert.rejects(service.flow(resumed.flowId, first.binding));
+  await assert.rejects(service.start(undefined, undefined, 'connect', choice));
+
+  const other = await service.start({ ...bob, id: 'other' }, undefined, 'connect', choice, {
+    tenant: 'a',
+  });
+
+  const tenant = await service.start(
+    { ...bob, siteName: 'Other site' },
+    undefined,
+    'connect',
+    choice,
+  );
+
+  assert.notEqual(other.expect, first.expect);
+  assert.notEqual(tenant.expect, first.expect);
+  await service.submit(resumed.flowId, resumed.binding, 'example.test');
+  assert.equal((await service.flow(resumed.flowId, resumed.binding)).phase, 'pending');
+  records.push(first.expect!);
+  await service.submit(resumed.flowId, resumed.binding, 'example.test');
+  assert.equal(calls.length, 3);
+  assert.equal((await service.flow(resumed.flowId, resumed.binding)).phase, 'approval');
+  assert.equal((await service.mine(bob)).length, 0);
+  await assert.rejects(service.approve(resumed.flowId, resumed.binding, alice, 'public'));
+  await service.approve(resumed.flowId, resumed.binding, bob, 'public');
+  const next = await service.start(bob, undefined, 'connect', choice, { tenant: 'a' });
+
+  assert.notEqual(next.expect, first.expect);
+});
+
+test('DNS draft expiry is fixed, failed attempts retain setup, and pruning removes old drafts', async () => {
+  let now = 1000000;
+  const { instance } = dns([]);
+  const storage = new MemoryStorage();
+
+  const service = new VerilyService({
+    storage,
+    providers: [instance],
+    baseUrl: 'https://site.test/api/verily',
+    siteName: 'Site',
+    verifierName: 'Site',
+    profileOrigins: ['https://site.test'],
+    now: () => now,
+  });
+
+  const first = await service.start(bob);
+
+  for (let i = 0; i < 5; i++) await service.submit(first.flowId, first.binding, 'example.test');
+
+  assert.equal((await service.flow(first.flowId, first.binding)).phase, 'failed');
+  now += 6 * 86400000;
+  assert.equal((await service.start(bob)).expect, first.expect);
+  now += 86400000;
+  await service.prune();
+  assert.equal([...storage.rows.keys()].filter((key) => key.startsWith('dnsDrafts:')).length, 0);
+  assert.notEqual((await service.start(bob)).expect, first.expect);
+});
+
+test('DNS instructions give exact names, safe commands, lookup links and continued scope', () => {
+  const { instance } = dns([]);
+
+  for (const artifact of [
+    'WWW.Example.test',
+    'https://dns.google/resolve?name=_verily.www.example.test&type=TXT',
+  ]) {
+    const parts = instance.instructions(expect, artifact);
+    const prose = written(parts);
+
+    assert.ok(prose.includes('dig TXT _verily.www.example.test +short'));
+    assert.ok(prose.includes('Proves control of www.example.test only'));
+    assert.ok(prose.includes('72 hours'));
+    assert.ok(prose.includes('Keep the TXT record'));
+
+    assert.ok(
+      JSON.stringify(parts).includes(
+        'https://dns.google/resolve?name=_verily.www.example.test&type=TXT',
+      ),
+    );
+  }
+
+  assert.ok(!written(instance.instructions(expect, '$(touch /tmp/oops)')).includes('touch'));
+});

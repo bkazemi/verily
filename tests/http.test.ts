@@ -1083,3 +1083,40 @@ test('a new link starts only from a posted form, and the verify page holds it to
     /name="action" value="approve"/,
   );
 });
+
+test('DNS setup and resumption instructions reach HTML and dialog views', async () => {
+  const f = fixture([
+    dnsProvider({ fetch: async () => new Response(JSON.stringify({ Status: 0, Answer: [] })) }),
+  ]);
+
+  const start = await f.request('/sessions', {
+    method: 'POST',
+    headers: { origin: 'https://site.test', cookie: 'local=bob' },
+    body: 'kind=connect&provider=domain&method=dns',
+  });
+
+  const cookie = `${start.headers.get('set-cookie')!.split(';')[0]}; local=bob`;
+  const path = start.headers.get('location')!.replace('/api/verily', '');
+
+  await f.request(`${path}/submit`, {
+    method: 'POST',
+    headers: { origin: 'https://site.test', cookie },
+    body: 'artifact=www.example.test',
+  });
+
+  const html = await (await f.request(path, { headers: { cookie } })).text();
+
+  assert.match(html, /dig TXT _verily.www.example.test \+short/);
+  assert.match(html, /saved for seven days/);
+  assert.match(html, /Proves control of www.example.test only/);
+  const view = await (await f.request(`${path}?format=json`, { headers: { cookie } })).json();
+
+  assert.equal(view.suggested, 'www.example.test');
+  assert.match(JSON.stringify(view.instructions), /saved for seven days/);
+
+  const foreign = await f.request(`${path}?format=json`, {
+    headers: { cookie: cookie.replace('local=bob', 'local=alice') },
+  });
+
+  assert.equal(foreign.status, 404);
+});

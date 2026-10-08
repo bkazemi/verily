@@ -152,6 +152,8 @@ export interface Connection {
 
 export interface Flow {
   id: string;
+  /** Saved DNS setup; grants no authority to finish a flow. */
+  dnsDraftId?: string;
   stateHash: string;
   bindingHash: string;
   verifier?: string;
@@ -167,7 +169,8 @@ export interface Flow {
   reason?: string;
   /**
    * The string an artifact must contain. Public by design: the holder publishes it. It is
-   * unguessable and per-flow, so an artifact made for one flow cannot complete another.
+   * normally unguessable and per-flow. DNS setup can retain the same value across
+   * fresh flows for the same subject and operation while propagation is pending.
    */
   expect?: string;
   /** Whether `expect` was minted for a method that had nothing of the subject's to state. */
@@ -282,7 +285,17 @@ export interface SiteRead {
   answered: boolean;
 }
 
+/** DNS setup retained across short-lived, authenticated flows for seven days. */
+export interface DnsDraft {
+  id: string;
+  flowId: string;
+  expect: string;
+  artifact?: string;
+  expiresAt: number;
+}
+
 export interface Records {
+  dnsDrafts: DnsDraft;
   connections: Connection;
   flows: Flow;
   shares: Share;
@@ -366,8 +379,9 @@ export interface ArtifactProvider {
    * Told to the holder verbatim. Must name what they are publishing and where. Returned in
    * pieces so a renderer can set a command as one: a command is copied character for
    * character, and prose that reflows is prose a holder cannot safely copy.
+   * `artifact` is the last submitted or suggested location, when one is known.
    */
-  instructions(expect: string): Instruction[];
+  instructions(expect: string, artifact?: string): Instruction[];
   /**
    * What the holder is asked to hand back, where the method takes something a holder knows
    * by a better name than "an address". `input` says how to ask for it: `text` where it
