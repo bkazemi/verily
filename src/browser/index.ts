@@ -329,7 +329,10 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
   if (!['https:', 'http:'].includes(base.protocol)) throw new Error('Invalid backend URL');
 
-  base.pathname = base.pathname.replace(/\/$/, '');
+  // Where the backend's routes begin, with no slash to end it: a backend mounted at the
+  // root of its origin has a path of `/` however it is written, and its routes are not
+  // under `//`.
+  const root = base.href.replace(/\/$/, '');
 
   /**
    * A backend on another origin: an instance this site is registered with. Its cookies
@@ -353,7 +356,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
     if (!record(vouched) || typeof vouched.token !== 'string')
       throw new Error('Verily request unavailable');
 
-    const traded = await fetch(`${base.href}/site/session`, {
+    const traded = await fetch(`${root}/site/session`, {
       method: 'POST',
       credentials: 'omit',
       cache: 'no-store',
@@ -375,7 +378,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
     const binding = flow && bindings.get(flow);
 
-    const response = await fetch(`${base.href}${path}`, {
+    const response = await fetch(`${root}${path}`, {
       credentials: 'omit',
       cache: 'no-store',
       method: data ? 'POST' : 'GET',
@@ -399,7 +402,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
   }
 
   async function request(path: string, data?: Record<string, string>): Promise<unknown> {
-    const response = await fetch(`${base.href}${path}`, {
+    const response = await fetch(`${root}${path}`, {
       credentials: 'same-origin',
       cache: 'no-store',
       ...(data
@@ -486,7 +489,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
             };
 
             window.addEventListener('message', receive);
-            popup.location.href = `${base.href}/site/enter`;
+            popup.location.href = `${root}/site/enter`;
           },
         }
       : {}),
@@ -523,7 +526,7 @@ export function init({ backendUrl, handoffUrl }: { backendUrl: string; handoffUr
 
       pill.onclick = async () => {
         if (typeof HTMLDialogElement === 'undefined' && !remote) {
-          location.href = `${base.href}/verify`;
+          location.href = `${root}/verify`;
 
           return;
         }

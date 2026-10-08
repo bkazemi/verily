@@ -3,7 +3,7 @@ import type { DurableObjectStorage } from '@cloudflare/workers-types';
 import type { FlowResult, LocalAccount, LocalKind, Visibility } from '../src/core/index.js';
 import { hash, secret } from '../src/server/service.js';
 
-/** How long a handoff may take, from `/begin` to `/start`, and how far ahead a token may run. */
+/** How long a handoff may take, from `/handoff/request` to `/handoff/accept`, and how far ahead a token may run. */
 export const handoffMs = 5 * 60000;
 
 /** How long a site session lasts once the handoff lands. */

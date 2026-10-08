@@ -44,7 +44,7 @@ try {
     assert.equal(typeof pseudonym, 'function');
     assert.equal(
       createSiteClient({ instance: 'https://verily.example', site: 'example', key: 'k'.repeat(43) }).beginUrl(),
-      'https://verily.example/begin?site=example&purpose=connect',
+      'https://verily.example/handoff/request?site=example&purpose=connect',
     );
     console.log(createRequire(import.meta.url).resolve('@bkazemi/verily/verily.js'));
   `,

@@ -295,13 +295,13 @@ A static site only needs the script and the badge markup; the backend runs somew
 
 1. Clone this repository, run `npm ci`, and copy `wrangler.example.jsonc` to `wrangler.jsonc`. Fill in your account, origin and owner details.
 2. Run `wrangler secret put` for `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `OWNER_KEY`, then `npm run cloudflare:deploy`.
-3. On the backend's site, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/api/verily/mine`.
+3. On the backend's site, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/mine`.
 4. Add the script and the badge to your site:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.4.0/dist/verily.js" defer></script>
 <verily-badge
-  backend-url="https://your-backend.example/api/verily"
+  backend-url="https://your-backend.example"
   connection-id="CONNECTION_ID"
 ></verily-badge>
 ```
@@ -355,7 +355,7 @@ The authorize and return URLs the instance's operator registers for you are `<pr
 ```html
 <script src="/assets/verily.js" defer></script>
 <verily-connect
-  backend-url="https://verily.example/api/verily"
+  backend-url="https://verily.example"
   handoff-url="/api/verily/handoff"
 ></verily-connect>
 ```
@@ -367,7 +367,7 @@ Once a user has a link, show their badge in place of the pill, and give it the s
 ```html
 <verily-badge
   connections="[...the records, as JSON...]"
-  backend-url="https://verily.example/api/verily"
+  backend-url="https://verily.example"
   handoff-url="/api/verily/handoff"
 ></verily-badge>
 ```

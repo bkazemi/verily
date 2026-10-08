@@ -145,9 +145,9 @@ test('a site shows a public link as a badge, and an unlisted one only to its hol
 
   assert.match(
     own,
-    /linked but hidden\. <a href="https:\/\/verifier\.test\/begin\?site=partner&amp;purpose=manage">Make public/,
+    /linked but hidden\. <a href="https:\/\/verifier\.test\/handoff\/request\?site=partner&amp;purpose=manage">Make public/,
   );
 
   assert.ok(!theirs.includes('linked but hidden'));
-  assert.ok(!theirs.includes('/begin'));
+  assert.ok(!theirs.includes('/handoff/request'));
 });
