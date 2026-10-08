@@ -116,8 +116,8 @@ test('malformed and hostile input is refused rather than half-read', async () =>
   // A signature block where the key should be is still not a key.
   const signature = await fixture('ed25519.sig.asc');
 
-  await assert.rejects(readCertificate(signature), Malformed);
-  await assert.rejects(readCleartext(armored), Malformed);
+  await assert.rejects(readCertificate(signature), /No OpenPGP key found/);
+  await assert.rejects(readCleartext(armored), /No OpenPGP signed message found/);
 });
 
 test('a signing subkey counts, but only where the primary key vouched for it', async () => {

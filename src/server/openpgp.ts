@@ -47,6 +47,14 @@ export class Malformed extends Refused {
   }
 }
 
+/** The block is not there at all: a holder who pasted half is told which half is missing. */
+export class Missing extends Malformed {
+  constructor(what: string) {
+    super(what);
+    this.message = `No OpenPGP ${what} found`;
+  }
+}
+
 export type Certificate = Key;
 
 export type Cleartext = CleartextMessage;
@@ -60,9 +68,12 @@ function block(text: string, begin: string, end: string, what: string): string {
   if (text.length > maxArmorBytes) throw new Malformed(what);
 
   const start = text.indexOf(`-----BEGIN PGP ${begin}-----`);
+
+  if (start < 0) throw new Missing(what);
+
   const stop = text.indexOf(`-----END PGP ${end}-----`, start);
 
-  if (start < 0 || stop < 0) throw new Malformed(what);
+  if (stop < 0) throw new Malformed(what);
 
   return text.slice(start, stop + `-----END PGP ${end}-----`.length);
 }
