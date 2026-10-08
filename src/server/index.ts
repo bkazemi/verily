@@ -990,6 +990,9 @@ export function createVerily(options: ServerOptions) {
           // With one visibility there is nothing for the holder to change it to.
           if (kind === 'visibility' && visibilities(user!).length < 2) throw new Unavailable();
 
+          // Several providers are named by their buttons, not strung together in the heading.
+          const several = new Set(offered.map((p) => p.name)).size > 1;
+
           // One form per method. With one on offer the provider is all there is to name.
           // A new link started from this page always ends on its approval, as it did when
           // this form was a GET, so it says so: `/verify` is an address any site can send a
@@ -1008,7 +1011,9 @@ export function createVerily(options: ServerOptions) {
                 ? 'Remove a connection'
                 : kind === 'renew'
                   ? 'Renew this connection'
-                  : `Verify with ${providerNames(offered)}`,
+                  : several
+                    ? 'Verify an account'
+                    : `Verify with ${providerNames(offered)}`,
               `
             ${
               user
