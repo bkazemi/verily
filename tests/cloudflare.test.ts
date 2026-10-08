@@ -350,7 +350,11 @@ test('the Worker offers email once it can send it, and links a mailbox through R
   const without = instance({ RESEND_API_KEY: 're_test' });
 
   try {
-    assert.ok(!(await offered(without)).providers.includes('email'));
+    const bare = (await offered(without)).providers;
+
+    assert.ok(!bare.includes('email'));
+    // A key needs no secret, so it is offered on every instance.
+    assert.ok(bare.includes('openpgp'));
   } finally {
     await without.dispose();
   }
