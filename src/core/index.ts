@@ -567,6 +567,11 @@ export * from './routes.js';
  */
 export const freshnessMs = 7 * 86400000;
 
+/** Whether a record has reached its deadline, including the exact expiry instant. */
+export function expired(record: { expiresAt: number }, now: number): boolean {
+  return record.expiresAt <= now;
+}
+
 /**
  * `freshness` bounds how stale a published proof may be before it stops counting. A
  * backend that never rechecks must leave it unbounded, since an unread proof going stale
@@ -578,7 +583,7 @@ export function status(connection: Connection, now: number, freshness = freshnes
   // Frozen at its last proof, so neither its expiry nor its freshness is read again.
   if (connection.retiredAt !== undefined) return 'retired';
 
-  if (now >= connection.expiresAt) return 'expired';
+  if (expired(connection, now)) return 'expired';
 
   const main = connection.attestations?.external[0];
 
@@ -621,7 +626,7 @@ export function statusLabel(evidence: Pick<Evidence, 'status' | 'expiresAt'>, no
   // Before expiry: a retired record's approval has long run out, and that is not its state.
   if (evidence.status === 'retired') return 'Retired';
 
-  if (evidence.status === 'expired' || evidence.expiresAt <= now) return 'Expired';
+  if (evidence.status === 'expired' || expired(evidence, now)) return 'Expired';
 
   return evidence.status === 'unconfirmed' ? 'Unconfirmed' : 'Verified';
 }

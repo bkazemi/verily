@@ -1,6 +1,12 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { DurableObjectStorage } from '@cloudflare/workers-types';
-import type { FlowResult, LocalAccount, LocalKind, Visibility } from '../src/core/index.js';
+import {
+  expired,
+  type FlowResult,
+  type LocalAccount,
+  type LocalKind,
+  type Visibility,
+} from '../src/core/index.js';
 import { hash, secret } from '../src/server/service.js';
 
 /** How long a handoff may take, from `/handoff/request` to `/handoff/accept`, and how far ahead a token may run. */
@@ -327,7 +333,7 @@ export class Sites {
       const key = `site/state/${hash(payload.state as string)}`;
       const state = await tx.get<State>(key);
 
-      if (!state || state.site !== site.id || state.expiresAt <= now) return undefined;
+      if (!state || state.site !== site.id || expired(state, now)) return undefined;
 
       await tx.delete(key);
 
@@ -459,8 +465,7 @@ export class Sites {
     const key = `site/session/${hash(token)}`;
     const session = await this.storage.get<SiteSession>(key);
 
-    if (!session || session.expiresAt <= Date.now() || !this.sites.has(session.site))
-      return undefined;
+    if (!session || expired(session, Date.now()) || !this.sites.has(session.site)) return undefined;
 
     return { key, session };
   }
@@ -527,7 +532,7 @@ export class Sites {
     return this.storage.transaction(async (tx) => {
       const session = await tx.get<SiteSession>(key);
 
-      if (!session || session.expiresAt <= Date.now() || session.operation) return false;
+      if (!session || expired(session, Date.now()) || session.operation) return false;
 
       if (session.returned) return session.returned === flow;
 
@@ -584,7 +589,7 @@ export class Sites {
     return this.storage.transaction(async (tx) => {
       const session = await tx.get<SiteSession>(key);
 
-      if (!session || session.expiresAt <= Date.now()) return undefined;
+      if (!session || expired(session, Date.now())) return undefined;
 
       if (session.operation)
         return session.operation.connection === connection && session.operation.mark === mark
