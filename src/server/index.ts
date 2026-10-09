@@ -588,7 +588,7 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
     externalName(e.external),
     externalLink(e.external),
     externalIdGroups(e.external) ?? externalId(e.external),
-    `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? ` · <a href="${record}#signed">signed</a>` : ''}</p>`,
+    `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? `<a class="signed-mark" href="${record}#signed">signed</a>` : ''}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
     times(
       retired

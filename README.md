@@ -445,7 +445,7 @@ With a key set:
 - **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form. A public retired record has one, signed as `version: 2` with `status: "retired"` and `retiredAt`, so a reader that knows only version 1 refuses it and never takes it for a record that stood.
 - **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verily-keys.json`.
 - **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
-- The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record `signed ✓`, and links to that page. A record whose signature fails is shown as unconfirmed.
+- The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record with a `signed` pill after its verifier, and links to that page. A record whose signature fails is shown as unconfirmed, with `bad signature` in the pill's place.
 - The approval step tells the holder that a saved signed record outlives removal.
 
 To check a file yourself:

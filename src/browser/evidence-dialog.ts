@@ -57,9 +57,12 @@ export const styles = `
   .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  .caution { display: inline-block; margin-left: 4px; color: #a15c00; cursor: help; vertical-align: -1.5px; }
-  .caution svg { display: block; width: 12px; height: 12px; }
-  .bad { color: #b3261e; font-weight: 650; text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+  /* What is said of a signature hangs off the verifier, so it is set a size under that line. */
+  .summary .signed { display: inline-block; margin-left: 5px; padding: 0 6px; border: 1px solid #cfdcd3; border-radius: 999px; font-size: 10px; font-weight: 550; line-height: 1.3; text-decoration: none; vertical-align: 1px; }
+  .summary a.signed:hover { background: #f2f5f1; }
+  .summary .signed.bad { border-color: #b3261e; color: #b3261e; font-weight: 650; cursor: help; }
+  .caution { display: inline-block; margin-left: 3px; color: #a15c00; vertical-align: -1.5px; }
+  .caution svg { display: block; width: 10px; height: 10px; }
   .account { padding: 14px 16px; border: 1px solid #e0e6df; border-radius: 10px; margin-top: 12px; }
   .account h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 3px; color: #6b786f; font-size: 11px; font-weight: 550; }
   .account a, .account strong { font-weight: 650; font-size: 14px; }
@@ -598,45 +601,51 @@ function signatures(evidence: Account): Promise<Signature[]> {
 }
 
 /**
- * Says a record is signed, in a word beside its verifier. The word opens the verifier's
- * own page for the record at what it says of the signature, where the signed record is to be
- * had: nothing is downloaded from the card. The signed record is checked here against the
- * verifier's keys: a tick once it has checked, and a warning in the word's place if it
- * fails, the one thing on a card that is a warning. `warned` is told each time that warning
- * is drawn, on the first check or on a later one, so whatever folds the card away opens.
+ * Says a record is signed, in a pill after its verifier. The line it hangs off reads the
+ * same on every card, signed or not. The pill opens the verifier's own page for the record
+ * at what it says of the signature, where the signed record is to be had: nothing is
+ * downloaded from the card. The signed record is checked here against the verifier's keys.
+ * One that checks out says only that it is signed, one not yet checked carries a warning
+ * sign, and one that fails is a warning in the pill's place, the one thing on a card that
+ * is. `warned` is told each time that warning is drawn, on the first check or on a later
+ * one, so whatever folds the card away opens.
  */
 function signedMark(evidence: Account, later: Later, warned: () => void) {
   const mark = node('span');
-  const link = outward(node('a', 'signed'), `${evidence.evidenceUrl}#signed`);
+  const link = outward(node('a', 'signed', 'signed'), `${evidence.evidenceUrl}#signed`);
   const see = 'See the signature (opens in a new tab)';
 
   const settle = (results: Signature[]) => {
     const first = results[0];
 
     if (results.some((result) => result.state === 'invalid')) {
-      const warning = node('span', 'invalid signature', 'bad');
+      // Not a link: the page it would open is the one this record failed to match.
+      const warning = node('span', 'bad signature', 'signed bad');
 
       warning.setAttribute('role', 'alert');
       // What it means, for a reader who has never met a signature, kept off the card.
       warning.title = `This record does not match the signature ${evidence.verifierName} put on it, so it may have been altered. Do not rely on it.`;
-      mark.replaceChildren(document.createTextNode(' · '), warning);
+      mark.replaceChildren(warning);
       warned();
 
       return;
     }
 
     if (first?.state === 'valid' && results.every((result) => result.state === 'valid')) {
-      link.textContent = 'signed ✓';
-      // Names where the keys came from, which is what the tick answers for.
+      // No tick: a signature that checks out is what a reader expects, and the pill is
+      // marked only when it did not. Setting the word again clears a warning sign left in it.
+      link.textContent = 'signed';
+      // Names where the keys came from, which is what the check answers for.
       link.title = `Signature checked in this browser against the keys ${new URL(evidence.evidenceUrl).host} publishes (key ${first.keyId}). ${see}`;
-      mark.replaceChildren(document.createTextNode(' · '), link);
+      mark.replaceChildren(link);
 
       return;
     }
 
-    // No verdict was reached. The record is signed and says so, with a warning beside the
-    // word in place of a tick, and why is said on hover. A check that only ran out of time
-    // or could not read what it needed is made again when the dialog next reads.
+    // No verdict was reached. The record is signed and says so, with a warning sign in the
+    // pill, which is all that tells it from one that checked out, and why is said on hover.
+    // A check that only ran out of time or could not read what it needed is made again when
+    // the dialog next reads.
     const why = results.find((result) => result.state === 'unchecked');
 
     const reason =
@@ -651,8 +660,9 @@ function signedMark(evidence: Account, later: Later, warned: () => void) {
     caution.setAttribute('aria-label', reason);
     caution.append(cautionMark());
     link.textContent = 'signed';
+    link.append(caution);
     link.title = `${reason} ${see}`;
-    mark.replaceChildren(document.createTextNode(' · '), link, caution);
+    mark.replaceChildren(link);
 
     if (why) later(() => void signatures(evidence).then(settle));
   };
