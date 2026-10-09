@@ -1448,6 +1448,17 @@ test('a link in the instructions opens in a new tab, and only if it is http(s)',
 const pillText = (host: Element) =>
   host.all().find((e) => e.className.split(' ').includes('badge'))!.textContent;
 
+/**
+ * What a card says after its verifier: the pill's words, and a warning sign where the pill
+ * has one. A signature that checked out and one not yet checked say the same word, and
+ * only the sign tells them apart.
+ */
+const beside = (card: Element) => {
+  const words = card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!;
+
+  return card.all().some((found) => found.className === 'caution') ? `${words} ⚠` : words;
+};
+
 /** A page with the badge script loaded, answering each connection id from `served`. */
 async function groupHarness(
   served: Record<string, unknown>,
@@ -2136,7 +2147,7 @@ test('a signed record says so on its card, and says how checking it went', async
     const card = shown().find((found) => found.textContent.includes(`@${handle}`))!;
 
     return {
-      text: card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!,
+      text: beside(card),
       link: card.links().find((link) => link.textContent.startsWith('sign')),
       alert: card.all().find((found) => found.attributes['role'] === 'alert'),
       caution: card.all().find((found) => found.className === 'caution'),
@@ -2147,19 +2158,20 @@ test('a signed record says so on its card, and says how checking it went', async
   assert.equal(said('erin').text, '');
 
   const settled = () =>
-    said('alice').text === ' · signed ✓' &&
-    said('dave').text === ' · signed' &&
+    said('alice').text === 'signed' &&
+    said('dave').text === 'signed ⚠' &&
     ['bob', 'carol'].every((handle) => said(handle).alert);
 
   for (let i = 0; i < 100 && !settled(); i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-  assert.equal(said('alice').text, ' · signed ✓');
+  assert.equal(said('alice').text, 'signed');
   assert.match(said('alice').link!.title, new RegExp(`key ${mine.key.id}`));
 
   // A signed record that fails is a warning, and links nowhere.
   for (const handle of ['bob', 'carol']) {
-    assert.equal(said(handle).alert!.textContent, 'invalid signature');
+    assert.equal(said(handle).alert!.textContent, 'bad signature');
+    assert.equal(said(handle).text, 'bad signature');
 
     // What that means is in its tooltip, for a reader who has never met a signature.
     assert.match(
@@ -2171,8 +2183,8 @@ test('a signed record says so on its card, and says how checking it went', async
   }
 
   // A signed record that could not be read is no verdict either way: the card says it is
-  // signed, with a warning in place of a tick that says on hover why it was not checked.
-  assert.equal(said('dave').text, ' · signed');
+  // signed, with a warning sign in its pill that says on hover why it was not checked.
+  assert.equal(said('dave').text, 'signed ⚠');
   assert.equal(said('dave').link!.href, `${unread.evidenceUrl}#signed`);
   assert.equal(said('dave').caution!.title, 'The signature could not be read, retrying.');
   assert.equal(said('alice').caution, undefined);
@@ -2265,7 +2277,7 @@ test('a card says it is checking a signature until the check comes back', async 
       .all()
       .filter((found) => found.attributes['role'] === 'status');
 
-  const said = () => card().textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!;
+  const said = () => beside(card());
 
   const reachable = () =>
     card().children.filter((part) => !(part as unknown as { inert?: boolean }).inert);
@@ -2284,10 +2296,10 @@ test('a card says it is checking a signature until the check comes back', async 
 
   release();
 
-  for (let i = 0; i < 100 && said() !== ' · signed ✓'; i++)
+  for (let i = 0; i < 100 && said() !== 'signed'; i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-  assert.equal(said(), ' · signed ✓');
+  assert.equal(said(), 'signed');
   assert.equal(card().className, 'account');
   assert.equal(reachable().length, card().children.length);
   assert.equal(waiting().length, 0);
@@ -2332,7 +2344,7 @@ test('a signature check that never answers gives the card back, says why, and tr
 
   const opened = await cards(host);
   const card = () => opened.dialog.all().filter((found) => found.className.includes('account'))[1]!;
-  const said = () => card().textContent.match(/via: verifier\.test([^A-Z]*)/)![1];
+  const said = () => beside(card());
 
   const caution = () =>
     card()
@@ -2345,11 +2357,11 @@ test('a signature check that never answers gives the card back, says why, and tr
     await new Promise((resolve) => setTimeout(resolve, 10));
 
   // No verdict: the card is in reach again, as the record was read. It is signed, and a
-  // warning where the tick would be says on hover that the check ran out of time.
+  // warning sign in its pill says on hover that the check ran out of time.
   assert.ok(waits.includes(5000));
   assert.equal(card().className, 'account');
   assert.ok(card().children.every((part) => !(part as unknown as { inert?: boolean }).inert));
-  assert.equal(said(), ' · signed');
+  assert.equal(said(), 'signed ⚠');
   assert.equal(caution()!.title, 'Signature check timed out, retrying.');
   assert.match(card().textContent, /Verified/);
 
@@ -2358,10 +2370,10 @@ test('a signature check that never answers gives the card back, says why, and tr
 
   for (const poll of polls) poll();
 
-  for (let i = 0; i < 100 && said() !== ' · signed ✓'; i++)
+  for (let i = 0; i < 100 && said() !== 'signed'; i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-  assert.equal(said(), ' · signed ✓');
+  assert.equal(said(), 'signed');
   assert.equal(caution(), undefined);
   // The card was never veiled again to do it.
   assert.equal(card().className, 'account');
@@ -2424,7 +2436,7 @@ test('a retired record whose signature fails opens its group, on a later check a
   for (const poll of polls) poll();
 
   await until(alert);
-  assert.equal(alert()!.textContent, 'invalid signature');
+  assert.equal(alert()!.textContent, 'bad signature');
   assert.equal(history().open, true);
   dialog.close();
 
@@ -2487,7 +2499,7 @@ test('a signature mark stands only beside what the signed record says', async ()
       subject: subject!.textContent,
       accounts: accounts.map((card) => [
         card.all().find((found) => found.className === 'state')!.textContent,
-        card.textContent.match(/via: verifier\.test([^A-Z]*)/)![1]!,
+        beside(card),
       ]),
       text: accounts.map((card) => card.textContent).join(' '),
     };
@@ -2495,21 +2507,21 @@ test('a signature mark stands only beside what the signed record says', async ()
 
   const plain = await marks([good]);
 
-  assert.deepEqual(plain.accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual(plain.accounts, [['Verified', 'signed']]);
   assert.equal(plain.pill, '@alice');
 
   // A record that says something its signed record does not is drawn as that has it: the
   // mark stands beside the verifier's own words, and what was altered is not shown at all.
   const renamed = await marks([{ ...good, external: { ...good.external, handle: 'mallory' } }]);
 
-  assert.deepEqual(renamed.accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual(renamed.accounts, [['Verified', 'signed']]);
   assert.match(renamed.text, /@alice/);
   assert.doesNotMatch(renamed.text, /mallory/);
   assert.equal(renamed.pill, '@alice');
 
   const relabelled = await marks([{ ...good, local: { ...good.local, label: 'Mallory' } }]);
 
-  assert.deepEqual(relabelled.accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual(relabelled.accounts, [['Verified', 'signed']]);
   assert.match(relabelled.subject, /Alice/);
   assert.doesNotMatch(relabelled.subject, /Mallory/);
 
@@ -2530,7 +2542,7 @@ test('a signature mark stands only beside what the signed record says', async ()
     },
   ]);
 
-  assert.deepEqual(reproved.accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual(reproved.accounts, [['Verified', 'signed']]);
   assert.equal(reproved.text, plain.text);
 
   // What stands now is no part of a signed record, so that is kept as the record was read.
@@ -2541,14 +2553,14 @@ test('a signature mark stands only beside what the signed record says', async ()
   // One naming another record under the same address is shown what its own check finds,
   // not the first's.
   assert.deepEqual((await marks([{ ...good, id: 'other' }])).accounts, [
-    ['Unconfirmed', ' · invalid signature'],
+    ['Unconfirmed', 'bad signature'],
   ]);
 
   // And the record that was signed is still vouched for after all of those.
-  assert.deepEqual((await marks([good])).accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual((await marks([good])).accounts, [['Verified', 'signed']]);
 
   // A signed record holding an address no page may follow is not drawn from: the record is
-  // shown as it was read, with no tick beside it.
+  // shown as it was read, its signature unchecked.
   const unsafe = linked('unsafe', 'dave', 150, { signedUrl: `${at('unsafe')}?format=signed` });
 
   served['unsafe'] = await signedBy({
@@ -2558,7 +2570,7 @@ test('a signature mark stands only beside what the signed record says', async ()
 
   const refused = await marks([unsafe]);
 
-  assert.deepEqual(refused.accounts, [['Verified', ' · signed']]);
+  assert.deepEqual(refused.accounts, [['Verified', 'signed ⚠']]);
   assert.ok(refused.accounts.length === 1 && !JSON.stringify(refused).includes('javascript'));
 
   // The verifier changes keys while the page is open: a record signed by the new one is
@@ -2570,7 +2582,7 @@ test('a signature mark stands only beside what the signed record says', async ()
 
   const before = asked.filter((id) => id === 'keys').length;
 
-  assert.deepEqual((await marks([later])).accounts, [['Verified', ' · signed ✓']]);
+  assert.deepEqual((await marks([later])).accounts, [['Verified', 'signed']]);
   assert.equal(asked.filter((id) => id === 'keys').length, before + 1);
 
   // A key no list has is asked after once more, and then the signed record fails.
@@ -2581,7 +2593,7 @@ test('a signature mark stands only beside what the signed record says', async ()
     await signer(await generateSigningKey('verifier.test')),
   );
 
-  assert.deepEqual((await marks([forged])).accounts, [['Unconfirmed', ' · invalid signature']]);
+  assert.deepEqual((await marks([forged])).accounts, [['Unconfirmed', 'bad signature']]);
 });
 
 test('records the page hands over are drawn without a fetch, unlisted ones with no link', async () => {
@@ -3563,7 +3575,7 @@ test('the order holds once a signed record checks, and follows a mark changed si
 
     return {
       order: handles(accounts),
-      signed: accounts.slice(1).map((card) => /signed ✓/.test(card.textContent)),
+      signed: accounts.slice(1).map((card) => beside(card) === 'signed'),
       text: accounts.slice(1).map((card) => card.textContent),
     };
   };
@@ -3633,7 +3645,7 @@ test('the order holds once a signed record checks, and follows a mark changed si
 
   const card = read.dialog.all().filter((found) => found.className.includes('account'))[1]!;
 
-  assert.match(card.textContent, /signed ✓/);
+  assert.equal(beside(card), 'signed');
   assert.doesNotMatch(card.textContent, /Preferred/);
 });
 

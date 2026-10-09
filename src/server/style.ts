@@ -192,6 +192,8 @@ main:has(.accounts) { max-width: 54rem; }
 .fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
 .fingerprint span { display: inline-block; margin-right: .5ch; }
 .how.additional { padding-left: .75rem; }
+/* That a record is signed hangs off its verifier, so it is set a size under that line. */
+.how .signed-mark { display: inline-block; margin-left: .3125rem; padding: 0 .375rem; border: 1px solid var(--line); border-radius: 999px; font-size: .625rem; font-weight: 550; line-height: 1.3; text-decoration: none; vertical-align: .0625rem; }
 
 .fine { color: var(--muted); font-size: .8125rem; line-height: 1.55; margin-bottom: .625rem; }
 
