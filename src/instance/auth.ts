@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
-import type { DurableObjectStorage } from '@cloudflare/workers-types';
-import { expired } from '../src/core/index.js';
-import { hash, secret } from '../src/server/service.js';
+import { expired } from '../core/index.js';
+import type { Store } from './store.js';
+import { hash, secret } from '../server/service.js';
 
 const sessionMs = 8 * 3600000;
 // Use a normal host-only cookie name. Secure, HttpOnly, SameSite and Path=/
@@ -16,7 +16,7 @@ interface Session {
 
 export class OwnerAuth {
   constructor(
-    private readonly storage: DurableObjectStorage,
+    private readonly storage: Store,
     private readonly ownerKey: string,
   ) {
     if (!/^[A-Za-z0-9_-]{43,}$/.test(ownerKey))
@@ -98,7 +98,7 @@ export class OwnerAuth {
     await this.storage.delete('owner/rate/v2/mutation');
 
     await this.storage.transaction(async (tx) => {
-      for (const [key, session] of await tx.list<Session>({ prefix: 'owner/session/' })) {
+      for (const [key, session] of await tx.list<Session>('owner/session/')) {
         if (expired(session, Date.now()) || session.keyHash !== hash(this.ownerKey))
           await tx.delete(key);
       }

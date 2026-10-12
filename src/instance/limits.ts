@@ -1,5 +1,5 @@
-import type { DurableObjectStorage } from '@cloudflare/workers-types';
-import { hash } from '../src/server/service.js';
+import type { Store } from './store.js';
+import { hash } from '../server/service.js';
 
 interface Bucket {
   count: number;
@@ -19,7 +19,7 @@ const windowMs = 60000;
  * nothing, in one transaction, so a refused request spends nothing from the others.
  */
 export async function allow(
-  storage: DurableObjectStorage,
+  storage: Store,
   buckets: { key: string; limit: number }[],
 ): Promise<boolean> {
   return storage.transaction(async (tx) => {
@@ -43,24 +43,22 @@ export async function allow(
   });
 }
 
-/** The bucket for a client with no session. The address is hashed, never stored as it is. */
-export const client = (request: Request) =>
-  `client/${hash(request.headers.get('cf-connecting-ip') ?? 'unknown')}`;
+/**
+ * The bucket for a client with no session, by the address the host says the request came
+ * from. The address is hashed, never stored as it is.
+ */
+export const client = (address: string | null) => `client/${hash(address ?? 'unknown')}`;
 
 /**
  * Deletes every record the handoff and the limits leave behind once it has expired:
  * handoffs that never reached `/handoff/accept`, site sessions, and idle buckets. Each is written
  * with its expiry under its own prefix for exactly this.
  */
-export async function prune(storage: DurableObjectStorage): Promise<void> {
+export async function prune(storage: Store): Promise<void> {
   const now = Date.now();
 
   for (const prefix of ['site/state/', 'site/session/', 'rate/']) {
-    const expired = [...(await storage.list<{ expiresAt: number }>({ prefix })).entries()]
-      .filter(([, value]) => !(value.expiresAt > now))
-      .map(([key]) => key);
-
-    // The storage API deletes at most 128 keys a call.
-    for (let i = 0; i < expired.length; i += 128) await storage.delete(expired.slice(i, i + 128));
+    for (const [key, value] of await storage.list<{ expiresAt: number }>(prefix))
+      if (!(value.expiresAt > now)) await storage.delete(key);
   }
 }

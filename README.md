@@ -423,7 +423,7 @@ Three options tie a flow to the site that sent the holder:
 
 Two more narrow what a subject is offered, for a backend whose sites don't all want the same. `providersFor(local)` returns the provider ids a subject may use: it is offered those alone, in that order, and a flow for any other is refused. `visibilityFor(local)` returns the visibilities it may choose: with one, the approval page states it and offers no choice.
 
-`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`cloudflare/sites.ts`](cloudflare/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
+`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`src/instance/sites.ts`](src/instance/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
 
 ## Signed records
 

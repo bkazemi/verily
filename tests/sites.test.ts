@@ -1153,7 +1153,7 @@ test('nothing the instance sends an outsider says which sites it serves', async 
 });
 
 test('a site with a missing or malformed key is left out, and the rest are still served', async () => {
-  const { registry } = await import('../cloudflare/sites.js');
+  const { registry } = await import('../src/instance/sites.js');
 
   const site = (id: string) => ({
     id,

@@ -495,7 +495,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
 });
 
 test('no path the worker answers itself is one the library serves', async () => {
-  const { own } = await import('../cloudflare/routes.js');
+  const { own } = await import('../src/instance/routes.js');
   const { createVerily } = await import('../src/server/index.js');
   const { MemoryStorage, alice, fakeProvider } = await import('./helpers.js');
   const base = 'https://verifier.test';

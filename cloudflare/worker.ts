@@ -26,11 +26,19 @@ import {
   githubLinkProvider,
   githubProvider,
 } from '../src/server/index.js';
-import { CloudflareStorage } from './storage.js';
-import { OwnerAuth } from './auth.js';
-import { registry, sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
-import { allow, client, limits, prune } from './limits.js';
-import { own } from './routes.js';
+import { cloudflareStore } from './storage.js';
+import { recordStorage, type Store } from '../src/instance/store.js';
+import { OwnerAuth } from '../src/instance/auth.js';
+import {
+  registry,
+  sessionCookie,
+  Sites,
+  type Listing,
+  type Site,
+  peek,
+} from '../src/instance/sites.js';
+import { allow, client, limits, prune } from '../src/instance/limits.js';
+import { own } from '../src/instance/routes.js';
 import type { LocalAccount, LocalKind } from '../src/core/index.js';
 
 export interface Env {
@@ -318,6 +326,8 @@ export default {
 
 export class VerilyStore {
   private readonly app;
+  /** Everything this instance keeps, on the Durable Object's storage. */
+  private readonly store: Store;
   private readonly auth: OwnerAuth;
   private readonly sites: Sites;
   private readonly local: LocalAccount;
@@ -331,10 +341,11 @@ export class VerilyStore {
     if (origin.protocol !== 'https:' || origin.origin !== env.PUBLIC_ORIGIN)
       throw new Error('PUBLIC_ORIGIN must be an HTTPS origin without a trailing slash');
 
-    this.auth = new OwnerAuth(ctx.storage, env.OWNER_KEY);
+    this.store = cloudflareStore(ctx.storage);
+    this.auth = new OwnerAuth(this.store, env.OWNER_KEY);
 
     this.sites = new Sites(
-      ctx.storage,
+      this.store,
       registry(env.SITES, env as unknown as Record<string, unknown>),
     );
 
@@ -350,7 +361,7 @@ export class VerilyStore {
     };
 
     this.app = createVerily({
-      storage: new CloudflareStorage(ctx.storage),
+      storage: recordStorage(this.store),
       // Two ways of showing one GitHub account. Whichever is used first is the record's
       // main method, and the other is listed beneath it once used. Discord, YouTube and
       // email are offered only when their secrets are set.
@@ -450,7 +461,7 @@ export class VerilyStore {
     // this colo.
     await this.app.service.recheck(10);
     await this.auth.prune();
-    await prune(this.ctx.storage);
+    await prune(this.store);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -527,7 +538,7 @@ export class VerilyStore {
         String((await fields(request)).token ?? ''),
         request.headers.get('origin'),
         (local) => this.app.service.validateLocal(local),
-        (site) => allow(this.ctx.storage, [{ key: `site/${site.id}`, limit: limits.site }]),
+        (site) => allow(this.store, [{ key: `site/${site.id}`, limit: limits.site }]),
       );
 
       return shared(
@@ -688,7 +699,9 @@ export class VerilyStore {
     // Counted against the sender's address, as a refused read is: a request turned away
     // here never reaches the counting a served one gets, and each costs a lookup.
     const unavailable = async () =>
-      (await allow(this.ctx.storage, [{ key: client(request), limit: limits.client }]))
+      (await allow(this.store, [
+        { key: client(request.headers.get('cf-connecting-ip')), limit: limits.client },
+      ]))
         ? html('Unavailable', '', 404)
         : html('Too many requests', '<p>Try again later.</p>', 429);
 
@@ -792,10 +805,10 @@ export class VerilyStore {
     );
 
     if (
-      !(await allow(this.ctx.storage, [
+      !(await allow(this.store, [
         asked
           ? { key: `read/${asked.site.id}`, limit: limits.read }
-          : { key: client(request), limit: limits.client },
+          : { key: client(request.headers.get('cf-connecting-ip')), limit: limits.client },
       ]))
     )
       return html('Too many requests', '<p>Try again later.</p>', 429);
@@ -817,13 +830,13 @@ export class VerilyStore {
 
   /** This installation's own signing key, made the first time a record is signed. */
   private async signingKey(): Promise<string> {
-    const kept = await this.ctx.storage.get<string>('signing/pgp');
+    const kept = await this.store.get<string>('signing/pgp');
 
     if (kept) return kept;
 
     const made = await generateSigningKey(new URL(this.env.PUBLIC_ORIGIN).host);
 
-    await this.ctx.storage.put('signing/pgp', made);
+    await this.store.put('signing/pgp', made);
 
     return made;
   }
@@ -848,7 +861,7 @@ export class VerilyStore {
       ? { key: `session/${found.key.slice('site/session/'.length)}`, limit: limits.session }
       : owner
         ? { key: `session/${owner}`, limit: limits.session }
-        : { key: client(request), limit: limits.client };
+        : { key: client(request.headers.get('cf-connecting-ip')), limit: limits.client };
 
     // A handoff is charged to the site it goes to, whatever session this browser holds.
     // Anything else counts against the site whose session is still in use.
@@ -863,7 +876,7 @@ export class VerilyStore {
 
     const site = named && this.sites.sites.has(named) ? named : undefined;
 
-    return allow(this.ctx.storage, [
+    return allow(this.store, [
       holder,
       ...(site ? [{ key: `site/${site}`, limit: limits.site }] : []),
     ]);

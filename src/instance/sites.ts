@@ -1,13 +1,13 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { DurableObjectStorage } from '@cloudflare/workers-types';
 import {
   expired,
   type FlowResult,
   type LocalAccount,
   type LocalKind,
   type Visibility,
-} from '../src/core/index.js';
-import { hash, secret } from '../src/server/service.js';
+} from '../core/index.js';
+import type { Store } from './store.js';
+import { hash, secret } from '../server/service.js';
 
 /** How long a handoff may take, from `/handoff/request` to `/handoff/accept`, and how far ahead a token may run. */
 export const handoffMs = 5 * 60000;
@@ -261,7 +261,7 @@ function subject(
  */
 export class Sites {
   constructor(
-    private readonly storage: DurableObjectStorage,
+    private readonly storage: Store,
     readonly sites: Map<string, Site>,
   ) {}
 
