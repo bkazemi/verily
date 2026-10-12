@@ -3,6 +3,10 @@
 # version is built into the bundle and named in the README's CDN URLs, so a deploy or a
 # publish ahead of the bump ships the old number.
 #
+# CHANGELOG.md needs a section for the new version before a release starts. The release
+# tags the bump commit as v<version> and pushes the commit and the tag last, once the
+# deploy and the publish have worked.
+#
 #   make release                 the next patch version
 #   make release minor           the next minor version, or major for the next major
 #   make release VERSION=0.1.0   a version you name
@@ -27,17 +31,22 @@ VERSION ?= $(shell node -p "const [a, b, c] = '$(CURRENT)'.split('.').map(Number
 
 # The steps depend on running in the order they are listed.
 .NOTPARALLEL:
-.PHONY: release clean-tree bump verify commit deploy publish major minor patch
+.PHONY: release clean-tree changelog bump verify commit tag deploy publish push major minor patch
 
 major minor patch:
 	@:
 
-release: clean-tree bump verify commit deploy publish
+release: clean-tree changelog bump verify commit tag deploy publish push
 
 # A bump commit holds the version and nothing else, so everything else is committed first.
 clean-tree:
 	@test -z "$$(git status --porcelain --untracked-files=no)" || \
 		{ echo 'Commit your work first: the tree has uncommitted changes.' >&2; exit 1; }
+
+# The changelog is written by hand, so the release only checks the section is there.
+changelog:
+	@grep -q '^## \[$(VERSION)\]' CHANGELOG.md || \
+		{ echo 'Add a section for $(VERSION) to CHANGELOG.md and commit it first.' >&2; exit 1; }
 
 bump:
 	npm version $(VERSION) --no-git-tag-version
@@ -54,8 +63,15 @@ verify:
 commit:
 	git commit -m "chore: bump version to $$(node -p "require('./package.json').version")" -- $(VERSION_FILES)
 
+# Run after the bump, so the version is read from package.json and not worked out again.
+tag:
+	git tag -a "v$$(node -p "require('./package.json').version")" -m "v$$(node -p "require('./package.json').version")"
+
 deploy:
 	npm run cloudflare:deploy
 
 publish:
 	npm publish
+
+push:
+	git push origin HEAD "v$$(node -p "require('./package.json').version")"
