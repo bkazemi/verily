@@ -395,9 +395,14 @@ test('the evidence page names how each side was established, without ranking the
   // No artifact exists for oauth, so nothing invites the reader to open one.
   assert.ok(!body.includes('View the proof'));
 
+  // No creation date on the record, so no "Joined" line.
+  assert.ok(!body.includes('Joined'));
+
   // An artifact url reaches an href only after it is confirmed http(s).
   await f.app.service.options.storage.transaction(async (tx) => {
     const stored = (await tx.get('connections', id))!;
+
+    stored.external.createdAt = Date.UTC(2014, 2, 2, 10, 20, 30);
 
     stored.attestations = {
       local: { by: 'backend', method: 'declared', confirmedAt: 1 },
@@ -417,6 +422,8 @@ test('the evidence page names how each side was established, without ranking the
   const hostile = await (await f.request(`/connections/${id}`)).text();
 
   assert.match(hostile, /Published a proof on GitHub/);
+  // The date is shown to the day, on the name's line and outside its link.
+  assert.match(hostile, /<\/a><span class="since">Joined 2014-03-02<\/span><\/p>/);
   assert.ok(!hostile.includes('javascript:'));
   assert.ok(!hostile.includes('View the proof'));
 });

@@ -120,6 +120,47 @@ test('a second method on the same account joins the record beneath the first', a
   assert.equal(evidence.external.id, '42');
 });
 
+test('a record keeps when its account was made, whichever method shows the account next', async () => {
+  const f = fixture();
+  const created = 500000;
+  const named = { id: '42', handle: 'known-alice', profileUrl: 'https://github.com/known-alice' };
+
+  // A link-back does not learn the creation date.
+  const { id } = await f.linkBack();
+
+  assert.equal((await f.service.read(id!, alice)).external.createdAt, undefined);
+
+  // A sign-in does, and adds it to the existing record.
+  f.oauth.authenticate = async () => ({ ...named, createdAt: created });
+  assert.equal(await f.signIn(), id);
+  assert.equal((await f.service.read(id!, alice)).external.createdAt, created);
+
+  // Renewing by link-back replaces the account details but keeps the date.
+  f.advance(10);
+  await f.linkBack('renew', id);
+
+  const evidence = await f.service.read(id!, alice);
+
+  assert.equal(evidence.external.id, 'https://github.com/Known-Alice');
+  assert.equal(evidence.external.createdAt, created);
+});
+
+test('an account said to be made after it was shown is not recorded', async () => {
+  for (const createdAt of [1000000 + 86400000, NaN, '2014' as unknown as number]) {
+    const f = fixture();
+
+    f.oauth.authenticate = async () => ({
+      id: '42',
+      handle: 'known-alice',
+      profileUrl: 'https://github.com/known-alice',
+      createdAt,
+    });
+
+    await assert.rejects(f.signIn());
+    assert.equal((await f.service.mine(alice)).length, 0);
+  }
+});
+
 test('a flow that joins a record is recorded without an approval', async () => {
   const f = fixture();
   const id = await f.signIn();

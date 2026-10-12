@@ -1045,7 +1045,11 @@ export class VerilyService {
       !external.handle ||
       typeof external.profileUrl !== 'string' ||
       // A mailbox has no page to point at, so its own address stands in for one.
-      new URL(external.profileUrl).protocol !== (external.kind === 'mailbox' ? 'mailto:' : 'https:')
+      new URL(external.profileUrl).protocol !==
+        (external.kind === 'mailbox' ? 'mailto:' : 'https:') ||
+      // Reject a creation date in the future, allowing five minutes of clock skew.
+      (external.createdAt !== undefined &&
+        !(Number.isFinite(external.createdAt) && external.createdAt <= this.now() + 300000))
     )
       throw new Unavailable();
 
@@ -1523,6 +1527,10 @@ export class VerilyService {
       { by: 'provider', method: 'oauth', confirmedAt: connection.authenticatedAt },
     ];
 
+    // Keep a creation date the record already has when this method did not report one.
+    const createdAt = flow.external!.createdAt ?? connection.external.createdAt;
+    const created = createdAt === undefined ? {} : { createdAt };
+
     connection.local = flow.local!;
     connection.approvedAt = this.now();
     connection.expiresAt = this.now() + (this.options.validityMs ?? 30 * 86400000);
@@ -1534,10 +1542,12 @@ export class VerilyService {
       // The account is taken as this method just named it. A recheck asks the same method
       // about the new proof and compares ids exactly, and an address read with different
       // case names the same profile under a different id.
-      connection.external = flow.external!;
+      connection.external = { ...flow.external!, ...created };
 
       connection.attestations = { local: this.declared(flow), external: [attestation, ...rest] };
     } else {
+      connection.external = { ...connection.external, ...created };
+
       // A proof that named the subject's old address proves nothing about its new one,
       // and rereading it would go on confirming a link to where the subject used to be.
       const others = rest.filter((a) => this.names(connection, a, flow.local!));

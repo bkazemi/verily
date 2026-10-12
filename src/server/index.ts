@@ -5,6 +5,7 @@ import {
   externalIdGroups,
   externalLink,
   externalName,
+  externalSince,
   isArtifactProvider,
   isCodeProvider,
   isRedirectProvider,
@@ -19,6 +20,7 @@ import {
   type Attestations,
   type CodeProvider,
   type Evidence,
+  type ExternalAccount,
   type Flow,
   type FlowResult,
   type Inline,
@@ -218,11 +220,38 @@ function card(
   reference?: string | string[],
   ...extra: string[]
 ) {
+  return side(heading, name, url, reference, undefined, extra);
+}
+
+/**
+ * The card for an external account: its name, link and id, with the "Joined <date>" text
+ * on the name's line when the creation date is known.
+ */
+function externalCard(heading: string, external: ExternalAccount, ...extra: string[]) {
+  return side(
+    heading,
+    externalName(external),
+    externalLink(external),
+    // A mailbox's address or a domain is its name already, so there is no second identifier.
+    externalIdGroups(external) ?? externalId(external),
+    externalSince(external, (time) => new Date(time).toISOString().slice(0, 10)),
+    extra,
+  );
+}
+
+function side(
+  heading: string,
+  name: string,
+  url: string | undefined,
+  reference: string | string[] | undefined,
+  since: string | undefined,
+  extra: string[],
+) {
   const profile = url && safeUrl(url);
 
   return `<div class="side"><p class="who">${escape(heading)}</p><p class="name">${
     profile ? `<a href="${escape(profile)}" rel="noreferrer">${escape(name)}</a>` : escape(name)
-  }</p>${
+  }${since ? `<span class="since">${escape(since)}</span>` : ''}</p>${
     typeof reference === 'string'
       ? `<p class="reference">${escape(reference)}</p>`
       : reference
@@ -518,14 +547,7 @@ function evidencePage(
       undefined,
       attestationNote(e.attestations.local, names),
     ) +
-      card(
-        names.provider,
-        externalName(e.external),
-        externalLink(e.external),
-        // A mailbox's address or a domain is its name already, so there is no second identifier.
-        externalIdGroups(e.external) ?? externalId(e.external),
-        externalNotes(e.attestations, names),
-      ) +
+      externalCard(names.provider, e.external, externalNotes(e.attestations, names)) +
       times(
         e.status === 'retired'
           ? [
@@ -583,11 +605,9 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
   const retired = e.status === 'retired';
   const record = escape(safeUrl(e.evidenceUrl));
 
-  return card(
+  return externalCard(
     e.providerName,
-    externalName(e.external),
-    externalLink(e.external),
-    externalIdGroups(e.external) ?? externalId(e.external),
+    e.external,
     `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? `<a class="signed-mark" href="${record}#signed">signed</a>` : ''}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
     times(
@@ -692,13 +712,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
         undefined,
         attestationNote(d.attestations.local, names),
       ) +
-      card(
-        names.provider,
-        externalName(d.external),
-        externalLink(d.external),
-        externalIdGroups(d.external) ?? externalId(d.external),
-        externalNotes(d.attestations, names),
-      ) +
+      externalCard(names.provider, d.external, externalNotes(d.attestations, names)) +
       times(
         retired
           ? [
@@ -1255,12 +1269,7 @@ export function createVerily(options: ServerOptions) {
                     : 'Confirm connection',
               `
             ${card(subject(flow.local!).heading, subject(flow.local!).value, flow.local!.profileUrl)}
-            ${card(
-              provider.name,
-              externalName(flow.external!),
-              externalLink(flow.external!),
-              externalIdGroups(flow.external!) ?? externalId(flow.external!),
-            )}
+            ${externalCard(provider.name, flow.external!)}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             ${found ? `<p>${escape(found)}</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>

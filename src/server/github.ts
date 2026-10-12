@@ -71,10 +71,14 @@ export function githubProvider(options: {
       )
         throw new Error('Invalid provider identity');
 
+      // Optional: a missing or unparseable date is left off and the sign-in still succeeds.
+      const createdAt = typeof user.created_at === 'string' ? Date.parse(user.created_at) : NaN;
+
       return {
         id: String(user.id),
         handle: user.login,
         profileUrl: `https://github.com/${user.login}`,
+        ...(Number.isFinite(createdAt) ? { createdAt } : {}),
       };
     },
   };

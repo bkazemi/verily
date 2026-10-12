@@ -50,6 +50,12 @@ export interface ExternalAccount {
   handle: string;
   /** Where a reader goes to see the subject. For a mailbox, its `mailto:` address. */
   profileUrl: string;
+  /**
+   * When the account was created, in milliseconds, as reported by the provider. It lets a
+   * reader tell an old account from one opened just to be linked. Only sign-in providers
+   * set it. Once a record has it, later proofs by other methods keep it.
+   */
+  createdAt?: number;
 }
 
 /**
@@ -770,6 +776,19 @@ export function externalId(external: ExternalAccount): string | undefined {
  */
 export function externalIdGroups(external: ExternalAccount): string[] | undefined {
   return external.kind === 'key' ? (external.id.match(/.{1,4}/g) ?? undefined) : undefined;
+}
+
+/**
+ * The text for an account's creation date, such as "Joined 2014-03-02", or undefined if
+ * the date is unknown. `day` formats the date, to the day.
+ */
+export function externalSince(
+  external: ExternalAccount,
+  day: (time: number) => string,
+): string | undefined {
+  return typeof external.createdAt === 'number' && Number.isFinite(external.createdAt)
+    ? `Joined ${day(external.createdAt)}`
+    : undefined;
 }
 
 /**

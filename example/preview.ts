@@ -19,19 +19,44 @@ const extra: Record<
     provider: string;
     providerName: string;
     handle: string;
+    /** The day the account was created, which a sign-in reports. */
+    joined: string;
     /** How the holder lists the account, or that they retired it. */
     mark?: 'preferred' | 'unused';
     retired?: true;
   }
 > = {
-  discord: { provider: 'discord', providerName: 'Discord', handle: 'joe' },
-  youtube: { provider: 'youtube', providerName: 'YouTube', handle: 'joemarshall' },
-  work: { provider: 'github', providerName: 'GitHub', handle: 'joe-at-work' },
+  discord: { provider: 'discord', providerName: 'Discord', handle: 'joe', joined: '2016-05-13' },
+  youtube: {
+    provider: 'youtube',
+    providerName: 'YouTube',
+    handle: 'joemarshall',
+    joined: '2011-09-02',
+  },
+  work: { provider: 'github', providerName: 'GitHub', handle: 'joe-at-work', joined: '2021-02-17' },
   // The last connected and the one its holder leads with, an account still held and no
   // longer used, and one that is finished and kept as history.
-  preferred: { provider: 'github', providerName: 'GitHub', handle: 'joe-main', mark: 'preferred' },
-  unused: { provider: 'discord', providerName: 'Discord', handle: 'joe-old', mark: 'unused' },
-  retired: { provider: 'github', providerName: 'GitHub', handle: 'joe-2019', retired: true },
+  preferred: {
+    provider: 'github',
+    providerName: 'GitHub',
+    handle: 'joe-main',
+    joined: '2012-03-08',
+    mark: 'preferred',
+  },
+  unused: {
+    provider: 'discord',
+    providerName: 'Discord',
+    handle: 'joe-old',
+    joined: '2015-11-21',
+    mark: 'unused',
+  },
+  retired: {
+    provider: 'github',
+    providerName: 'GitHub',
+    handle: 'joe-2019',
+    joined: '2019-01-04',
+    retired: true,
+  },
 };
 
 const server = createServer((request, response) => {
@@ -136,8 +161,21 @@ const server = createServer((request, response) => {
                   profileUrl: `${origin}/demo`,
                 }
               : extra[id]
-                ? { id: `demo-${id}`, handle: extra[id].handle, profileUrl: `${origin}/demo` }
-                : { id: 'demo-account', handle: 'Joe', profileUrl: `${origin}/demo` },
+                ? {
+                    id: `demo-${id}`,
+                    handle: extra[id].handle,
+                    profileUrl: `${origin}/demo`,
+                    createdAt: Date.parse(extra[id].joined),
+                  }
+                : {
+                    id: 'demo-account',
+                    handle: 'Joe',
+                    profileUrl: `${origin}/demo`,
+                    // Only the signed-in records have a date. The gist ones learn none.
+                    ...(['current', 'unconfirmed'].includes(id)
+                      ? {}
+                      : { createdAt: Date.parse('2012-03-08') }),
+                  },
       provider:
         extra[id]?.provider ??
         { signed: 'openpgp', mailed: 'email', domain: 'domain' }[id] ??

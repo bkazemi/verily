@@ -29,7 +29,18 @@ test('YouTube adapter sends PKCE, reads the chosen channel and revokes the token
   const calls: { url: string; init?: RequestInit }[] = [];
 
   const youtube = provider(
-    { items: [{ id: channelId, snippet: { title: 'Alice Trades', customUrl: '@alicetrades' } }] },
+    {
+      items: [
+        {
+          id: channelId,
+          snippet: {
+            title: 'Alice Trades',
+            customUrl: '@alicetrades',
+            publishedAt: '2011-05-06T07:08:09Z',
+          },
+        },
+      ],
+    },
     calls,
   );
 
@@ -62,6 +73,8 @@ test('YouTube adapter sends PKCE, reads the chosen channel and revokes the token
     id: channelId,
     handle: 'alicetrades',
     profileUrl: `https://www.youtube.com/channel/${channelId}`,
+    // The channel's creation date.
+    createdAt: Date.UTC(2011, 4, 6, 7, 8, 9),
   });
 
   assert.equal((calls[0]!.init!.body as URLSearchParams).get('code_verifier'), 'verifier');

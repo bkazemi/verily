@@ -79,6 +79,9 @@ export function discordProvider(options: {
         id: user.id,
         handle: user.username,
         profileUrl: `https://discord.com/users/${user.id}`,
+        // A Discord id encodes its creation time: the bits above the low 22 are
+        // milliseconds since 2015-01-01 UTC.
+        createdAt: Number(BigInt(user.id) >> 22n) + 1420070400000,
       };
     },
   };

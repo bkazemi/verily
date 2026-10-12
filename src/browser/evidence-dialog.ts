@@ -4,12 +4,14 @@ import {
   externalIdGroups,
   externalLink,
   externalName,
+  externalSince,
   lastProved,
   localSide,
   proofTitle,
   statusLabel,
   type Attestation,
   type Evidence,
+  type ExternalAccount,
 } from '../core/index.js';
 import { markStyles, verificationMark } from './mark.js';
 import { providerMark } from './provider-mark.js';
@@ -57,7 +59,7 @@ export const styles = `
   .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
-  /* What is said of a signature hangs off the verifier, so it is set a size under that line. */
+  /* The "signed" pill after the verifier's name, one size smaller than the line it sits on. */
   .summary .signed { display: inline-block; margin-left: 5px; padding: 0 6px; border: 1px solid #cfdcd3; border-radius: 999px; font-size: 10px; font-weight: 550; line-height: 1.3; text-decoration: none; vertical-align: 1px; }
   .summary a.signed:hover { background: #f2f5f1; }
   .summary .signed.bad { border-color: #b3261e; color: #b3261e; font-weight: 650; cursor: help; }
@@ -78,7 +80,13 @@ export const styles = `
   .listing.preferred { border-color: #245f43; color: #245f43; }
   /* Quiet, as its pill is: the surface and the name step back, and the controls do not. */
   .account.retired { background: #f6f8f5; }
-  .account.retired > a, .account.retired > strong { color: #6b786f; }
+  .account.retired > a, .account.retired > strong, .account.retired > .named > a, .account.retired > .named > strong { color: #6b786f; }
+  /* The name, then a dot and the account's creation date. The date wraps under a long name. */
+  /* Clipped 4px left of the text, which hides the dot when the date wraps to a new line. */
+  .named { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 14px; margin-left: -4px; padding-left: 4px; overflow-x: clip; }
+  .since { position: relative; white-space: nowrap; }
+  /* The dot sits in the gap before the date. */
+  .since::before { content: "·"; position: absolute; left: -7px; transform: translateX(-50%); }
   .account.retired .mark { opacity: .45; }
   .group { margin: 20px 0 0; color: #6b786f; font-size: 11px; font-weight: 550; }
   summary.group { display: flex; align-items: center; gap: 4px; width: fit-content; border-radius: 4px; list-style: none; cursor: pointer; }
@@ -298,6 +306,36 @@ export function accountCard(
   url?: string,
   ...extra: HTMLElement[]
 ) {
+  return side(heading, name, reference, url, undefined, extra);
+}
+
+/**
+ * The card for an external account: its name, link and id, with the "Joined <date>" text
+ * on the name's line when the creation date is known.
+ */
+export function namedCard(heading: Node[], external: ExternalAccount, ...extra: HTMLElement[]) {
+  return side(
+    heading,
+    externalName(external),
+    // A mailbox's address or a domain is its name already, so there is no second identifier.
+    externalIdGroups(external) ?? externalId(external),
+    externalLink(external),
+    // In UTC, so the day matches the one the verifier's own pages print.
+    externalSince(external, (time) =>
+      new Date(time).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' }),
+    ),
+    extra,
+  );
+}
+
+function side(
+  heading: Node[],
+  name: string,
+  reference: string | string[] | undefined,
+  url: string | undefined,
+  since: string | undefined,
+  extra: HTMLElement[],
+) {
   const card = node('section', '', 'account');
   const title = node('h3');
   const value = node(url ? 'a' : 'strong', name);
@@ -306,7 +344,13 @@ export function accountCard(
 
   if (value instanceof HTMLAnchorElement) outward(value, url!);
 
-  card.append(title, value);
+  if (since) {
+    // The name and the date share a line, and the date wraps under a long name.
+    const named = node('div', '', 'named');
+
+    named.append(value, node('span', since, 'muted since'));
+    card.append(title, named);
+  } else card.append(title, value);
 
   if (typeof reference === 'string') card.append(node('div', reference, 'muted reference'));
   else if (reference) {
@@ -601,14 +645,15 @@ function signatures(evidence: Account): Promise<Signature[]> {
 }
 
 /**
- * Says a record is signed, in a pill after its verifier. The line it hangs off reads the
- * same on every card, signed or not. The pill opens the verifier's own page for the record
- * at what it says of the signature, where the signed record is to be had: nothing is
- * downloaded from the card. The signed record is checked here against the verifier's keys.
- * One that checks out says only that it is signed, one not yet checked carries a warning
- * sign, and one that fails is a warning in the pill's place, the one thing on a card that
- * is. `warned` is told each time that warning is drawn, on the first check or on a later
- * one, so whatever folds the card away opens.
+ * The "signed" pill shown after the verifier's name. It links to the signature section of
+ * the verifier's evidence page, where the signed record can be downloaded.
+ *
+ * The signature is checked here against the verifier's keys:
+ * - valid: the pill says "signed"
+ * - not yet checked: the pill carries a warning sign
+ * - invalid: a warning replaces the pill
+ *
+ * `warned` is called every time the invalid warning is drawn, so a folded card can open.
  */
 function signedMark(evidence: Account, later: Later, warned: () => void) {
   const mark = node('span');
@@ -824,14 +869,11 @@ function externalCard(
 
   const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
 
-  const card = accountCard(
+  const card = namedCard(
     // The mark and the name, or just the name. A mark that falls back to writing the name
     // would print it twice here, since this heading writes it either way.
     logo ? [logo, document.createTextNode(provider)] : [document.createTextNode(provider)],
-    externalName(evidence.external),
-    // A mailbox's address or a domain is its name already, so there is no second identifier.
-    externalIdGroups(evidence.external) ?? externalId(evidence.external),
-    externalLink(evidence.external),
+    evidence.external,
     // Status first, then how it was shown, then when. The proof explains the state
     // above it, so it cannot sit before that state has been given.
     summary,

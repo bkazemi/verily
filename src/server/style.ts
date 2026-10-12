@@ -179,7 +179,14 @@ main:has(.accounts) { max-width: 54rem; }
   letter-spacing: .02em;
 }
 
-.name { margin: 0; font-size: 1.0625rem; font-weight: 620; letter-spacing: -.01em; }
+/* Clipped 4px left of the text, which hides the date's dot when the date wraps to a new line. */
+.name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1rem; margin: 0 0 0 -4px; padding-left: 4px; overflow-x: clip; font-size: 1.0625rem; font-weight: 620; letter-spacing: -.01em; }
+
+/* The account's creation date, after the name and a dot. It wraps under a long name. */
+.name .since { position: relative; color: var(--muted); font-size: .8125rem; font-weight: 400; letter-spacing: 0; white-space: nowrap; }
+
+/* The dot sits in the gap before the date. */
+.name .since::before { content: "·"; position: absolute; left: -.5rem; transform: translateX(-50%); }
 
 /* The name is the card's subject before it is a link, so the rule is drawn on hover. */
 .name a { text-decoration: none; }
@@ -192,7 +199,7 @@ main:has(.accounts) { max-width: 54rem; }
 .fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
 .fingerprint span { display: inline-block; margin-right: .5ch; }
 .how.additional { padding-left: .75rem; }
-/* That a record is signed hangs off its verifier, so it is set a size under that line. */
+/* The "signed" pill after the verifier's name, one size smaller than the line it sits on. */
 .how .signed-mark { display: inline-block; margin-left: .3125rem; padding: 0 .375rem; border: 1px solid var(--line); border-radius: 999px; font-size: .625rem; font-weight: 550; line-height: 1.3; text-decoration: none; vertical-align: .0625rem; }
 
 .fine { color: var(--muted); font-size: .8125rem; line-height: 1.55; margin-bottom: .625rem; }

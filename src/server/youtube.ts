@@ -103,10 +103,16 @@ export function youtubeProvider(options: {
 
         if (!handle) throw new Error('Invalid provider identity');
 
+        // The channel's creation date, not the Google account's. Optional: a missing or
+        // unparseable date is left off and the sign-in still succeeds.
+        const publishedAt = channel.snippet.publishedAt;
+        const createdAt = typeof publishedAt === 'string' ? Date.parse(publishedAt) : NaN;
+
         return {
           id: channel.id,
           handle,
           profileUrl: `https://www.youtube.com/channel/${channel.id}`,
+          ...(Number.isFinite(createdAt) ? { createdAt } : {}),
         };
       } finally {
         // The scope reads the whole YouTube account for an hour. Nothing more is needed

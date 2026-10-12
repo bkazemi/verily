@@ -231,6 +231,8 @@ import {
 
 All methods except the sign-ins and the mailed code let the user publish the proof in their own time and come back. A proof that does not check out can be put right and handed back on the same step, up to five times, so a mistyped address never means publishing or signing again. Gists, link-backs, DNS records and files can be taken down later, so Verily re-reads them on a schedule. A PGP signature is kept by Verily and published at `<baseUrl>/connections/<id>/proof`.
 
+**How old an account is.** A link shows who controls an account, not how long it has existed. Signing in with GitHub, Discord or YouTube also reads when the account was made: GitHub's `created_at`, the time inside a Discord id, and a YouTube channel's `publishedAt`. It is kept on the record as `external.createdAt`, in milliseconds, shown as "Joined" beside the account's name on evidence and in the badge's dialog, and covered by a signed record. The other methods read an address or a proof and learn no date, so a record first shown by one of them has none until its holder also signs in. A provider of your own sets it by returning `createdAt` from `authenticate()`.
+
 **Several at once.** List more than one, and `/verify` offers each method as its own button:
 
 ```ts

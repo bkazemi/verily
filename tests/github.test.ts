@@ -12,7 +12,9 @@ test('GitHub adapter sends PKCE and reads identity from authenticated provider A
       calls.push({ url: String(url), init });
 
       return Response.json(
-        calls.length === 1 ? { access_token: 'private-token' } : { id: 42, login: 'alice' },
+        calls.length === 1
+          ? { access_token: 'private-token' }
+          : { id: 42, login: 'alice', created_at: '2014-03-02T10:20:30Z' },
       );
     }) as typeof fetch,
   });
@@ -50,7 +52,12 @@ test('GitHub adapter sends PKCE and reads identity from authenticated provider A
       verifier: 'verifier',
       redirectUri: 'https://site.test/callback',
     }),
-    { id: '42', handle: 'alice', profileUrl: 'https://github.com/alice' },
+    {
+      id: '42',
+      handle: 'alice',
+      profileUrl: 'https://github.com/alice',
+      createdAt: Date.UTC(2014, 2, 2, 10, 20, 30),
+    },
   );
 
   assert.equal((calls[0]!.init!.body as URLSearchParams).get('code_verifier'), 'verifier');
@@ -80,6 +87,30 @@ test('malformed provider identity and token errors fail closed', async () => {
         verifier: 'verifier',
         redirectUri: 'https://site.test/callback',
       }),
+    );
+  }
+});
+
+test('a sign-in that does not say when the account was made is taken without a date', async () => {
+  for (const created_at of [undefined, 42, 'long ago']) {
+    let calls = 0;
+
+    const provider = githubProvider({
+      clientId: 'client',
+      clientSecret: 'secret',
+      fetch: (async () =>
+        Response.json(
+          ++calls === 1 ? { access_token: 'token' } : { id: 42, login: 'alice', created_at },
+        )) as typeof fetch,
+    });
+
+    assert.deepEqual(
+      await provider.authenticate({
+        code: 'code',
+        verifier: 'verifier',
+        redirectUri: 'https://site.test/callback',
+      }),
+      { id: '42', handle: 'alice', profileUrl: 'https://github.com/alice' },
     );
   }
 });

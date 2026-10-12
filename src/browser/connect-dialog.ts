@@ -6,6 +6,7 @@ import {
   closeMark,
   linkMark,
   node,
+  namedCard,
   outward,
   stampLink,
   styles,
@@ -659,13 +660,11 @@ export function openConnectDialog(
   function approve(flow: FlowView) {
     const logo = providerMark(flow.provider.id, flow.provider.method);
 
-    const external = accountCard(
+    const external = namedCard(
       logo
         ? [logo, document.createTextNode(flow.provider.name)]
         : [document.createTextNode(flow.provider.name)],
-      externalName(flow.external!),
-      externalIdGroups(flow.external!) ?? externalId(flow.external!),
-      externalLink(flow.external!),
+      flow.external!,
     );
 
     const parts: Node[] = [subjectCard(flow.local!), linkMark(), external];

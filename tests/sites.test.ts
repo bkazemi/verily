@@ -89,7 +89,11 @@ function instance() {
           return WorkerResponse.json({ access_token: 'provider-secret' });
 
         if (request.url === 'https://api.github.com/user')
-          return WorkerResponse.json({ id: 123, login: 'octocat' });
+          return WorkerResponse.json({
+            id: 123,
+            login: 'octocat',
+            created_at: '2011-01-25T18:44:36Z',
+          });
 
         throw new Error(`Unexpected outbound URL: ${new URL(request.url).origin}`);
       },
@@ -659,6 +663,8 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.match(records, /shirkadeh\.test · public · Verified/);
     assert.match(records, /Partner · (public|unlisted) · /);
     assert.match(records, /\d+ on this instance: \d+ public, \d+ unlisted\./);
+    // The account's creation date follows the record's connected date.
+    assert.match(records, /connected \d{4}-\d\d-\d\d · account joined 2011-01-25</);
 
     // Nobody else does: a site's holder and a stranger are told nothing is there.
     assert.equal((await a.fetch('/records')).status, 404);

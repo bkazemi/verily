@@ -3,6 +3,7 @@ import {
   dialogPath,
   dialogRoute,
   externalName,
+  externalSince,
   lastProved,
   localSide,
   routeOf,
@@ -996,9 +997,12 @@ export class VerilyStore {
         .map((e) => {
           const name = `${escape(e.local.label)} and ${escape(e.providerName)} ${escape(externalName(e.external))}`;
 
+          // Prefixed with "account" below, since the line also has the record's own date.
+          const since = externalSince(e.external, day);
+
           return `<div class="side"><p class="who">${escape(e.siteName)} · ${escape(e.visibility)} · ${escape(statusLabel(e, now))}</p>
       <p class="name">${e.visibility === 'public' ? `<a href="${escape(e.evidenceUrl)}">${name}</a>` : name}</p>
-      <p class="reference">${escape(e.local.reference)} · connected ${escape(day(e.connectedAt))}</p></div>`;
+      <p class="reference">${escape(e.local.reference)} · connected ${escape(day(e.connectedAt))}${since ? ` · account ${escape(since.toLowerCase())}` : ''}</p></div>`;
         })
         .join('')}
       <p><a href="/">Back to owner settings</a></p>`,

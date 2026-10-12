@@ -58,6 +58,8 @@ test('Discord adapter sends PKCE and reads identity from authenticated provider 
       id: '80351110224678912',
       handle: 'alice',
       profileUrl: 'https://discord.com/users/80351110224678912',
+      // Decoded from the id.
+      createdAt: Date.parse('2015-08-10T17:26:37.529Z'),
     },
   );
 

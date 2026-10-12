@@ -843,6 +843,9 @@ function validEvidence(value: unknown): value is Evidence {
       (k) => typeof (value.external as Record<string, unknown>)[k] === 'string',
     ) &&
     (value.local.profileUrl === undefined || typeof value.local.profileUrl === 'string') &&
+    (value.external.createdAt === undefined ||
+      (typeof value.external.createdAt === 'number' &&
+        Number.isFinite(value.external.createdAt))) &&
     // A signed record lives beside the record it was made from and nowhere else, since the
     // keys it is checked against are read from where the record lives.
     (value.signedUrl === undefined || value.signedUrl === `${value.evidenceUrl}?format=signed`) &&
