@@ -9,7 +9,7 @@ import {
   wellKnownProvider,
 } from '../src/server/domain.js';
 import { VerilyService } from '../src/server/service.js';
-import { attestationLabel, externalName } from '../src/core/index.js';
+import { Absent, attestationLabel, externalName } from '../src/core/index.js';
 import { alice, bob, MemoryStorage, written } from './helpers.js';
 
 const expect = 'https://site.test/users/1';
@@ -171,7 +171,9 @@ test('a record that does not name the subject proves nothing', async () => {
   for (const [name, { instance }] of cases)
     await assert.rejects(
       instance.verify({ artifact: lookup, expect }),
-      /No TXT record at _verily\.example\.test/,
+      // The lookup worked, so the record is reported as missing and not as unread.
+      (error: Error) =>
+        error instanceof Absent && /No TXT record at _verily\.example\.test/.test(error.message),
       `accepted ${name}`,
     );
 });
@@ -187,7 +189,7 @@ test('a lookup that could not be made is unread, never absent', async () => {
   for (const [name, { instance }] of cases)
     await assert.rejects(
       instance.verify({ artifact: lookup, expect }),
-      /DNS could not be read/,
+      (error: Error) => !(error instanceof Absent) && /DNS could not be read/.test(error.message),
       `accepted ${name}`,
     );
 

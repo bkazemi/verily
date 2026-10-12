@@ -1,8 +1,9 @@
 import { legacyHookDecode } from '@exodus/bytes/encoding.js';
 import htmlEncodingSniffer from 'html-encoding-sniffer';
-import { MIMEType } from 'node:util';
+import { isDeepStrictEqual, MIMEType } from 'node:util';
 import { html, parse, type DefaultTreeAdapterTypes } from 'parse5';
 import {
+  Absent,
   Refused,
   type ArtifactProvider,
   type ExternalAccount,
@@ -161,6 +162,9 @@ async function backlinked(
   if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400))
     throw new Refused('Page redirects, and a redirect is not followed');
 
+  // The page is gone. Any other failure is a failed read.
+  if (response.status === 404 || response.status === 410) throw new Absent('Page unavailable');
+
   if (!response.ok) throw new Refused('Page unavailable');
 
   // A link relation is a link relation wherever it is declared, and a page with no
@@ -202,9 +206,9 @@ async function backlinked(
   }
 
   // Not finding it in part of a page is not the same as it not being there.
-  throw new Refused(
-    truncated ? 'Page is too large to read' : 'Page has no rel="me" link to this subject',
-  );
+  if (truncated) throw new Refused('Page is too large to read');
+
+  throw new Absent('Page has no rel="me" link to this subject');
 }
 
 /**
@@ -360,8 +364,7 @@ function points(href: string, base: URL, subject: URL): boolean {
     const wanted = subject.searchParams.getAll(key);
     const found = target.searchParams.getAll(key);
 
-    if (found.length !== wanted.length || found.some((value, at) => value !== wanted[at]))
-      return false;
+    if (!isDeepStrictEqual(found, wanted)) return false;
   }
 
   return true;

@@ -111,6 +111,13 @@ export interface Attestation {
    * is reconfirmed like any other.
    */
   confirmedAt: number;
+  /** When `recheck()` last tried to read the proof, whether or not the read worked. */
+  readAt?: number;
+  /**
+   * When a recheck first read the proof and found it missing. The proof does not count
+   * while this is set. Cleared by the next read that finds it.
+   */
+  absentAt?: number;
 }
 
 /** Each side of a link is attested separately, by different parties under different methods. */
@@ -154,6 +161,41 @@ export interface Connection {
    * last proof: never renewed by another method, never reread, never verified.
    */
   retiredAt?: number;
+  /** The state last delivered to `onChange`. Absent until the first delivery. */
+  reported?: Reported;
+  /**
+   * When the last delivery to `onChange` started, while it has not been confirmed. Set when
+   * a delivery starts and cleared when it succeeds, so a record with it set is delivered
+   * again even if its state matches `reported`.
+   */
+  reportTriedAt?: number;
+  /** The revision given to the last delivery. Each delivery of the record adds one. */
+  reportRevision?: number;
+}
+
+/** The parts of a record that `onChange` reports a change in. */
+export interface Reported {
+  status: Status;
+  visibility: Visibility;
+  expiresAt: number;
+  mark?: Mark;
+}
+
+/** One record whose status, visibility, expiry or mark changed, as `onChange` receives it. */
+export interface Change {
+  /** The record as it stands now. */
+  evidence: Evidence;
+  /** The subject the record belongs to, with its private id. */
+  local: LocalAccount;
+  /** What the last confirmed delivery reported. Absent until one is confirmed. */
+  previous?: Reported;
+  /**
+   * Counts the deliveries of this record, starting at 1. A higher revision always carries
+   * a state read later, across processes too. Keep the last one applied for each record
+   * and ignore a change whose revision is not higher: a slow or repeated delivery can
+   * arrive after a newer one.
+   */
+  revision: number;
 }
 
 export interface Flow {
@@ -486,6 +528,14 @@ export interface CodeProvider {
 export class Refused extends Error {}
 
 /**
+ * A proof that was read and is not there: the page, file, gist or DNS answer came back and
+ * the expected value was missing. Thrown by `verify` or `prove`. On a recheck it makes the
+ * proof unconfirmed at once. Any other error means the read itself failed, and the proof
+ * keeps counting until `freshnessMs` runs out.
+ */
+export class Absent extends Refused {}
+
+/**
  * A piece of what the holder is told: a paragraph, a paragraph with links in it, or
  * something they run or publish as is.
  */
@@ -604,6 +654,9 @@ export function status(connection: Connection, now: number, freshness = freshnes
  * reverses the moment it reads again.
  */
 export function fresh(attestation: Attestation, now: number, freshness = freshnessMs): boolean {
+  // Read and found missing, which is not the same as not having been read lately.
+  if (attestation.absentAt !== undefined) return false;
+
   return (
     !attestation.artifactUrl ||
     attestation.hosted === true ||

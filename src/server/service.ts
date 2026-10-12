@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import {
+  Absent,
   expired,
   fresh,
   freshnessMs,
@@ -10,6 +12,7 @@ import {
   Refused,
   status,
   type ArtifactProvider,
+  type Change,
   type CodeProvider,
   type Attestation,
   type Attestations,
@@ -26,6 +29,7 @@ import {
   type Provider,
   type Records,
   type RedirectProvider,
+  type Reported,
   type SignedDocument,
   type SignedEvidence,
   type Signer,
@@ -114,6 +118,18 @@ export interface ServiceOptions {
    * is on the site's domain or a subdomain of it. Unset reads nothing.
    */
   dns?: boolean | DnsOptions;
+  /**
+   * Called when a record's status, visibility, expiry or mark changes, with the record as
+   * it stands now. Changes made by a request are delivered before that request returns.
+   * Expiry and a proof going unconfirmed happen with time alone, so those are delivered by
+   * `recheck()` or `announce()`.
+   *
+   * Delivery is at least once: a call that throws, or takes longer than `recheckTimeoutMs`,
+   * is retried on the next `recheck()` or `announce()`. A call that timed out is not
+   * cancelled and may finish after a newer one, so apply a change only if its `revision`
+   * is higher than the last one applied for that record.
+   */
+  onChange?: (change: Change) => void | Promise<void>;
   now?: () => number;
 }
 
@@ -1408,8 +1424,147 @@ export class VerilyService {
   }
 
   /** Every read of a connection goes through here, so a record in an older shape is upgraded. */
-  private transaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
+  private async transaction<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
+    const written = new Set<string>();
+    const result = await this.options.storage.transaction((tx) => work(upgraded(tx, written)));
+
+    // Report the records this transaction wrote, once it has committed. A failure here is
+    // left for the next announce() and never fails the request that made the change.
+    if (written.size && this.options.onChange) await this.announce([...written]).catch(() => 0);
+
+    return result;
+  }
+
+  /** The parts of a record that `onChange` reports, as they are at `now`. */
+  private reportable(connection: Connection, now: number): Reported {
+    return {
+      status: status(connection, now, this.freshness),
+      visibility: connection.visibility,
+      expiresAt: connection.expiresAt,
+      ...(connection.mark ? { mark: connection.mark } : {}),
+    };
+  }
+
+  /**
+   * Delivers every record whose state differs from the one last reported to `onChange`,
+   * up to `budget` records. `ids` limits it to those records. Returns how many were
+   * delivered. Does nothing without `onChange`.
+   *
+   * Records whose last delivery failed are tried after the others, oldest attempt first,
+   * so a record that keeps failing does not hold up the rest.
+   */
+  async announce(ids?: string[], budget = 50): Promise<number> {
+    if (!this.options.onChange || budget <= 0) return 0;
+
+    const now = this.now();
+
+    const due = await this.unreported(async (tx) => {
+      const records = ids
+        ? await Promise.all(ids.map((id) => tx.get('connections', id)))
+        : await tx.list('connections');
+
+      return records
+        .filter((connection) => connection !== undefined)
+        .filter((c) => this.unsettled(c, now))
+        .sort((x, y) => (x.reportTriedAt ?? 0) - (y.reportTriedAt ?? 0))
+        .slice(0, budget)
+        .map((connection) => connection.id);
+    });
+
+    let delivered = 0;
+
+    for (const id of due) delivered += await this.deliver(id);
+
+    return delivered;
+  }
+
+  /** A storage transaction whose writes are not themselves announced. */
+  private unreported<T>(work: (tx: Transaction) => Promise<T>): Promise<T> {
     return this.options.storage.transaction((tx) => work(upgraded(tx)));
+  }
+
+  /** The last delivery started. Each delivery waits for the one before it. */
+  private delivering: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Whether a record still has something to deliver: its state differs from the one last
+   * reported, or its last delivery started and was never confirmed. An unconfirmed
+   * delivery may have reached the receiver, so it is sent again even if the state has
+   * since gone back to the one reported.
+   */
+  private unsettled(connection: Connection, now: number): boolean {
+    return (
+      connection.reportTriedAt !== undefined ||
+      !isDeepStrictEqual(connection.reported, this.reportable(connection, now))
+    );
+  }
+
+  /**
+   * Delivers one record to `onChange` if it has something to deliver. Returns 1 if the
+   * delivery was confirmed.
+   *
+   * Each delivery reads the record and takes the next revision in one storage
+   * transaction, so a higher revision always carries a later state, whichever process or
+   * callback finishes first. Within this process deliveries also run one at a time.
+   */
+  private deliver(id: string): Promise<number> {
+    const run = this.delivering.then(async () => {
+      const now = this.now();
+
+      // Start the delivery: read the state, take a revision, and mark it unconfirmed.
+      const attempt = await this.unreported(async (tx) => {
+        const connection = await tx.get('connections', id);
+
+        if (!connection || !this.unsettled(connection, now)) return undefined;
+
+        const revision = (connection.reportRevision ?? 0) + 1;
+
+        await tx.put('connections', id, {
+          ...connection,
+          reportRevision: revision,
+          reportTriedAt: now,
+        });
+
+        return { connection, revision, state: this.reportable(connection, now) };
+      });
+
+      if (!attempt) return 0;
+
+      const { connection, revision, state } = attempt;
+
+      try {
+        await this.deadline(
+          Promise.resolve(
+            this.options.onChange!({
+              evidence: this.evidence(connection),
+              local: connection.local,
+              ...(connection.reported ? { previous: connection.reported } : {}),
+              revision,
+            }),
+          ),
+        );
+      } catch {
+        // Left unconfirmed, so the next announce() delivers the record again.
+        return 0;
+      }
+
+      // Confirm it, unless a later delivery of the record has started since.
+      await this.unreported(async (tx) => {
+        const current = await tx.get('connections', id);
+
+        if (!current || current.reportRevision !== revision) return;
+
+        const { reportTriedAt: _tried, ...rest } = current;
+
+        await tx.put('connections', id, { ...rest, reported: state });
+      });
+
+      return 1;
+    });
+
+    this.delivering = run.catch(() => 0);
+
+    return run;
   }
 
   /**
@@ -1931,6 +2086,14 @@ export class VerilyService {
 
     const interval = this.options.recheckMs ?? 86400000;
     const now = this.now();
+    const spent = new Map<string, number>();
+
+    // When a proof was last read, or last tried. One whose last read did not confirm it,
+    // because the read failed or the proof was missing, is tried again four times as soon.
+    const tried = (a: Attestation) => a.readAt ?? a.confirmedAt;
+
+    const wait = (a: Attestation) =>
+      tried(a) > a.confirmedAt ? Math.ceil(interval / 4) : interval;
 
     const due = await this.transaction(async (tx) =>
       (await tx.list('connections'))
@@ -1950,11 +2113,19 @@ export class VerilyService {
             }))
             .filter(
               (item): item is Due =>
-                item.provider !== undefined && item.attestation.confirmedAt + interval <= now,
+                item.provider !== undefined &&
+                tried(item.attestation) + wait(item.attestation) <= now,
             ),
         )
-        .sort((a, b) => a.attestation.confirmedAt - b.attestation.confirmedAt)
-        .slice(0, budget),
+        .sort((a, b) => tried(a.attestation) - tried(b.attestation))
+        // The budget is per provider, so one provider's backlog does not delay the others.
+        .filter((item) => {
+          const used = spent.get(item.provider.id) ?? 0;
+
+          spent.set(item.provider.id, used + 1);
+
+          return used < budget;
+        }),
     );
 
     let confirmed = 0;
@@ -1964,6 +2135,9 @@ export class VerilyService {
     for (const item of due) confirmed += await this.reread(item);
 
     await this.restate(budget);
+
+    // Report records that expired or went unconfirmed since the last run.
+    await this.announce();
 
     return confirmed;
   }
@@ -2075,6 +2249,9 @@ export class VerilyService {
     const main = attestation === connection.attestations!.external[0];
     let withdrawn = false;
     let dnssec = false;
+    // 'absent': the read worked and the proof was not there. 'unread': the read failed.
+    let missed: 'absent' | 'unread' | undefined;
+    const started = this.now();
 
     try {
       if (provider.artifact === 'document')
@@ -2097,10 +2274,10 @@ export class VerilyService {
             ? external.id !== connection.external.id
             : !sameAccount(connection.external, external)
         )
-          return 0;
+          missed = 'absent';
       }
-    } catch {
-      return 0;
+    } catch (error) {
+      missed = error instanceof Absent ? 'absent' : 'unread';
     }
 
     return this.transaction(async (tx) => {
@@ -2121,6 +2298,18 @@ export class VerilyService {
 
       if (held?.method !== method || held.artifactUrl !== artifactUrl) return 0;
 
+      // Drop this answer if something newer than this read has been written since the
+      // read was picked: a renewal that replaced or confirmed the proof, or another
+      // recheck's read that started at or after this one, whatever that read found.
+      const replaced =
+        held.expect !== expect ||
+        (held.confirmedAt !== attestation.confirmedAt && held.confirmedAt >= started);
+
+      const reread =
+        held.readAt !== undefined && held.readAt !== attestation.readAt && held.readAt >= started;
+
+      if (replaced || reread) return 0;
+
       // The holder said this identity is no longer theirs, which is a choice, not decay.
       if (withdrawn) {
         current.revokedAt = this.now();
@@ -2132,7 +2321,21 @@ export class VerilyService {
         return 0;
       }
 
-      held.confirmedAt = this.now();
+      // Times are the moment the read started, so answers can be put in order.
+      held.readAt = started;
+
+      if (missed) {
+        // A failed read leaves the proof counting until freshnessMs runs out. A proof
+        // that was read and is missing stops counting now.
+        if (missed === 'absent') held.absentAt ??= started;
+
+        await tx.put('connections', connection.id, current);
+
+        return 0;
+      }
+
+      held.confirmedAt = started;
+      delete held.absentAt;
 
       // A zone can start or stop being signed, so the flag is as the last read found it.
       if (dnssec) held.dnssec = true;
@@ -2318,10 +2521,15 @@ function sameAccount(a: ExternalAccount, b: ExternalAccount): boolean {
  * Wraps a transaction so records read through it are in the current shape. They are
  * rewritten in that shape the next time they are put.
  */
-function upgraded(tx: Transaction): Transaction {
+function upgraded(tx: Transaction, written?: Set<string>): Transaction {
   return {
     get: async (kind, id) => upgrade(kind, await tx.get(kind, id)),
-    put: (kind, id, value) => tx.put(kind, id, value),
+    put: (kind, id, value) => {
+      // Collects the ids of the connections written, for transaction() to report.
+      if (kind === 'connections') written?.add(id);
+
+      return tx.put(kind, id, value);
+    },
     delete: (kind, id) => tx.delete(kind, id),
     list: async (kind) => (await tx.list(kind)).map((value) => upgrade(kind, value)!),
   };

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { VerilyService, type ServiceOptions } from '../src/server/service.js';
+import { Absent } from '../src/core/index.js';
 
 /** Either shape of provider drives the same service, so the fixture takes both. */
 type FakeProvider =
@@ -653,8 +654,165 @@ test('a reread that names a different account confirms nothing', async () => {
   assert.equal(await f.service.recheck(), 0);
   assert.equal((await f.service.read(f.id)).attestations!.external[0].confirmedAt, 1000000);
 
-  f.advance(4000);
+  // The proof was read and is somebody else's now, so it stops counting on that read.
   assert.equal((await f.service.read(f.id)).status, 'unconfirmed');
+});
+
+test('a proof read and found missing is unconfirmed at once, and verified when it is back', async () => {
+  const f = await proved();
+  const verify = f.provider.verify;
+
+  // The read works and the proof is not there.
+  f.provider.verify = () => {
+    throw new Absent('Line not found');
+  };
+
+  f.advance(1000);
+  assert.equal(await f.service.recheck(), 0);
+  assert.equal((await f.service.read(f.id)).status, 'unconfirmed');
+  assert.deepEqual(await f.service.published(), []);
+
+  // It is read again after a quarter of the usual wait, not on every run.
+  f.provider.verify = verify;
+  assert.equal(await f.service.recheck(), 0);
+
+  f.advance(250);
+  assert.equal(await f.service.recheck(), 1);
+
+  const evidence = await f.service.read(f.id);
+
+  assert.equal(evidence.status, 'verified');
+  assert.equal(evidence.attestations!.external[0].absentAt, undefined);
+});
+
+test('a missing-proof answer from a read that started before a renewal is dropped', async () => {
+  const f = await proved();
+  const verify = f.provider.verify.bind(f.provider);
+
+  // The recheck's read is held open, then answers that the proof is missing.
+  let answer = () => {};
+
+  f.provider.verify = () =>
+    new Promise((_, reject) => {
+      answer = () => reject(new Absent('Line not found'));
+    });
+
+  f.advance(1000);
+  const recheck = f.service.recheck();
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  // The holder renews with the same address while that read is still in flight.
+  f.provider.verify = verify;
+
+  const flow = await f.service.start(alice, f.id, 'renew');
+
+  f.provider.artifacts.set(f.url, flow.expect!);
+
+  if ((await f.service.flow(flow.flowId, flow.binding)).phase === 'pending')
+    await f.service.submit(flow.flowId, flow.binding, f.url);
+
+  await f.service.approve(flow.flowId, flow.binding, alice, 'public');
+
+  answer();
+  await recheck;
+
+  assert.equal((await f.service.read(f.id)).status, 'verified');
+});
+
+test('an older read that finishes after a newer one found the proof missing is dropped', async () => {
+  const f = await proved();
+
+  const account = await f.provider.verify({
+    artifact: f.url,
+    expect: (await f.service.read(f.id)).attestations!.external[0].expect!,
+  });
+
+  // The first read is held open and then succeeds. The second finds the proof missing.
+  let finish = () => {};
+  let reads = 0;
+
+  f.provider.verify = () => {
+    if (++reads > 1) throw new Absent('Line not found');
+
+    return new Promise((resolve) => {
+      finish = () => resolve(account);
+    });
+  };
+
+  f.advance(1000);
+  const older = f.service.recheck();
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(await f.service.recheck(), 0);
+  assert.equal((await f.service.read(f.id)).status, 'unconfirmed');
+
+  finish();
+  assert.equal(await older, 0);
+  assert.equal((await f.service.read(f.id)).status, 'unconfirmed');
+});
+
+test('a proof whose read keeps failing is tried after the ones that have waited longer', async () => {
+  const f = await proved();
+  const verify = f.provider.verify.bind(f.provider);
+
+  f.advance(1000);
+
+  const second = 'https://notes.test/alice/2';
+  const flow = await f.service.start(alice);
+
+  f.provider.artifacts.set(second, flow.expect!);
+  await f.service.submit(flow.flowId, flow.binding, second);
+
+  const other = (await f.service.approve(flow.flowId, flow.binding, alice, 'public'))!;
+
+  // The first proof cannot be read. One proof is read per run.
+  f.provider.verify = (input) => {
+    if (input.artifact === f.url) throw new Error('Unreachable');
+
+    return verify(input);
+  };
+
+  f.advance(1000);
+  assert.equal(await f.service.recheck(1), 0);
+
+  // Both are due again. The one that was just tried goes second.
+  f.advance(300);
+  assert.equal(await f.service.recheck(1), 1);
+  assert.equal((await f.service.read(other)).attestations!.external[0].confirmedAt, 1002300);
+});
+
+test('the recheck budget is per provider', async () => {
+  const notes = fakeArtifactProvider();
+  const pages = { ...fakeArtifactProvider(), id: 'pages', name: 'Pages' };
+
+  const f = fixture(notes, {
+    providers: [notes, pages],
+    validityMs: 1000000,
+    recheckMs: 1000,
+    freshnessMs: 5000,
+  });
+
+  const prove = async (provider: typeof notes, n: number) => {
+    const url = `https://notes.test/alice/${n}`;
+
+    const flow = await f.service.start(alice, undefined, 'connect', {
+      provider: provider.id,
+      method: 'gist',
+    });
+
+    provider.artifacts.set(url, flow.expect!);
+    await f.service.submit(flow.flowId, flow.binding, url);
+    await f.service.approve(flow.flowId, flow.binding, alice, 'public');
+  };
+
+  await prove(notes, 1);
+  await prove(notes, 2);
+  await prove(pages, 3);
+
+  // One read each for the two providers, though three proofs are due.
+  f.advance(1000);
+  assert.equal(await f.service.recheck(1), 2);
 });
 
 test('a provider that never answers does not hold up the run', async () => {

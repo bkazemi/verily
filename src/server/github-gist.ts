@@ -1,4 +1,4 @@
-import { Refused, type ArtifactProvider, type ExternalAccount } from '../core/index.js';
+import { Absent, Refused, type ArtifactProvider, type ExternalAccount } from '../core/index.js';
 
 /**
  * Proves control of a GitHub account by having its holder publish a given line in a public
@@ -41,10 +41,13 @@ export function githubGistProvider(options: { fetch?: typeof fetch } = {}): Arti
 
       const gist: unknown = await response.json();
 
+      // GitHub answers 404 for a gist that was deleted. Any other failure is a failed read.
+      if (response.status === 404) throw new Absent('Gist unavailable');
+
       if (!response.ok || !isRecord(gist)) throw new Refused('Gist unavailable');
 
       // A secret gist proves nothing a reader could check for themselves.
-      if (gist.public !== true) throw new Refused('Gist is not public');
+      if (gist.public !== true) throw new Absent('Gist is not public');
 
       const owner = gist.owner;
 
@@ -57,8 +60,14 @@ export function githubGistProvider(options: { fetch?: typeof fetch } = {}): Arti
       )
         throw new Refused('Invalid gist owner');
 
-      if (!isRecord(gist.files) || !contains(gist.files, expect))
-        throw new Refused('Gist does not contain the expected line');
+      if (!isRecord(gist.files) || !contains(gist.files, expect)) {
+        // Part of the gist was left out of the answer, and the line may be in that part.
+        // That is a failed read, so the proof keeps counting.
+        if (!isRecord(gist.files) || gist.truncated === true || partial(gist.files))
+          throw new Refused('Gist is too large to read');
+
+        throw new Absent('Gist does not contain the expected line');
+      }
 
       return {
         id: String(owner.id),
@@ -77,6 +86,13 @@ function contains(files: Record<string, unknown>, expect: string): boolean {
       file.truncated !== true &&
       typeof file.content === 'string' &&
       file.content.includes(expect),
+  );
+}
+
+/** Whether any file came back cut short or without its content. */
+function partial(files: Record<string, unknown>): boolean {
+  return Object.values(files).some(
+    (file) => !isRecord(file) || file.truncated === true || typeof file.content !== 'string',
   );
 }
 

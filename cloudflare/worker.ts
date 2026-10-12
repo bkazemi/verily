@@ -406,6 +406,8 @@ export class VerilyStore {
       // reader can check. It is not SITE_NAME: that host is claimed, not demonstrated.
       // The host alone: how the backend is operated is not something a reader verifies.
       verifierName: origin.host,
+      // Each published proof is re-read every six hours, so one taken down is noticed soon.
+      recheckMs: 6 * 3600000,
       // Every site's origin, since the library checks one list. That a subject's profile
       // is on its own site's origin is checked when its handoff arrives.
       profileOrigins: [new URL(env.OWNER_PROFILE_URL).origin, ...siteOrigins],
@@ -443,9 +445,10 @@ export class VerilyStore {
     // Schedule first so transient cleanup failures never permanently stop maintenance.
     await this.ctx.storage.setAlarm(Date.now() + 3600000);
     await this.app.service.prune();
-    // Published proofs go stale on their own. A small budget per hour stays inside the
-    // rate limit a provider gives an unauthenticated caller, shared across this colo.
-    await this.app.service.recheck();
+    // Re-reads published proofs that are due, up to 10 per provider each hour. That stays
+    // inside the rate limit a provider gives an unauthenticated caller, shared across
+    // this colo.
+    await this.app.service.recheck(10);
     await this.auth.prune();
     await prune(this.ctx.storage);
   }

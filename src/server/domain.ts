@@ -1,5 +1,6 @@
 import { MIMEType } from 'node:util';
 import {
+  Absent,
   Refused,
   type ArtifactProvider,
   type ExternalAccount,
@@ -102,7 +103,7 @@ export function dnsProvider(options: DomainProviderOptions = {}): ArtifactProvid
     const { values, dnssec } = await published(domain, options);
 
     if (!values.includes(expect))
-      throw new Refused(`No TXT record at ${label}.${domain} has this value`);
+      throw new Absent(`No TXT record at ${label}.${domain} has this value`);
 
     return { account: account(domain), ...(dnssec ? { dnssec } : {}) };
   };
@@ -341,6 +342,10 @@ export function wellKnownProvider(options: WellKnownProviderOptions = {}): Artif
         if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400))
           throw new Refused('File redirects, and a redirect is not followed');
 
+        // The file is gone. Any other failure is a failed read.
+        if (response.status === 404 || response.status === 410)
+          throw new Absent('File unavailable');
+
         if (!response.ok) throw new Refused('File unavailable');
 
         if (mediaType(response.headers.get('content-type')) !== 'text/plain')
@@ -352,10 +357,11 @@ export function wellKnownProvider(options: WellKnownProviderOptions = {}): Artif
         // The last line of a file cut short may be the start of some longer address.
         if (truncated) lines.pop();
 
-        if (!lines.some((line) => line.trim() === expect))
-          throw new Refused(
-            truncated ? 'File is too large to read' : 'File has no line with this value',
-          );
+        if (!lines.some((line) => line.trim() === expect)) {
+          if (truncated) throw new Refused('File is too large to read');
+
+          throw new Absent('File has no line with this value');
+        }
       } finally {
         await discard(response);
       }

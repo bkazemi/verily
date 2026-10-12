@@ -1,18 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Absent } from '../src/core/index.js';
 import { githubGistProvider } from '../src/server/github-gist.js';
 import { written } from './helpers.js';
 
 const expect = 'Verily proof for site.test: token';
 
-function provider(gist: unknown, ok = true) {
+function provider(gist: unknown, ok = true, status = ok ? 200 : 500) {
   const calls: string[] = [];
 
   const instance = githubGistProvider({
     fetch: ((url: string) => {
       calls.push(String(url));
 
-      return Promise.resolve({ ok, json: () => Promise.resolve(gist) });
+      return Promise.resolve({ ok, status, json: () => Promise.resolve(gist) });
     }) as unknown as typeof fetch,
   });
 
@@ -105,4 +106,31 @@ test('a gist proving one flow does not prove another', async () => {
       expect: 'Verily proof for site.test: a different token',
     }),
   );
+});
+
+test('a gist that is gone is reported as missing, and a failed read is not', async () => {
+  const artifact = 'https://gist.github.com/alice/0123456789abcdef01234567';
+
+  const read = (gist: unknown, ok = true, status?: number) =>
+    provider(gist, ok, status).instance.verify({ artifact, expect });
+
+  const missing = (error: Error) => error instanceof Absent;
+
+  await assert.rejects(read({}, false, 404), missing);
+  await assert.rejects(read({ ...valid, public: false }), missing);
+  await assert.rejects(read({ ...valid, files: { 'proof.md': { content: 'hello' } } }), missing);
+
+  // A gist cut short may hold the line in the part left out, so it is a failed read.
+  const cut = { 'proof.md': { content: 'hello', truncated: true } };
+
+  await assert.rejects(read({ ...valid, files: cut }), (error: Error) => !missing(error));
+
+  await assert.rejects(
+    read({ ...valid, truncated: true, files: { 'a.md': { content: 'hello' } } }),
+    (error: Error) => !missing(error),
+  );
+
+  // A server error or a rate limit says nothing about whether the gist is still there.
+  await assert.rejects(read({}, false, 500), (error: Error) => !missing(error));
+  await assert.rejects(read({}, false, 403), (error: Error) => !missing(error));
 });

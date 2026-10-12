@@ -395,7 +395,7 @@ To show them, hand the records to the badge. It draws them as given and fetches 
 
 From script, set the property instead: `badge.connections = records`. Send a page only the records its reader may see: whatever is in the page, the reader has. Several records become one badge, as under [Show the badge](#show-the-badge), and an unlisted one opens its details without linking anywhere.
 
-Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. `connections()` takes any number of ids, so read a whole page of users in one call. Pass `cacheMs` to the client to reuse an answer for that long, and `{ fresh: true }` to a call that must not.
+Each record has the provider, the external account's handle and profile address, the visibility and the expiry. Unlisted records are included, and only your site can read them, so you can show a link to your own users without making it public. `connections()` takes any number of ids, so read a whole page of users in one call. Every call reads the instance, so a removed or expired link stops showing on the next page load. Passing `cacheMs` to the client reuses an answer for that long, and a connection revoked in that time still shows as verified until it runs out, so leave it unset or keep it to a few seconds. `{ fresh: true }` makes one call read anyway.
 
 If you would rather your user ids never left your site, give the client a secret:
 
@@ -532,7 +532,20 @@ setInterval(
 ```
 
 - **`prune()`** deletes expired flows and DNS drafts, and deletes expired or revoked records after 90 days. A retired record is kept until it is removed.
-- **`recheck()`** re-reads gists, link-backs, DNS records and files that are due, up to 5 per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`) and stays current for 7 days after its last successful read (`freshnessMs`); after that it shows as unconfirmed until a read succeeds. A failed read changes nothing. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
+- **`recheck()`** re-reads gists, link-backs, DNS records and files that are due, up to 5 per provider per run (its `budget` argument). Each proof is re-read every 24 hours (`recheckMs`). A read that finds the proof gone, such as a deleted gist, a page without the link or a DNS answer without the record, makes the connection unconfirmed at once. A read that fails, such as a timeout or a server error, changes nothing, and the proof stays current for 7 days after its last successful read (`freshnessMs`). Either way the proof is read again after a quarter of `recheckMs`, and the connection is verified again as soon as a read finds the proof. A provider of your own says a proof is gone by throwing `Absent` from `verify`; any other error is a failed read. For PGP, it asks the keyserver whether the key has been revoked, and revokes the connection if so.
+
+- **`onChange`** is an option, not a call. Set it to hear when a record's status, visibility, expiry or mark changes, so your site can update its own copy without polling:
+
+  ```ts
+  createVerily({
+    // ...
+    onChange: async ({ evidence, local, revision }) => {
+      await db.saveConnectionIfNewer(local.id, evidence, revision);
+    },
+  });
+  ```
+
+  `evidence` is the record as it stands now, `local` is your subject with its private id, `previous` is the status, visibility, expiry and mark last confirmed as delivered, and `revision` counts the deliveries of that record. Keep the `revision` you last applied for each record and ignore a change that is not higher: a call that timed out is not cancelled and can finish after a newer one. A change made by a request is delivered before that request returns, and the call is awaited, so keep it quick. A record that expires or goes unconfirmed changes with time alone, so those are delivered by `recheck()`, or by `service.announce()` if you do not recheck. Delivery is at least once: a call that throws is made again on the next run, after the records that have not failed, and turning the option on reports every existing record once, 50 per run. A record removed by `prune()` is not reported.
 
 **If you never call `recheck()`, set `freshnessMs: Infinity`.** Otherwise connections proved by gist, link-back or PGP lapse after a week.
 
