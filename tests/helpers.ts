@@ -7,6 +7,7 @@ import type {
   RedirectProvider,
   ArtifactProvider,
 } from '../src/core/index.js';
+import type { KeyValue, Store } from '../src/instance/store.js';
 
 /** Instructions reach a page as pieces, so a test that reads them as prose joins them. */
 export const written = (parts: Instruction[]) =>
@@ -44,6 +45,48 @@ export class MemoryStorage implements Storage {
             .map(([, value]) => structuredClone(value) as Records[K]);
         },
       });
+
+      this.rows = rows;
+
+      return result;
+    });
+
+    this.tail = operation.catch(() => {});
+
+    return operation;
+  }
+}
+
+/** An instance store in memory: one transaction at a time, and nothing kept from a failed one. */
+export class MemoryStore implements Store {
+  rows = new Map<string, unknown>();
+  private tail: Promise<unknown> = Promise.resolve();
+
+  private over(rows: Map<string, unknown>): KeyValue {
+    return {
+      get: async <T>(key: string) => structuredClone(rows.get(key)) as T | undefined,
+      put: async (key, value) => void rows.set(key, structuredClone(value)),
+      delete: async (key) => void rows.delete(key),
+      list: async <T>(prefix: string) =>
+        [...rows]
+          .filter(([key]) => key.startsWith(prefix))
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([key, value]) => [key, structuredClone(value)] as [string, T]),
+    };
+  }
+
+  get: KeyValue['get'] = (key) => this.over(this.rows).get(key);
+
+  put: KeyValue['put'] = (key, value) => this.over(this.rows).put(key, value);
+
+  delete: KeyValue['delete'] = (key) => this.over(this.rows).delete(key);
+
+  list: KeyValue['list'] = (prefix) => this.over(this.rows).list(prefix);
+
+  transaction<T>(work: (tx: KeyValue) => Promise<T>): Promise<T> {
+    const operation = this.tail.then(async () => {
+      const rows = structuredClone(this.rows);
+      const result = await work(this.over(rows));
 
       this.rows = rows;
 

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Pool, PostgresStorage } from '../src/postgres/index.js';
+import { PostgresStore } from '../src/instance/postgres.js';
 import { VerilyService } from '../src/server/service.js';
 import { alice, fakeProvider } from './helpers.js';
 
@@ -113,6 +114,66 @@ test(
       await Promise.all(pools.map((pool) => pool.end()));
       await admin.query(`DROP SCHEMA ${schema} CASCADE`);
       await admin.end();
+    }
+  },
+);
+
+test(
+  'real Postgres: the instance store rolls back, isolates namespaces and lists by prefix in order',
+  { skip: !process.env.TEST_DATABASE_URL },
+  async () => {
+    const pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL }),
+      namespace = `test-${randomUUID()}`;
+
+    const store = new PostgresStore(pool, namespace),
+      other = new PostgresStore(pool, `${namespace}-other`);
+
+    try {
+      await Promise.all([store.migrate(), other.migrate()]);
+
+      await assert.rejects(
+        store.transaction(async (tx) => {
+          await tx.put('rate/a', { count: 1 });
+
+          throw new Error('rollback');
+        }),
+      );
+
+      assert.equal(await store.get('rate/a'), undefined);
+
+      await store.put('rate/b', { count: 2 });
+      await store.put('rate/B', { count: 3 });
+      await store.put('rate_/c', { count: 4 });
+      await store.put('signing/pgp', 'armored');
+      await store.put('rate/b', { count: 5 });
+
+      // Byte order, and a prefix taken literally: `_` and `%` match only themselves.
+      assert.deepEqual(await store.list('rate/'), [
+        ['rate/B', { count: 3 }],
+        ['rate/b', { count: 5 }],
+      ]);
+
+      assert.equal(await store.get('signing/pgp'), 'armored');
+      assert.deepEqual(await other.list(''), []);
+
+      // Concurrent increments each see the last, since transactions run one at a time.
+      await Promise.all(
+        Array.from({ length: 8 }, () =>
+          store.transaction(async (tx) => {
+            const held = (await tx.get<{ count: number }>('counter'))?.count ?? 0;
+
+            await tx.put('counter', { count: held + 1 });
+          }),
+        ),
+      );
+
+      assert.deepEqual(await store.get('counter'), { count: 8 });
+
+      await store.delete('rate/b');
+      assert.equal(await store.get('rate/b'), undefined);
+    } finally {
+      await pool.query('DELETE FROM verily_instance WHERE namespace LIKE $1', [`${namespace}%`]);
+      await pool.end();
     }
   },
 );
