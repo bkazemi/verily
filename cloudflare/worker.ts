@@ -10,7 +10,8 @@ import {
   githubLinkProvider,
   githubProvider,
 } from '../src/server/index.js';
-import { admit, createInstance, html, registry, type Instance } from '../src/instance/index.js';
+import { admit, createInstance, registry, type Instance } from '../src/instance/index.js';
+import { html } from '../src/instance/page.js';
 import { cloudflareStore } from './storage.js';
 
 export interface Env {
