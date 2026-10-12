@@ -1,7 +1,7 @@
 /**
- * The paths this worker answers itself. The library is mounted at the root of the origin
+ * The paths the instance answers itself. The library is mounted at the root of the origin
  * and answers every other path, so a path listed here must be one the library does not
- * serve: this worker looks here first, and a library route of the same name would never be
+ * serve: the instance looks here first, and a library route of the same name would never be
  * reached.
  */
 export const own = new Set([

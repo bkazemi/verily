@@ -1,0 +1,995 @@
+import {
+  dialogPath,
+  dialogRoute,
+  externalName,
+  externalSince,
+  lastProved,
+  localSide,
+  routeOf,
+  routes,
+  statusLabel,
+  type Evidence,
+  type LocalAccount,
+  type Provider,
+} from '../core/index.js';
+import { logo } from '../logo.js';
+import { escape } from '../server/escape.js';
+import { styleVersion } from '../server/style.js';
+import { createVerily, generateSigningKey } from '../server/index.js';
+import { recordStorage, type Store } from './store.js';
+import { OwnerAuth } from './auth.js';
+import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
+import { allow, client, limits, prune } from './limits.js';
+import { own } from './routes.js';
+
+export { registry, type Site } from './sites.js';
+
+export { recordStorage, type KeyValue, type Store } from './store.js';
+
+export interface InstanceOptions {
+  /** Everything the instance keeps: the records, and its own sessions, handoffs and counts. */
+  store: Store;
+  /** The origin the instance is served from. HTTPS, with no trailing slash. */
+  origin: string;
+  /** The owner's own site. A registered site's subjects carry their site's name instead. */
+  siteName: string;
+  /** What the owner links here: one of their accounts, a page, or the site. */
+  owner: Omit<LocalAccount, 'id' | 'siteName'> & { profileUrl: string };
+  /** The secret the owner signs in with. */
+  ownerKey: string;
+  reportUrl: string;
+  /** The methods offered. A registered site may narrow these for its own holders. */
+  providers: Provider[];
+  /** The sites that send their users here instead of hosting Verily, as `registry()` reads them. */
+  sites?: Map<string, Site>;
+  /**
+   * The key public records are signed by, armored. Left out, a key is made on first use and
+   * kept in the store. `false` turns signing off.
+   */
+  signingKey?: string | false;
+  /** How many codes may be mailed in a day, where the mail allowance is not the default. */
+  mailPerDay?: number;
+  /** How often each published proof is re-read. Six hours by default. */
+  recheckMs?: number;
+  /** How many proofs one `upkeep()` re-reads per provider. 10 by default. */
+  recheckBudget?: number;
+}
+
+const safeHeaders = {
+  'Cache-Control': 'no-store',
+  'Referrer-Policy': 'same-origin',
+  'X-Robots-Tag': 'noindex, nofollow',
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy':
+    "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+};
+
+/**
+ * Every page here says in its heading what it is, the way the library's pages do. The
+ * logotype above already says whose it is, so the heading never has to repeat that.
+ */
+export const html = (heading: string, body: string, status = 200, variant = '') =>
+  new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(heading)} · Verily</title><link rel="stylesheet" href="/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(heading)}</h1>${body}</main></body></html>`,
+    { status, headers: { ...safeHeaders, 'Content-Type': 'text/html; charset=utf-8' } },
+  );
+
+/**
+ * The page at the root for anybody not signed in, and the only thing it does. Whoever
+ * reaches it either holds the owner key or has no business past it, so it carries one
+ * field and no account of what lies behind.
+ */
+const signIn = (message = '', status = 200) =>
+  html(
+    'Sign in',
+    `${message}<form action="/login" method="post"><label>Owner key <input name="key" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>`,
+    status,
+    'single',
+  );
+
+const redirect = (cookie: string) => see('/', [cookie]);
+
+function see(location: string, cookies: string[] = []) {
+  const headers = new Headers({ ...safeHeaders, Location: location });
+
+  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
+
+  return new Response(null, { status: 303, headers });
+}
+
+/** Every refused handoff looks the same, so nobody can learn which check it failed. */
+const refused = () =>
+  html(
+    'Link expired',
+    '<p>This link has expired or was already used. Start again from the site that sent you.</p>',
+    403,
+    'single',
+  );
+
+/**
+ * Whether a request is for one of the library's own management routes, which a site
+ * session does not get. Which routes those are is the library's to say.
+ */
+const manages = (method: string, path: string) => {
+  const name = routeOf(method, path);
+
+  return name !== undefined && 'manages' in routes[name];
+};
+
+/** GETs that create state, and so are limited like every POST. */
+const limitedGets = ['/handoff/request', '/handoff/accept', '/callback'];
+
+/** Matches the library's own bound: large enough for a pasted key, small enough to buffer. */
+const maxBodyBytes = 65536;
+
+/** How a holder may have an account listed, as the library's mark route takes it. */
+const listings: readonly Listing[] = ['preferred', 'current', 'unused', 'retired'];
+
+/** Said beside the control that retires an account, since nothing here asks twice. */
+const retiringNote =
+  'Retiring keeps this record as history. It will no longer read as verified, and who can read it cannot be changed afterwards.';
+
+/** Carries a flow's binding for a page on another origin, where the cookie cannot. */
+const flowHeader = 'X-Verily-Flow';
+
+/** A session or a binding as this instance mints them, and nothing that could bend a header. */
+const opaque = /^[A-Za-z0-9_-]{16,200}$/;
+
+/**
+ * Lets the page that asked read the answer. These requests carry no cookie and are given
+ * none, so naming whichever origin asked gives nothing away, least of all which origins
+ * are registered sites: what a caller may do is decided by the token it holds.
+ */
+function shared(response: Response, request: Request): Response {
+  const answer = new Response(response.body, response);
+
+  answer.headers.set('Access-Control-Allow-Origin', request.headers.get('origin') ?? '*');
+  answer.headers.set('Access-Control-Expose-Headers', flowHeader);
+  answer.headers.append('Vary', 'Origin');
+
+  return answer;
+}
+
+const preflight = (request: Request) =>
+  shared(
+    new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Methods': 'GET, POST',
+        'Access-Control-Allow-Headers': `Authorization, Content-Type, ${flowHeader}`,
+        'Access-Control-Max-Age': '600',
+      },
+    }),
+    request,
+  );
+
+const data = (value: unknown, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(value), {
+    headers: { ...safeHeaders, 'Content-Type': 'application/json', ...headers },
+  });
+
+/**
+ * A JSON object from a request's body, or an empty one. Only a body sent as JSON is read:
+ * a form cannot send that type, so nothing here can be reached by a form on another page.
+ */
+async function fields(request: Request): Promise<Record<string, unknown>> {
+  if (!request.headers.get('content-type')?.startsWith('application/json')) return {};
+
+  return parsed(await request.text()) ?? {};
+}
+
+/** The JSON object a text holds, or undefined if it holds anything else. */
+function parsed(text: string): Record<string, unknown> | undefined {
+  try {
+    const value: unknown = JSON.parse(text);
+
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Run in the sign-in window a site's dialog opens. The window is on this origin, so the
+ * flow's binding can be a cookie here, where the provider's callback will look for it. The
+ * page that opened the window sends the binding, and this script says which origin that
+ * page is on. The instance takes the binding only if that origin is the site the flow
+ * belongs to, so a page elsewhere cannot have someone sign in to a flow it started.
+ */
+const enterScript = `const status=document.getElementById('status');const fail=()=>{status.textContent='This window could not start the sign-in. Close it and try again.'};let taken=false;if(!window.opener)fail();else{window.addEventListener('message',async(event)=>{const d=event.data;if(taken||event.source!==window.opener||!d||d.type!=='verily-enter'||typeof d.flow!=='string'||typeof d.binding!=='string'||typeof d.url!=='string')return;taken=true;let target;try{target=new URL(d.url)}catch{return fail()}if(target.protocol!=='https:')return fail();const response=await fetch('/site/enter',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({flow:d.flow,binding:d.binding,origin:event.origin})}).catch(()=>undefined);if(!response||!response.ok)return fail();location.replace(target.href)});window.opener.postMessage({type:'verily-enter'},'*')}`;
+
+const enterPage = () =>
+  new Response(
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Verily</title><link rel="stylesheet" href="/style.css?v=${styleVersion}"><body><main class="single">${logo}<h1>Sign in</h1><p id="status">Opening the sign-in page.</p></main><script src="/site/enter.js"></script></body></html>`,
+    {
+      headers: {
+        ...safeHeaders,
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy':
+          "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+      },
+    },
+  );
+
+/** Buffer only bounded request bodies before passing them to the library. */
+async function boundedBody(request: Request): Promise<ArrayBuffer | undefined> {
+  if (!request.body) return;
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+
+  while (true) {
+    const { value, done } = await reader.read();
+
+    if (done) break;
+
+    length += value.byteLength;
+
+    if (length > maxBodyBytes) {
+      await reader.cancel();
+
+      throw new Error('Body too large');
+    }
+
+    chunks.push(value);
+  }
+
+  const body = new Uint8Array(length);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return body.buffer;
+}
+
+/**
+ * The checks that need nothing stored: the origin, the method, and a bound on the body.
+ * Gives back the response to send, or the request with its body read. `handle` runs this
+ * itself. A host that passes requests on to another process can run it first, so that
+ * process is not woken for a request this turns away.
+ */
+export async function admit(request: Request, origin: string): Promise<Request | Response> {
+  const url = new URL(request.url);
+
+  if (url.origin !== origin) return html('Unavailable', '', 404);
+
+  // Asked by a browser before a page on another origin may send the dialog's headers.
+  if (
+    request.method === 'OPTIONS' &&
+    (dialogPath(url.pathname) || url.pathname === '/site/session')
+  )
+    return preflight(request);
+
+  if (!['GET', 'POST'].includes(request.method)) return html('Unavailable', '', 405);
+
+  let body: ArrayBuffer | undefined;
+
+  try {
+    body = await boundedBody(request);
+  } catch {
+    return html('Request too large', '', 413);
+  }
+
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body,
+    redirect: 'manual',
+  });
+}
+
+/** A multi-site Verily server: a request handler, and the upkeep its host runs on a timer. */
+export type Instance = ReturnType<typeof createInstance>;
+
+export function createInstance(options: InstanceOptions) {
+  return new Server(options);
+}
+
+class Server {
+  private readonly app;
+  private readonly store: Store;
+  private readonly origin: string;
+  private readonly auth: OwnerAuth;
+  private readonly sites: Sites;
+  private readonly local: LocalAccount;
+
+  constructor(private readonly options: InstanceOptions) {
+    const origin = new URL(options.origin);
+
+    if (origin.protocol !== 'https:' || origin.origin !== options.origin)
+      throw new Error('The origin must be an HTTPS origin without a trailing slash');
+
+    this.origin = options.origin;
+    this.store = options.store;
+    this.auth = new OwnerAuth(this.store, options.ownerKey);
+    this.sites = new Sites(this.store, options.sites ?? new Map());
+
+    const siteOrigins = [...this.sites.sites.values()].map((site) => site.origin);
+
+    // A site with no user accounts must not have its subject described as one, so the
+    // owner's kind is whatever the host gave, absent included.
+    this.local = { id: 'site-owner', ...options.owner };
+
+    this.app = createVerily({
+      storage: recordStorage(this.store),
+      providers: options.providers,
+      sendLimits: { day: options.mailPerDay },
+      ...(options.signingKey === false
+        ? {}
+        : { signingKey: options.signingKey ?? (() => this.signingKey()) }),
+      // Whether this origin's DNS names its signing key, and whether a site's names this
+      // instance as its verifier. Both go to the resolver the domain method already asks.
+      dns: true,
+      // The whole origin is this instance, so the library's routes sit at its root.
+      baseUrl: this.origin,
+      siteName: options.siteName,
+      // The verifier is the origin that ran the flow and serves the evidence, which a
+      // reader can check. It is not the site name: that host is claimed, not demonstrated.
+      // The host alone: how the backend is operated is not something a reader verifies.
+      verifierName: origin.host,
+      // Each published proof is re-read every six hours, so one taken down is noticed soon.
+      recheckMs: options.recheckMs ?? 6 * 3600000,
+      // Every site's origin, since the library checks one list. That a subject's profile
+      // is on its own site's origin is checked when its handoff arrives.
+      profileOrigins: [new URL(options.owner.profileUrl).origin, ...siteOrigins],
+      reportUrl: options.reportUrl,
+      // A site session is the more specific: it was opened for this holder moments ago.
+      authenticate: async (request) =>
+        (await this.sites.open(request))?.session.local ??
+        ((await this.auth.authenticated(request)) ? this.local : undefined),
+      context: async (request) => {
+        const open = await this.sites.open(request);
+
+        return open
+          ? {
+              site: open.session.site,
+              purpose: open.session.purpose,
+              txn: open.session.txn,
+              session: open.key,
+            }
+          : undefined;
+      },
+      // A site's holders get the providers that site chose. The owner has no site.
+      providersFor: (local) => this.siteOf(local)?.providers,
+      visibilityFor: (local) => this.siteOf(local)?.visibility,
+      finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
+    });
+
+    this.app.service.validateLocal(this.local);
+  }
+
+  /** The library's service, for a host that needs more than requests and upkeep. */
+  get service() {
+    return this.app.service;
+  }
+
+  /**
+   * What a host runs on a timer, about hourly: drops what has expired, and re-reads the
+   * published proofs that are due. The default of 10 per provider each hour stays inside
+   * the rate limit a provider gives an unauthenticated caller.
+   */
+  async upkeep(): Promise<void> {
+    await this.app.service.prune();
+    await this.app.service.recheck(this.options.recheckBudget ?? 10);
+    await this.auth.prune();
+    await prune(this.store);
+  }
+
+  /**
+   * Answers one request. `address` is the client's address as the host knows it, which
+   * rate limits count by. The instance reads no forwarding header itself, since which one
+   * can be trusted depends on what the host sits behind.
+   */
+  async handle(request: Request, address: string | null = null): Promise<Response> {
+    let response: Response;
+
+    try {
+      const admitted = await admit(request, this.origin);
+
+      response = admitted instanceof Response ? admitted : await this.route(admitted, address);
+    } catch {
+      response = html('Temporarily unavailable', '', 503);
+    }
+
+    // An approval or disconnect form redirects on to the holder's site, and Chromium holds
+    // a form's redirects to form-action. Only a holder that site sent here is told its
+    // origin, and only that one: named on every response, the policy would tell any visitor
+    // which sites this instance serves.
+    const policy = response.headers.get('Content-Security-Policy');
+    const found = policy ? await this.sites.session(request).catch(() => undefined) : undefined;
+
+    if (policy && found)
+      response.headers.set(
+        'Content-Security-Policy',
+        policy.replace(
+          /form-action [^;]*/,
+          (allowed) => `${allowed} ${this.site(found.session).origin}`,
+        ),
+      );
+
+    return response;
+  }
+
+  private async route(request: Request, address: string | null): Promise<Response> {
+    const url = new URL(request.url);
+
+    // The sign-in window's own script, and nothing else. It sets a cookie that decides
+    // whose flow this browser signs in to, so it is held to the origin the browser itself
+    // reports, before a missing or opaque one is read as ours below: a form in a sandboxed
+    // frame has an opaque origin, and can put any origin it likes in its body.
+    if (request.method === 'POST' && url.pathname === '/site/enter') {
+      if (
+        request.headers.get('origin') !== this.origin ||
+        !request.headers.get('content-type')?.startsWith('application/json')
+      )
+        return html('Unavailable', '', 403);
+
+      if (!(await this.allowed(request, url, address)))
+        return html('Too many requests', '<p>Try again later.</p>', 429);
+
+      return this.enter(request);
+    }
+
+    if (
+      request.method === 'POST' &&
+      !own.has(url.pathname) &&
+      (!request.headers.has('origin') || request.headers.get('origin') === 'null')
+    ) {
+      const headers = new Headers(request.headers);
+
+      headers.set('origin', this.origin);
+      request = new Request(request, { headers });
+    }
+
+    // The connect dialog on a site's own page, which counts its requests once it knows
+    // whose they are.
+    if (request.headers.has('authorization') && dialogPath(url.pathname))
+      return shared(await this.dialog(request, url, address), request);
+
+    if (!(await this.allowed(request, url, address)))
+      return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    if (request.method === 'POST' && url.pathname === '/site/session') {
+      const opened = await this.sites.dialog(
+        String((await fields(request)).token ?? ''),
+        request.headers.get('origin'),
+        (local) => this.app.service.validateLocal(local),
+        (site) => allow(this.store, [{ key: `site/${site.id}`, limit: limits.site }]),
+      );
+
+      return shared(
+        opened === 'limited'
+          ? html('Too many requests', '<p>Try again later.</p>', 429)
+          : opened
+            ? data({ session: opened.session })
+            : html('Unavailable', '', 404),
+        request,
+      );
+    }
+
+    if (request.method === 'GET' && url.pathname === '/site/enter') return enterPage();
+
+    if (request.method === 'GET' && url.pathname === '/site/enter.js')
+      return new Response(enterScript, {
+        headers: { ...safeHeaders, 'Content-Type': 'text/javascript' },
+      });
+
+    if (request.method === 'POST') {
+      if (url.pathname === '/login') {
+        if (!(await this.auth.allow('login', 10, 15 * 60000)))
+          return html('Too many requests', '<p>Try again in fifteen minutes.</p>', 429);
+
+        const key = new URLSearchParams(await request.text()).get('key') ?? '';
+        const cookie = await this.auth.login(key);
+
+        return cookie ? redirect(cookie) : signIn('<p>Incorrect owner key.</p>', 403);
+      }
+
+      if (url.pathname === '/logout') return redirect(await this.auth.logout(request));
+
+      if (request.headers.get('origin') !== this.origin) return html('Unavailable', '', 403);
+
+      if (url.pathname === '/disconnect') return this.disconnect(request);
+
+      if (url.pathname === '/mark') return this.mark(request);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/site/connections')
+      return this.read(request, address);
+
+    if (request.method === 'GET' && url.pathname === '/handoff/request') {
+      const begun = await this.sites.begin(
+        url.searchParams.get('site'),
+        url.searchParams.get('purpose'),
+      );
+
+      return begun ? see(begun.location, [begun.cookie]) : html('Unavailable', '', 404);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/handoff/accept') {
+      const started = await this.sites.start(
+        request,
+        url.searchParams.get('token') ?? '',
+        (local) => this.app.service.validateLocal(local),
+      );
+
+      // Straight on, so the token leaves the address bar.
+      return started
+        ? see(started.purpose === 'connect' ? '/verify' : '/', started.cookies)
+        : refused();
+    }
+
+    // Where a reader who has only this domain's name finds the keys its records are signed by.
+    if (request.method === 'GET' && url.pathname === '/.well-known/verily-keys.json')
+      return new Response(
+        JSON.stringify({
+          keys: await this.app.service.keys(),
+          dns: await this.app.service.keyRecords(),
+        }),
+        {
+          headers: {
+            ...safeHeaders,
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+          },
+        },
+      );
+
+    // Every path that is not one of the instance's own is the library's to answer.
+    if (!own.has(url.pathname)) {
+      // A site session removes a link, or lists an account another way, through this
+      // instance, which reports it back to the site, and has no sharing links. The library's
+      // routes would do neither.
+      if (manages(request.method, url.pathname) && (await this.sites.open(request)))
+        return html('Unavailable', '', 404);
+
+      // Some browsers omit Origin on native same-origin form posts. The request
+      // already passed the exact public-origin check above; flow cookies are
+      // SameSite=Lax and the library still requires the authenticated owner.
+      if (request.method === 'POST' && !request.headers.has('origin')) {
+        const headers = new Headers(request.headers);
+
+        headers.set('origin', this.origin);
+        request = new Request(request, { headers });
+      }
+
+      return this.app.handle(request);
+    }
+
+    // Every record on the instance, for whoever holds the owner key and nobody else.
+    if (request.method === 'GET' && url.pathname === '/records')
+      return (await this.auth.authenticated(request))
+        ? this.records()
+        : html('Unavailable', '', 404);
+
+    if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
+
+    const found = await this.sites.session(request);
+
+    if (found && !found.session.closed && !found.session.operation)
+      return this.settings(found.session.local, this.site(found.session));
+
+    // A disconnect or a mark that failed partway is the one thing left to do with this session.
+    if (found?.session.operation && found.session.operation.finishedAt === undefined) {
+      const { connection, mark } = found.session.operation;
+
+      return mark
+        ? html(
+            'Change not finished',
+            `<p>Changing how this account is listed did not finish.</p><form action="/mark" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><input type="hidden" name="as" value="${escape(mark)}"><button>Try again</button></form>`,
+            200,
+            'single',
+          )
+        : html(
+            'Disconnect not finished',
+            `<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><button>Try again</button></form>`,
+            200,
+            'single',
+          );
+    }
+
+    if (await this.auth.authenticated(request)) return this.settings(this.local);
+
+    if (found) {
+      const site = this.site(found.session);
+
+      return html(
+        'Session ended',
+        `<p>You are finished here. <a href="${escape(site.origin)}">Return to ${escape(site.name)}</a> to start again.</p>`,
+        200,
+        'single',
+      );
+    }
+
+    return signIn();
+  }
+
+  /**
+   * One request from the connect dialog on a site's own page. The page holds the session
+   * and the flow's binding and sends them as headers, because this instance's cookies are
+   * another site's on that page and a browser may not send them. Here they are put where
+   * the library looks for them, and a binding the library sets comes back as a header. The
+   * session works only from its own site's origin, and only for the dialog's requests.
+   */
+  private async dialog(request: Request, url: URL, address: string | null): Promise<Response> {
+    // Counted against the sender's address, as a refused read is: a request turned away
+    // here never reaches the counting a served one gets, and each costs a lookup.
+    const unavailable = async () =>
+      (await allow(this.store, [{ key: client(address), limit: limits.client }]))
+        ? html('Unavailable', '', 404)
+        : html('Too many requests', '<p>Try again later.</p>', 429);
+
+    const session = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '';
+    const binding = request.headers.get(flowHeader) ?? '';
+    const post = request.method === 'POST';
+    const body = post ? await request.text() : undefined;
+
+    if (!opaque.test(session) || (binding && !opaque.test(binding))) return unavailable();
+
+    // What the dialogs on a registered site's own page may ask for is the library's to say:
+    // the methods, a flow's start, state, proof and approval, and the removal or the
+    // listing of one of the holder's own accounts. Everything else stays same-origin.
+    const route = dialogRoute(request.method, url.pathname, url.searchParams);
+
+    if (!route) return unavailable();
+
+    if (post) {
+      if (!request.headers.get('content-type')?.startsWith('application/json'))
+        return unavailable();
+
+      // The dialog connects an account or renews one. Every other kind of flow has a page
+      // of its own here. Parsed as the library parses it, so the kind checked is the kind
+      // it will run.
+      if (route === 'start' && !['connect', 'renew'].includes(String(parsed(body!)?.kind)))
+        return unavailable();
+    }
+
+    const inner = new Request(request.url, {
+      method: request.method,
+      headers: {
+        cookie: `${sessionCookie}=${session}${binding ? `; ${this.app.flowCookieName}=${binding}` : ''}`,
+        origin: this.origin,
+        ...(post ? { 'content-type': 'application/json' } : {}),
+      },
+      body,
+    });
+
+    const found = await this.sites.open(inner);
+
+    if (!found || this.site(found.session).origin !== request.headers.get('origin'))
+      return unavailable();
+
+    if (!(await this.allowed(inner, url, address)))
+      return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    const response = await this.app.handle(inner);
+    const answer = new Response(response.body, response);
+
+    const set = response.headers
+      .getSetCookie()
+      .find((cookie) => cookie.startsWith(`${this.app.flowCookieName}=`))
+      ?.slice(this.app.flowCookieName.length + 1)
+      .split(';')[0];
+
+    answer.headers.delete('Set-Cookie');
+
+    if (set) answer.headers.set(flowHeader, set);
+
+    return answer;
+  }
+
+  /**
+   * Gives the sign-in window the binding of a flow a site's dialog started, as the cookie
+   * the provider's callback checks. `origin` is where the page that sent the binding is,
+   * as the window's own script saw it. It must be the site the flow's subject belongs to.
+   */
+  private async enter(request: Request): Promise<Response> {
+    const { flow: id, binding, origin } = await fields(request);
+
+    if (typeof id !== 'string' || typeof binding !== 'string' || !opaque.test(binding))
+      return html('Unavailable', '', 404);
+
+    const flow = await this.app.service.flow(id, binding).catch(() => undefined);
+    const site = flow?.local && this.siteOf(flow.local);
+
+    if (!flow || !['connect', 'renew'].includes(flow.kind) || !site || site.origin !== origin)
+      return html('Unavailable', '', 404);
+
+    return new Response(null, {
+      status: 204,
+      headers: { ...safeHeaders, 'Set-Cookie': this.app.flowCookie(binding) },
+    });
+  }
+
+  /** The site a subject belongs to, by its id's prefix. The owner's id has none. */
+  private siteOf(local: LocalAccount): Site | undefined {
+    return local.id.includes(':') ? this.sites.sites.get(local.id.split(':')[0]!) : undefined;
+  }
+
+  /**
+   * A site's backend reading its own subjects' connections, unlisted ones included, which
+   * nobody else can read. This is what lets a site show a link to its own users without the
+   * link being public. A refused request counts against the caller's address, and a good
+   * one against the site's own allowance, apart from the one its holders' handoffs share.
+   */
+  private async read(request: Request, address: string | null): Promise<Response> {
+    const asked = this.sites.read(
+      request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '',
+    );
+
+    if (
+      !(await allow(this.store, [
+        asked
+          ? { key: `read/${asked.site.id}`, limit: limits.read }
+          : { key: client(address), limit: limits.client },
+      ]))
+    )
+      return html('Too many requests', '<p>Try again later.</p>', 429);
+
+    if (!asked) return html('Unavailable', '', 404);
+
+    // No prototype, so an id such as `__proto__` is an entry like any other.
+    const connections: Record<string, Evidence[]> = Object.create(null);
+
+    for (const id of asked.ids)
+      connections[id] = await this.app.service.mine({
+        id: `${asked.site.id}:${id}`,
+      } as LocalAccount);
+
+    return new Response(JSON.stringify({ connections }), {
+      headers: { ...safeHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  /** This installation's own signing key, made the first time a record is signed. */
+  private async signingKey(): Promise<string> {
+    const kept = await this.store.get<string>('signing/pgp');
+
+    if (kept) return kept;
+
+    const made = await generateSigningKey(new URL(this.origin).host);
+
+    await this.store.put('signing/pgp', made);
+
+    return made;
+  }
+
+  private site(session: { site: string }): Site {
+    return this.sites.sites.get(session.site)!;
+  }
+
+  /**
+   * Counts a request that creates state: every POST, and the GETs that start a handoff, a
+   * session or a flow. A signed-in holder has a bucket of their own and anyone else is
+   * counted by address, so one visitor cannot lock everyone else out. A site's requests
+   * also share a ceiling, so one site cannot starve another.
+   */
+  private async allowed(request: Request, url: URL, address: string | null): Promise<boolean> {
+    if (request.method !== 'POST' && !limitedGets.includes(url.pathname)) return true;
+
+    const found = await this.sites.session(request);
+    const owner = found ? undefined : await this.auth.session(request);
+
+    const holder = found
+      ? { key: `session/${found.key.slice('site/session/'.length)}`, limit: limits.session }
+      : owner
+        ? { key: `session/${owner}`, limit: limits.session }
+        : { key: client(address), limit: limits.client };
+
+    // A handoff is charged to the site it goes to, whatever session this browser holds.
+    // Anything else counts against the site whose session is still in use.
+    const named =
+      url.pathname === '/handoff/request'
+        ? url.searchParams.get('site')
+        : url.pathname === '/handoff/accept'
+          ? String(peek(url.searchParams.get('token') ?? '')?.site ?? '')
+          : found && !found.session.closed
+            ? found.session.site
+            : undefined;
+
+    const site = named && this.sites.sites.has(named) ? named : undefined;
+
+    return allow(this.store, [
+      holder,
+      ...(site ? [{ key: `site/${site}`, limit: limits.site }] : []),
+    ]);
+  }
+
+  /**
+   * Removes a link from a site session and reports it back to the site. There is no flow to
+   * hold the result, so the session holds it, and success is reported only once the
+   * revocation has committed: pending first, then revoked, then complete. A retry resumes
+   * wherever the last attempt stopped, and one already complete reads what it stored.
+   */
+  private async disconnect(request: Request): Promise<Response> {
+    const found = await this.sites.session(request);
+    const connection = new URLSearchParams(await request.text()).get('connection') ?? '';
+
+    if (!found || !connection) return html('Unavailable', '', 404);
+
+    const { key, session } = found;
+    const held = session.operation;
+    let current = held?.connection === connection && !held.mark ? session : undefined;
+
+    if (!current) {
+      const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
+
+      if (!owned) return html('Unavailable', '', 404);
+
+      current = await this.sites.pending(key, connection, owned.visibility);
+
+      if (!current) return html('Unavailable', '', 404);
+    }
+
+    if (current.operation!.finishedAt === undefined) {
+      // Idempotent: a connection already revoked is left as it is.
+      await this.app.service.revoke(connection, session.local);
+      current = await this.sites.completed(key);
+    }
+
+    return see(
+      this.sites.returnUrl(this.site(session), session.local, session.txn, {
+        operation: 'disconnect',
+        outcome: 'complete',
+        connection,
+        visibility: current.operation!.visibility,
+        finishedAt: current.operation!.finishedAt!,
+      }),
+    );
+  }
+
+  /**
+   * Lists an account another way, or retires it, from a site session, and reports it back
+   * to the site as a disconnect is reported: pending on the session first, then changed,
+   * then complete. Asking again for what already holds changes nothing, so a retry is safe.
+   */
+  private async mark(request: Request): Promise<Response> {
+    const found = await this.sites.session(request);
+    const fields = new URLSearchParams(await request.text());
+    const connection = fields.get('connection') ?? '';
+    const as = listings.find((listing) => listing === fields.get('as'));
+
+    if (!found || !connection || !as) return html('Unavailable', '', 404);
+
+    const { key, session } = found;
+    const held = session.operation;
+    let current = held?.connection === connection && held.mark === as ? session : undefined;
+
+    if (!current) {
+      const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
+
+      // Checked before anything is held: what cannot be done must not be left pending.
+      if (!owned || owned.status === 'revoked' || (owned.status === 'retired' && as !== 'retired'))
+        return html('Unavailable', '', 404);
+
+      current = await this.sites.pending(key, connection, owned.visibility, as);
+
+      if (!current) return html('Unavailable', '', 404);
+    }
+
+    if (current.operation!.finishedAt === undefined) {
+      await this.app.service.mark(connection, session.local, as);
+      current = await this.sites.completed(key);
+    }
+
+    return see(
+      this.sites.returnUrl(this.site(session), session.local, session.txn, {
+        operation: 'mark',
+        outcome: 'complete',
+        connection,
+        visibility: current.operation!.visibility,
+        finishedAt: current.operation!.finishedAt!,
+      }),
+    );
+  }
+
+  /**
+   * The settings page for whoever is signed in: the owner, or a holder a site sent here.
+   * The owner's page carries the embed for their own site; a site's holder has the site to
+   * show their badge, and removes a link through a route that tells the site so.
+   */
+  private async settings(subject: LocalAccount, site?: Site) {
+    const connections = await this.app.service.mine(subject);
+    const local = localSide(subject, this.options.siteName);
+
+    return html(
+      site ? 'Your connections' : 'Owner settings',
+      `<div class="side"><p class="who">${escape(local.heading)}</p>
+      <p class="name">${escape(local.value)}</p>
+      <p class="reference">${escape(subject.reference)}</p></div>
+      <p><a href="/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
+      ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p><p><a href="/records">Every connection on this instance</a></p>'}
+      ${connections.map((e) => this.connection(e, site)).join('')}
+      ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
+    );
+  }
+
+  /**
+   * Every record the instance holds, for its operator: each site's subjects, public and
+   * unlisted alike, with what each is linked to and how it stands. Read-only. A public
+   * record links to its evidence; an unlisted one has no page that is the operator's to open.
+   */
+  private async records() {
+    const all = await this.app.service.all();
+    const now = Date.now();
+    const count = (visibility: string) => all.filter((e) => e.visibility === visibility).length;
+    const day = (time: number) => new Date(time).toISOString().slice(0, 10);
+
+    return html(
+      'All connections',
+      `<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
+      ${all
+        .map((e) => {
+          const name = `${escape(e.local.label)} and ${escape(e.providerName)} ${escape(externalName(e.external))}`;
+
+          // Prefixed with "account" below, since the line also has the record's own date.
+          const since = externalSince(e.external, day);
+
+          return `<div class="side"><p class="who">${escape(e.siteName)} · ${escape(e.visibility)} · ${escape(statusLabel(e, now))}</p>
+      <p class="name">${e.visibility === 'public' ? `<a href="${escape(e.evidenceUrl)}">${name}</a>` : name}</p>
+      <p class="reference">${escape(e.local.reference)} · connected ${escape(day(e.connectedAt))}${since ? ` · account ${escape(since.toLowerCase())}` : ''}</p></div>`;
+        })
+        .join('')}
+      <p><a href="/">Back to owner settings</a></p>`,
+    );
+  }
+
+  /** One connection, with the state, the visibility and the expiry each said once. */
+  private connection(e: Evidence, site?: Site) {
+    const embed = `<script src="/assets/verily.js" defer></script>\n<verily-badge backend-url="${this.origin}" connection-id="${e.id}"></verily-badge>`;
+
+    const shown = site
+      ? e.visibility === 'public'
+        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><p class="fine">Anyone can view this connection, on ${escape(site.name)} or anywhere else.</p>`
+        : `<p class="fine">Only ${escape(site.name)} can read this connection, and it chooses who there sees it.</p>`
+      : e.visibility === 'public'
+        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>`
+        : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
+
+    const retired = e.status === 'retired';
+    const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+    // How the holder lists the account, which acts on every record of it they have. A
+    // site's holder is sent back to the site with the change, as with a disconnect.
+    const listing = ['revoked', 'retired'].includes(e.status)
+      ? ''
+      : `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : ''}
+      ${e.mark === 'preferred' ? '' : '<button name="as" value="preferred">Mark as preferred</button>'}
+      ${e.mark === 'unused' ? '' : '<button name="as" value="unused">Mark as unused</button>'}
+      ${e.mark === undefined ? '' : '<button name="as" value="current">Mark as current</button>'}
+      <button name="as" value="retired">Retire</button>
+      <p class="fine">${escape(retiringNote)}</p></form>`;
+
+    const actions =
+      site && e.status === 'revoked'
+        ? ''
+        : `<p><a href="/renew/${escape(e.id)}">Renew this connection</a></p>
+      <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
+      ${retired || site?.visibility?.length === 1 ? '' : `<p><a href="/visibility/${escape(e.id)}">Change visibility</a></p>`}
+      ${listing}
+      ${
+        site
+          ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`
+          : `<form action="/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form>`
+      }`;
+
+    return `<section><p class="who">${escape(e.providerName ?? e.provider)}</p>
+      <h3>${escape(externalName(e.external))}</h3>
+      <dl><dt>Status</dt><dd>${escape(statusLabel(e, Date.now()))}</dd>
+      <dt>Visibility</dt><dd>${escape(e.visibility)}</dd>
+      ${
+        retired
+          ? `<dt>Last verified</dt><dd>${escape(moment(lastProved(e)))}</dd><dt>Retired</dt><dd>${escape(moment(e.retiredAt!))}</dd>`
+          : `<dt>Expires</dt><dd>${escape(moment(e.expiresAt))}</dd>`
+      }</dl>
+      ${e.mark === 'preferred' ? '<p class="fine">Preferred</p>' : e.mark === 'unused' ? '<p class="fine">No longer used</p>' : ''}
+      ${shown}
+      ${actions}</section>`;
+  }
+}

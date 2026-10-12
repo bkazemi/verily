@@ -1,7 +1,6 @@
 import type { DurableObjectState } from '@cloudflare/workers-types';
 import { CloudflareStorage } from '../../cloudflare/storage.js';
 import { VerilyStore as Store, type Env } from '../../cloudflare/worker.js';
-import type { LocalAccount } from '../../src/core/index.js';
 
 /** Test-only entry point; never included in the deployment bundle. */
 export { default } from '../../cloudflare/worker.js';
@@ -16,18 +15,23 @@ export class VerilyStore extends Store {
     env: Env,
   ) {
     super(probe, env);
-  }
 
-  protected override async revoke(id: string, local: LocalAccount) {
-    const fault = await this.probe.storage.get<string>('test/fault');
+    const { service } = this.instance;
+    const revoke = service.revoke.bind(service);
 
-    await this.probe.storage.delete('test/fault');
+    service.revoke = async (id, local) => {
+      const fault = await probe.storage.get<string>('test/fault');
 
-    if (fault === 'before') throw new Error('Injected before revoking');
+      await probe.storage.delete('test/fault');
 
-    await super.revoke(id, local);
+      if (fault === 'before') throw new Error('Injected before revoking');
 
-    if (fault === 'after') throw new Error('Injected after revoking');
+      const revoked = await revoke(id, local);
+
+      if (fault === 'after') throw new Error('Injected after revoking');
+
+      return revoked;
+    };
   }
 
   override async fetch(request: Request) {

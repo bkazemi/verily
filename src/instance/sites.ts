@@ -56,7 +56,7 @@ interface State {
 export type Listing = 'preferred' | 'current' | 'unused' | 'retired';
 
 /**
- * What the worker holds for a disconnect or a mark, which have no flow of their own to
+ * What the instance holds for a disconnect or a mark, which have no flow of their own to
  * hold it.
  */
 interface Operation {
