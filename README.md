@@ -211,9 +211,7 @@ Add `stacked` to name the accounts in the badge itself, one to a row:
 ></verily-badge>
 ```
 
-<p align="center">
-  <img src="docs/images/stacked.png" alt="A stacked badge listing four accounts, one to a row, then +2 more" width="213" />
-</p>
+<img src="docs/images/stacked.png" alt="A stacked badge listing four accounts, one to a row, then +2 more" width="213" />
 
 It lists up to four verified accounts, then counts the rest, such as `+2 more`. It is as tall as its rows, so give it a line of its own. `mountBadges` and `presentConnections` take the same choices as `{ stacked: true }` and `{ peek: false }`.
 
