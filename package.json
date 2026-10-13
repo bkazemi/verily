@@ -62,6 +62,9 @@
     "dist",
     "docs/licenses"
   ],
+  "bin": {
+    "verily-instance": "./dist/instance/bin.js"
+  },
   "exports": {
     ".": {
       "browser": {
@@ -92,6 +95,10 @@
     "./instance/postgres": {
       "types": "./dist/instance/postgres.d.ts",
       "default": "./dist/instance/postgres.js"
+    },
+    "./instance/serve": {
+      "types": "./dist/instance/serve.d.ts",
+      "default": "./dist/instance/serve.js"
     },
     "./verily.js": "./dist/verily.js"
   }

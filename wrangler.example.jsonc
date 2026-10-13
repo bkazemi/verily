@@ -10,12 +10,11 @@
 // To offer email, RESEND_API_KEY, with EMAIL_FROM set in vars below.
 // Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
 //
-// Those two GitHub secrets are only needed by githubProvider(), the sign-in
-// method. The holder-paced methods need no registration and no secret at all.
-// cloudflare/worker.ts already offers pgpProvider(), which checks a signature
-// from an OpenPGP key. githubGistProvider() reads a public gist, and adding it
-// to the list in worker.ts is the whole change; a connection already
-// established under one method keeps whichever method proved it.
+// Those two GitHub secrets are only needed by GitHub sign-in, which is offered
+// when both are set. The holder-paced methods need no registration and no
+// secret: a link back from a GitHub profile, a DNS record, and a signature from
+// an OpenPGP key are always offered. The list is in src/instance/env.ts, shared
+// with the Node server, so both hosts offer the same methods.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "verily",

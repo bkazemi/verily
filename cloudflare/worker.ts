@@ -1,67 +1,12 @@
 import type { DurableObjectNamespace, DurableObjectState } from '@cloudflare/workers-types';
-import type { LocalKind } from '../src/core/index.js';
-import {
-  discordProvider,
-  dnsProvider,
-  emailProvider,
-  pgpProvider,
-  resendSender,
-  youtubeProvider,
-  githubLinkProvider,
-  githubProvider,
-} from '../src/server/index.js';
-import { admit, createInstance, registry, type Instance } from '../src/instance/index.js';
+import { admit, createInstance, type Instance } from '../src/instance/index.js';
+import { fromEnv, type InstanceEnv } from '../src/instance/env.js';
 import { html } from '../src/instance/page.js';
 import { cloudflareStore } from './storage.js';
 
-export interface Env {
+/** The instance's settings, as vars and secrets, and the binding of the object that runs it. */
+export interface Env extends InstanceEnv {
   VERILY: DurableObjectNamespace;
-  PUBLIC_ORIGIN: string;
-  SITE_NAME: string;
-  /** What this deployment links: one of its accounts, a page, or the site. Defaults to account. */
-  OWNER_KIND?: LocalKind;
-  OWNER_LABEL: string;
-  OWNER_REFERENCE: string;
-  OWNER_PROFILE_URL: string;
-  REPORT_URL: string;
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
-  /** Discord sign-in is offered only when both are set. */
-  DISCORD_CLIENT_ID?: string;
-  DISCORD_CLIENT_SECRET?: string;
-  /** YouTube sign-in is offered only when both are set. */
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
-  /**
-   * Email is offered only when both are set: a Resend API key, and the sender its codes
-   * come from, as `Name <address>` or an address on a domain verified with Resend.
-   */
-  RESEND_API_KEY?: string;
-  EMAIL_FROM?: string;
-  /** How many codes may be mailed in a day, where the mail allowance is not the default. */
-  EMAIL_DAILY_LIMIT?: string | number;
-  OWNER_KEY: string;
-  /**
-   * Public records are signed unless this is `off`. The key is made on first use and kept
-   * in the object's storage, or is the secret `SIGNING_KEY` where one is set: an armored
-   * key, which then outlives the deployment.
-   */
-  SIGNING?: string;
-  SIGNING_KEY?: string;
-  /**
-   * The sites that send their users here instead of hosting Verily, as a JSON list of
-   * `{ id, name, origin, authorizeUrl, returnUrl }`. Each needs its key in the secret
-   * `SITE_<ID>_KEY`, such as `SITE_PARTNER_KEY`.
-   */
-  SITES?: string | unknown[];
-  [key: `SITE_${string}_KEY`]: string | undefined;
-}
-
-/** The configured count of mailed messages a day, if it is a count at all. */
-function dailyMail(configured: string | number | undefined): number | undefined {
-  const count = Number(configured);
-
-  return Number.isSafeInteger(count) && count > 0 ? count : undefined;
 }
 
 const hour = 3600000;
@@ -87,7 +32,7 @@ export default {
   },
 };
 
-/** The instance on a Durable Object: its storage, an hourly alarm, and config from `env`. */
+/** The instance on a Durable Object: its storage, an hourly alarm, and settings from `env`. */
 export class VerilyStore {
   protected readonly instance: Instance;
 
@@ -95,62 +40,7 @@ export class VerilyStore {
     private readonly ctx: DurableObjectState,
     env: Env,
   ) {
-    this.instance = createInstance({
-      store: cloudflareStore(ctx.storage),
-      origin: env.PUBLIC_ORIGIN,
-      siteName: env.SITE_NAME,
-      owner: {
-        kind: env.OWNER_KIND,
-        label: env.OWNER_LABEL,
-        reference: env.OWNER_REFERENCE,
-        profileUrl: env.OWNER_PROFILE_URL,
-      },
-      ownerKey: env.OWNER_KEY,
-      reportUrl: env.REPORT_URL,
-      // Two ways of showing one GitHub account. Whichever is used first is the record's
-      // main method, and the other is listed beneath it once used. Discord, YouTube and
-      // email are offered only when their secrets are set.
-      providers: [
-        githubProvider({
-          clientId: env.GITHUB_CLIENT_ID,
-          clientSecret: env.GITHUB_CLIENT_SECRET,
-        }),
-        githubLinkProvider(),
-        // A domain shown by a record in its DNS, which is one fetch to a fixed resolver. The
-        // file method reads a host the holder names, and a Worker cannot check where that
-        // resolves, so it is not offered here.
-        dnsProvider(),
-        // A key needs no registration and no secret. A Worker cannot read a web key
-        // directory safely, so an address on a key is shown only when the keyserver confirms it.
-        pgpProvider(),
-        ...(env.DISCORD_CLIENT_ID && env.DISCORD_CLIENT_SECRET
-          ? [
-              discordProvider({
-                clientId: env.DISCORD_CLIENT_ID,
-                clientSecret: env.DISCORD_CLIENT_SECRET,
-              }),
-            ]
-          : []),
-        ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-          ? [
-              youtubeProvider({
-                clientId: env.GOOGLE_CLIENT_ID,
-                clientSecret: env.GOOGLE_CLIENT_SECRET,
-              }),
-            ]
-          : []),
-        ...(env.RESEND_API_KEY && env.EMAIL_FROM
-          ? [
-              emailProvider({
-                send: resendSender({ apiKey: env.RESEND_API_KEY, from: env.EMAIL_FROM }),
-              }),
-            ]
-          : []),
-      ],
-      sites: registry(env.SITES, env as unknown as Record<string, unknown>),
-      signingKey: env.SIGNING === 'off' ? false : env.SIGNING_KEY,
-      mailPerDay: dailyMail(env.EMAIL_DAILY_LIMIT),
-    });
+    this.instance = createInstance({ ...fromEnv(env), store: cloudflareStore(ctx.storage) });
 
     ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) await ctx.storage.setAlarm(Date.now() + hour);
