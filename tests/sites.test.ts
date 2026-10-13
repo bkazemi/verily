@@ -663,8 +663,9 @@ test('a site holder connects, returns with a signed result, and manages from a s
     assert.match(records, /shirkadeh\.test · public · Verified/);
     assert.match(records, /Partner · (public|unlisted) · /);
     assert.match(records, /\d+ on this instance: \d+ public, \d+ unlisted\./);
-    // The account's creation date follows the record's connected date.
-    assert.match(records, /connected \d{4}-\d\d-\d\d · account joined 2011-01-25</);
+    // The account's creation date is on the name's line, as on every other card.
+    assert.match(records, /<span class="since">Joined 2011-01-25<\/span>/);
+    assert.match(records, /connected \d{4}-\d\d-\d\d<\/p>/);
 
     // Nobody else does: a site's holder and a stranger are told nothing is there.
     assert.equal((await a.fetch('/records')).status, 404);

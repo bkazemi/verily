@@ -14,6 +14,7 @@ import {
 } from '../core/index.js';
 import { logo } from '../logo.js';
 import { escape } from '../server/escape.js';
+import { card, day, moment, side } from '../server/render.js';
 import { styleVersion } from '../server/style.js';
 import { createVerily, generateSigningKey } from '../server/index.js';
 import { recordStorage, type Store } from './store.js';
@@ -22,6 +23,8 @@ import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js'
 import { allow, client, limits, prune } from './limits.js';
 import { own } from './routes.js';
 import { html, safeHeaders } from './page.js';
+
+export { fromEnv, type InstanceEnv } from './env.js';
 
 export { registry, type Site } from './sites.js';
 
@@ -882,9 +885,7 @@ class Server {
 
     return html(
       site ? 'Your connections' : 'Owner settings',
-      `<div class="side"><p class="who">${escape(local.heading)}</p>
-      <p class="name">${escape(local.value)}</p>
-      <p class="reference">${escape(subject.reference)}</p></div>
+      `${card(local.heading, local.value, undefined, subject.reference)}
       <p><a href="/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
       ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p><p><a href="/records">Every connection on this instance</a></p>'}
       ${connections.map((e) => this.connection(e, site)).join('')}
@@ -901,22 +902,23 @@ class Server {
     const all = await this.app.service.all();
     const now = Date.now();
     const count = (visibility: string) => all.filter((e) => e.visibility === visibility).length;
-    const day = (time: number) => new Date(time).toISOString().slice(0, 10);
 
     return html(
       'All connections',
       `<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
       ${all
-        .map((e) => {
-          const name = `${escape(e.local.label)} and ${escape(e.providerName)} ${escape(externalName(e.external))}`;
-
-          // Prefixed with "account" below, since the line also has the record's own date.
-          const since = externalSince(e.external, day);
-
-          return `<div class="side"><p class="who">${escape(e.siteName)} · ${escape(e.visibility)} · ${escape(statusLabel(e, now))}</p>
-      <p class="name">${e.visibility === 'public' ? `<a href="${escape(e.evidenceUrl)}">${name}</a>` : name}</p>
-      <p class="reference">${escape(e.local.reference)} · connected ${escape(day(e.connectedAt))}${since ? ` · account ${escape(since.toLowerCase())}` : ''}</p></div>`;
-        })
+        .map((e) =>
+          // The same card as everywhere else, so what a card shows of an account, such as
+          // when it was created, shows here too.
+          side(
+            `${e.siteName} · ${e.visibility} · ${statusLabel(e, now)}`,
+            `${e.local.label} and ${e.providerName} ${externalName(e.external)}`,
+            e.visibility === 'public' ? e.evidenceUrl : undefined,
+            `${e.local.reference} · connected ${day(e.connectedAt)}`,
+            externalSince(e.external, day),
+            [],
+          ),
+        )
         .join('')}
       <p><a href="/">Back to owner settings</a></p>`,
     );
@@ -935,7 +937,6 @@ class Server {
         : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
 
     const retired = e.status === 'retired';
-    const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
     // How the holder lists the account, which acts on every record of it they have. A
     // site's holder is sent back to the site with the change, as with a disconnect.
