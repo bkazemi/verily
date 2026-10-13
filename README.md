@@ -28,12 +28,15 @@ It doesn't sign anyone into your site, and it doesn't establish legal identity.
 4. A `<verily-badge>` on their profile shows the external account. Clicking it opens the evidence.
 5. Verily keeps the record honest: published proofs are re-read, records expire, and either side can revoke.
 
-## Two ways to use it
+## Ways to use it
 
-- **Run it yourself.** Your site hosts Verily beside its own backend and registers its own app with each sign-in provider. Everything from [Install](#install) to [Operations](#operations) is this. Nothing else is needed, and nothing depends on anyone else's server.
+Verily's backend comes in two forms. Both run the same flows and serve the same evidence. A site can also skip the backend and use one that someone else runs.
+
+- **Embed it in your app.** `createVerily` is mounted beside your own backend and links your app's own accounts. Your app says who is signed in, and registers its own app with each sign-in provider. Nothing depends on anyone else's server. See [Embed the backend in your app](#embed-the-backend-in-your-app).
+- **Run an instance.** `createInstance` is a complete app with one owner, who signs in with a key. It needs no app around it, and other sites can send their users to it. A standalone backend running at an address is called an instance. See [Run an instance](#run-an-instance).
 - **Use an instance someone else runs.** The instance holds the provider apps and the records, and your site registers nothing with any provider. Your backend makes two calls. See [Using a hosted instance](#using-a-hosted-instance).
 
-Both give your backend the same records in the same shape, so the code that shows them does not change if you move from one to the other.
+All three give your backend the same records in the same shape, so the code that shows them does not change if you move from one to another.
 
 ## Install
 
@@ -43,7 +46,7 @@ npm install @bkazemi/verily
 
 Requires Node.js 22.13+ or 24+. In Node, `@bkazemi/verily` exports the server. Browser bundlers get a browser-only entry with no server or database code. With TypeScript, use `moduleResolution: "NodeNext"` for the server and `"Bundler"` for the browser.
 
-## Set up the server
+## Embed the backend in your app
 
 ### 1. Storage
 
@@ -295,12 +298,11 @@ emailProvider({
 
 ## A badge on a static site
 
-A static site only needs the script and the badge markup; the backend runs somewhere else over HTTPS. The quickest backend is the Cloudflare Worker in this repository, which fits the free plan:
+A static site only needs the script and the badge markup; the backend runs somewhere else over HTTPS. The quickest backend is an instance of your own on Cloudflare, which fits the free plan:
 
-1. Clone this repository, run `npm ci`, and copy `wrangler.example.jsonc` to `wrangler.jsonc`. Fill in your account, origin and owner details.
-2. Run `wrangler secret put` for `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `OWNER_KEY`, then `npm run cloudflare:deploy`.
-3. On the backend's site, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/mine`.
-4. Add the script and the badge to your site:
+1. Set one up as [Run an instance](#run-an-instance) describes, and deploy it.
+2. On the instance, sign in with `OWNER_KEY`, verify, and approve a **public** connection. Its id is listed at `/mine`.
+3. Add the script and the badge to your site:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.7.0/dist/verily.js" defer></script>
@@ -311,6 +313,25 @@ A static site only needs the script and the badge markup; the backend runs somew
 ```
 
 Run the backend on a domain readers can connect to your site, because `PUBLIC_ORIGIN` is shown as the verifier. If your site sets a Content Security Policy, allow the backend in `connect-src`.
+
+## Run an instance
+
+An instance runs on Cloudflare or on Node from the same settings. `PUBLIC_ORIGIN`, `SITE_NAME`, `OWNER_LABEL`, `OWNER_REFERENCE`, `OWNER_PROFILE_URL`, `REPORT_URL` and `OWNER_KEY` are required. `OWNER_KEY` is the secret you sign in with: at least 32 random bytes, base64url.
+
+A link back from a GitHub profile, a DNS record and an OpenPGP signature are always offered. GitHub, Discord and YouTube sign-in and email are each offered once their secrets are set. Each sign-in app needs `<PUBLIC_ORIGIN>/callback` as a redirect. [`src/instance/env.ts`](src/instance/env.ts) lists every setting.
+
+**On Cloudflare.**
+
+```sh
+npx @bkazemi/verily init cloudflare my-instance
+cd my-instance && npm install
+```
+
+Fill in `wrangler.jsonc`, run `npx wrangler secret put OWNER_KEY`, then `npm run deploy`. To take a new release, update the dependency and deploy again.
+
+**On Node.** Install the package, set the settings and `DATABASE_URL` in the environment, and run `npx verily serve`. It keeps everything in one Postgres table, which it creates, and listens on `127.0.0.1:3000` for a proxy that terminates TLS. Set `CLIENT_ADDRESS_HEADER` to the header your proxy sets to the client's address, such as `X-Real-IP`. Without it every visitor is counted as the proxy and shares one rate limit.
+
+**In your own server.** `createInstance` from `@bkazemi/verily/instance` takes the same options and a store, and returns a request handler and an `upkeep()` to run hourly.
 
 ## Using a hosted instance
 
@@ -407,7 +428,7 @@ Every id you pass is then your own, and the instance is sent a stand-in. A subje
 
 A site that would rather write its own endpoints can: `verily.authorize(state, subject)` signs the redirect handoff, `verily.handoff(subject)` the pill's, and `verily.result(token)` checks what a user returns with.
 
-**Moving to your own instance.** Hosting Verily yourself replaces `verily.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Set up the server](#set-up-the-server). Records are not moved between instances, so users verify again.
+**Moving to your own instance.** Hosting Verily yourself replaces `verily.connections([id])` with `service.mine(account)`, which returns the same records, and the three steps above with the handler from [Embed the backend in your app](#embed-the-backend-in-your-app). Records are not moved between instances, so users verify again.
 
 ## Serving other sites
 
@@ -423,7 +444,7 @@ Three options tie a flow to the site that sent the holder:
 
 Two more narrow what a subject is offered, for a backend whose sites don't all want the same. `providersFor(local)` returns the provider ids a subject may use: it is offered those alone, in that order, and a flow for any other is refused. `visibilityFor(local)` returns the visibilities it may choose: with one, the approval page states it and offers no choice.
 
-`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. The Cloudflare Worker uses these hooks to serve registered sites ([`src/instance/sites.ts`](src/instance/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
+`result` is recorded when the flow ends and never changes: its kind, how it ended, the connection and its visibility at that moment, and `finishedAt`. An instance uses these hooks to serve registered sites ([`src/instance/sites.ts`](src/instance/sites.ts)). The sites it serves use the client under [Using a hosted instance](#using-a-hosted-instance).
 
 ## Signed records
 
@@ -445,7 +466,7 @@ createVerily({
 With a key set:
 
 - **`GET <baseUrl>/connections/<id>?format=signed`** returns the signed file for a public record that is currently verified: the record as JSON under an OpenPGP cleartext signature. It is signed when asked for, so it says the record stood at that moment. An unlisted, revoked or expired record has no signed form. A public retired record has one, signed as `version: 2` with `status: "retired"` and `retiredAt`, so a reader that knows only version 1 refuses it and never takes it for a record that stood.
-- **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. The Cloudflare Worker also serves that list at `/.well-known/verily-keys.json`.
+- **`GET <baseUrl>/keys.asc`** is the public key as `gpg --import` reads it. **`GET <baseUrl>/keys`** lists the same keys as JSON, each with its fingerprint. An instance also serves that list at `/.well-known/verily-keys.json`.
 - **`<baseUrl>/check`** is a page where a saved file can be pasted and read back.
 - The evidence page says the record is signed and links to the signed record. The badge's dialog checks the signature in the browser with OpenPGP.js, which it starts only when a record is signed, marks the record with a `signed` pill after its verifier, and links to that page. A record whose signature fails is shown as unconfirmed, with `bad signature` in the pill's place.
 - The approval step tells the holder that a saved signed record outlives removal.
@@ -470,7 +491,7 @@ A signed record proves what the verifier claimed and when (`issuedAt`). It does 
 
 `generateSigningKey()` makes an Ed25519 key in the OpenPGP form GnuPG reads, with no subkeys. Any OpenPGP key that signs with its primary key works as `signingKey`; one that is revoked, expired or passphrase-protected is refused. Checking is done by OpenPGP.js under the format's own rules: a key is judged as it stood when the record was signed, so an expired key, or one revoked as retired or superseded, still answers for records it signed before then, and a key revoked as compromised signs nothing at all.
 
-The Cloudflare Worker signs by default, with a key it makes and stores itself. Set the `SIGNING_KEY` secret to supply your own, or `SIGNING` to `off` to sign nothing.
+An instance signs by default, with a key it makes and stores itself. Set `SIGNING_KEY` to supply your own, or `SIGNING` to `off` to sign nothing.
 
 ## What DNS says of the verifier
 
@@ -507,7 +528,7 @@ createVerily({
 - The evidence page and `<baseUrl>/check` say the signing key is named in the verifier's DNS, with a link to the lookup, once it is. The answer is kept for ten minutes.
 - When a link is approved, the site's domain is looked up. If it names this verifier, the record's local side carries the lookup as `artifactUrl` and the record as `expect`, the evidence reads "Stated by … whose DNS names this verifier" and links to the lookup, and the signed record includes it. `recheck()` reads each site again every `recheckMs`, one lookup for all of a site's records. A record loses the proof when the site stops naming the verifier, or when the lookup has gone unread for `freshnessMs`; its status is unaffected either way.
 
-The Cloudflare Worker sets `dns: true`.
+An instance sets `dns: true`.
 
 ## Operations
 
@@ -571,9 +592,10 @@ npm run format:check   # npm run format fixes formatting
 npm test
 TEST_DATABASE_URL=postgres://verily:verily@localhost:5432/verily npm test
 npm run test:consumer
+npm run starter:check
 ```
 
-The Postgres and example tests only run when `TEST_DATABASE_URL` is set. The other tests use a fake provider and in-memory storage, so a live GitHub sign-in still has to be tried by hand. `test:consumer` installs the packed package into a separate project and checks its Node and browser imports. CI runs all of it, Postgres included, on Node 22.13, 24 and 26.
+The Postgres and example tests only run when `TEST_DATABASE_URL` is set. The other tests use a fake provider and in-memory storage, so a live GitHub sign-in still has to be tried by hand. `test:consumer` installs the packed package into a separate project and checks its Node and browser imports. `starter:check` writes the project `verily init cloudflare` gives a new instance and bundles it as a deploy would, without deploying. CI runs all of it, Postgres included, on Node 22.13, 24 and 26.
 
 ## License
 
