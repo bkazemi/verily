@@ -1,29 +1,30 @@
-// Copy to wrangler.jsonc and fill in your own deployment. wrangler.jsonc is
-// gitignored: it names a specific Cloudflare account and a specific site owner,
-// neither of which belongs in the library.
+import { version } from '../version.js';
+
+/** The package as a project depends on it: this release, and later ones compatible with it. */
+const release = `^${version.slice(1)}`;
+
+const wrangler = `// Your instance's Cloudflare settings. Fill in account_id and the vars below.
 //
-// Secrets are never set here. Use `wrangler secret put NAME` for:
-//   GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, OWNER_KEY
-// and, to offer Discord or YouTube sign-in, DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
-// or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Each app needs
-// <PUBLIC_ORIGIN>/callback as a redirect.
-// To offer email, RESEND_API_KEY, with EMAIL_FROM set in vars below.
-// Each site listed in SITES below also needs its key as SITE_<ID>_KEY.
+// Secrets are never set here. Use \`npx wrangler secret put NAME\` for OWNER_KEY, the
+// secret you sign in with: at least 32 random bytes, base64url, such as the output of
+//   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 //
-// Those two GitHub secrets are only needed by GitHub sign-in, which is offered
-// when both are set. The holder-paced methods need no registration and no
-// secret: a link back from a GitHub profile, a DNS record, and a signature from
-// an OpenPGP key are always offered. The list is in src/instance/env.ts, shared
-// with the Node server, so both hosts offer the same methods.
+// A link back from a GitHub profile, a DNS record and an OpenPGP signature are always
+// offered. Each sign-in is offered once both of its secrets are set:
+//   GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET
+//   DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET
+//   GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (YouTube)
+// Each app needs <PUBLIC_ORIGIN>/callback as a redirect.
+// Email is offered once the RESEND_API_KEY secret and EMAIL_FROM below are set.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "verily",
   "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
-  "main": "cloudflare/worker.ts",
+  "main": "worker.ts",
   "compatibility_date": "2026-07-01",
   "compatibility_flags": ["nodejs_compat"],
-  // publicFetch() loads undici only on Node, so it has no place in the Worker.
-  "alias": { "undici": "./cloudflare/undici.ts" },
+  // The library loads undici only on Node, so the Worker build gets a stand-in for it.
+  "alias": { "undici": "@bkazemi/verily/instance/undici" },
 
   // Serve the backend from a host a reader can tie to the site making the
   // claim. Keep workers_dev true until the custom domain answers, then set it
@@ -62,7 +63,8 @@
     // Public records are signed with a key this installation makes and keeps. Set "off"
     // to sign nothing, or set the SIGNING_KEY secret to supply the key yourself.
     // "SIGNING": "off",
-    // Sites that send their users here instead of hosting Verily; see docs/cloudflare.md.
+    // Sites that send their users here instead of hosting Verily; each also needs
+    // its key as the secret SITE_<ID>_KEY.
     // "SITES": [
     //   {
     //     "id": "partner",
@@ -78,3 +80,27 @@
     // ],
   },
 }
+`;
+
+/**
+ * The files of a project that runs an instance on Cloudflare. All of the instance is in the
+ * package, so the project is its settings and one line that names the entry, and it takes
+ * a new release by updating the dependency.
+ */
+export const cloudflareStarter: Record<string, string> = {
+  'package.json': `${JSON.stringify(
+    {
+      name: 'verily-instance',
+      private: true,
+      type: 'module',
+      scripts: { dev: 'wrangler dev --local', deploy: 'wrangler deploy' },
+      dependencies: { '@bkazemi/verily': release },
+      devDependencies: { wrangler: '^4.132.0' },
+    },
+    null,
+    2,
+  )}\n`,
+  'worker.ts': "export { default, VerilyStore } from '@bkazemi/verily/instance/cloudflare';\n",
+  'wrangler.jsonc': wrangler,
+  '.gitignore': 'node_modules\n.wrangler\n.dev.vars\n',
+};

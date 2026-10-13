@@ -1,9 +1,12 @@
 import type { DurableObjectState } from '@cloudflare/workers-types';
-import { CloudflareStorage } from '../../cloudflare/storage.js';
-import { VerilyStore as Store, type Env } from '../../cloudflare/worker.js';
+import {
+  CloudflareStorage,
+  VerilyStore as Store,
+  type Env,
+} from '../../src/instance/cloudflare.js';
 
 /** Test-only entry point; never included in the deployment bundle. */
-export { default } from '../../cloudflare/worker.js';
+export { default } from '../../src/instance/cloudflare.js';
 
 /**
  * The worker's object with a door only tests reach, since nothing routes the host `probe`

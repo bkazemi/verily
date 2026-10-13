@@ -58,5 +58,6 @@ jobs:
 
       - run: npm run test:consumer
 
-      # wrangler.jsonc is each deployment's own and is not committed.
-      - run: npx wrangler deploy --dry-run --config wrangler.example.jsonc --outdir .wrangler/build
+      # Writes the starter project `verily init cloudflare` gives a new instance, and bundles
+      # it. The package resolves by name here because the example workspace links it.
+      - run: npm run starter:check

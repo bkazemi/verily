@@ -203,3 +203,56 @@ test('serve runs an instance from its settings and counts by the header a proxy 
 
   await assert.rejects(serve(settings), /DATABASE_URL must be set/);
 });
+
+test('the Cloudflare starter depends on this release and names the package entry', async () => {
+  const { cloudflareStarter: files } = await import('../src/instance/starter.js');
+  const { version } = await import('../src/version.js');
+
+  assert.deepEqual(Object.keys(files).sort(), [
+    '.gitignore',
+    'package.json',
+    'worker.ts',
+    'wrangler.jsonc',
+  ]);
+
+  assert.equal(
+    JSON.parse(files['package.json']!).dependencies['@bkazemi/verily'],
+    `^${version.slice(1)}`,
+  );
+
+  assert.match(files['worker.ts']!, /from '@bkazemi\/verily\/instance\/cloudflare'/);
+  // The names the package's own class and stand-in go by, which the settings must match.
+  assert.match(files['wrangler.jsonc']!, /"class_name": "VerilyStore"/);
+  assert.match(files['wrangler.jsonc']!, /"undici": "@bkazemi\/verily\/instance\/undici"/);
+  assert.match(files['wrangler.jsonc']!, /"main": "worker\.ts"/);
+});
+
+test('init writes the whole starter or none of it, and leaves existing files alone', async () => {
+  const { init } = await import('../src/instance/init.js');
+  const { mkdtemp, readdir, readFile, rm, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'verily-init-'));
+
+  try {
+    // The last file written is the one in the way, so every earlier one would be left behind.
+    await writeFile(join(directory, '.gitignore'), 'mine\n');
+    await assert.rejects(init(directory), /\.gitignore already exists\. Nothing was written\./);
+    assert.deepEqual(await readdir(directory), ['.gitignore']);
+    assert.equal(await readFile(join(directory, '.gitignore'), 'utf8'), 'mine\n');
+
+    await rm(join(directory, '.gitignore'));
+    await init(join(directory, 'new', 'project'));
+
+    assert.deepEqual((await readdir(join(directory, 'new', 'project'))).sort(), [
+      '.gitignore',
+      'package.json',
+      'worker.ts',
+      'wrangler.jsonc',
+    ]);
+
+    await assert.rejects(init(join(directory, 'new', 'project')), /Nothing was written/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

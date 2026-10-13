@@ -68,7 +68,7 @@ tag:
 	git tag -a "v$$(node -p "require('./package.json').version")" -m "v$$(node -p "require('./package.json').version")"
 
 deploy:
-	npm run cloudflare:deploy
+	npm run release:deploy
 
 publish:
 	npm publish

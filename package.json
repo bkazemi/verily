@@ -30,7 +30,8 @@
     "preview": "npm run build && tsx example/preview.ts",
     "cloudflare:dev": "wrangler dev --local",
     "cloudflare:check": "wrangler deploy --dry-run --outdir .wrangler/build",
-    "cloudflare:deploy": "wrangler deploy"
+    "starter:check": "rm -rf .wrangler/starter && node dist/instance/bin.js init cloudflare .wrangler/starter && wrangler deploy --dry-run --config .wrangler/starter/wrangler.jsonc --outdir .wrangler/starter-build",
+    "release:deploy": "wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260915.1",
@@ -63,7 +64,7 @@
     "docs/licenses"
   ],
   "bin": {
-    "verily-instance": "./dist/instance/bin.js"
+    "verily": "./dist/instance/bin.js"
   },
   "exports": {
     ".": {
@@ -99,6 +100,14 @@
     "./instance/serve": {
       "types": "./dist/instance/serve.d.ts",
       "default": "./dist/instance/serve.js"
+    },
+    "./instance/cloudflare": {
+      "types": "./dist/instance/cloudflare.d.ts",
+      "default": "./dist/instance/cloudflare.js"
+    },
+    "./instance/undici": {
+      "types": "./dist/instance/undici.d.ts",
+      "default": "./dist/instance/undici.js"
     },
     "./verily.js": "./dist/verily.js"
   }
