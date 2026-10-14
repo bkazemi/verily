@@ -220,10 +220,13 @@ test(
       assert.equal(visibility, 'public');
       assert.equal(await page.locator(`verily-badge[connection-id="${connection}"]`).count(), 1);
 
-      // Disconnecting from the settings page is a form too, and returns the same way.
+      // Disconnecting from the settings page asks first, then posts a form that returns the
+      // same way.
       await page.click('text=Manage linked accounts');
       await page.waitForURL(`${verifier}/`);
-      await page.click('text=Disconnect');
+      await page.click('button:has-text("Disconnect")');
+      await page.waitForURL(/\/confirm\?/);
+      await page.click('button:has-text("Disconnect")');
       await page.waitForURL(`${site}/u/alice`);
       assert.equal(alice.links.size, 0);
     } finally {

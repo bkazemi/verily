@@ -540,7 +540,8 @@ test('a retired record says so on its page, with its last proof and its retireme
 
   const text = await (await f.request(`/connections/${id}`)).text();
 
-  assert.match(text, /<h1>Retired connection<\/h1>/);
+  // The V before the heading is drawn faint: a retired record claims nothing now.
+  assert.match(text, /<h1><svg class="verdict pending"[^>]*>.*?<\/svg>Retired connection<\/h1>/);
   assert.match(text, /<dt>Last verified<\/dt><dd>1970-01-01T00:16:40Z<\/dd>/);
   assert.match(text, /<dt>Retired<\/dt><dd>1970-01-04T00:16:40Z<\/dd>/);
   assert.doesNotMatch(text, /Expired on|Valid until|Verified connection/);

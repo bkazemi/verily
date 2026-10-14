@@ -423,7 +423,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
     // The owner page names the mailbox by its address, with no @ put in front of it.
     const home = await (await mf.dispatchFetch(`${origin}/`, { headers: { cookie } })).text();
 
-    assert.match(home, /<h3>alice@example\.test<\/h3>/);
+    assert.match(home, /<p class="name">alice@example\.test<\/p>/);
   } finally {
     await mf.dispose();
   }

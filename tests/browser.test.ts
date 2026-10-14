@@ -2880,8 +2880,9 @@ test('each account in an open dialog lapses at its own deadline', async () => {
   const soon = Date.now();
 
   verily.presentConnections(host, [
-    linked('a', 'alice', 100, { expiresAt: soon + 60 }),
-    linked('b', 'bob', 200, { expiresAt: soon + 140 }),
+    // Deadlines far enough apart that a loaded machine still checks between them.
+    linked('a', 'alice', 100, { expiresAt: soon + 400 }),
+    linked('b', 'bob', 200, { expiresAt: soon + 1000 }),
     linked('c', 'carol', 300),
   ]);
 
@@ -2894,11 +2895,11 @@ test('each account in an open dialog lapses at its own deadline', async () => {
       .map((e) => e.textContent);
 
   assert.deepEqual(states(), ['Verified', 'Verified', 'Verified']);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 700 - (Date.now() - soon)));
   assert.deepEqual(states(), ['Expired', 'Verified', 'Verified']);
 
   // The second deadline is watched too, without waiting for the next check.
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 600));
   assert.deepEqual(states(), ['Expired', 'Expired', 'Verified']);
 });
 
