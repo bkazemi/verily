@@ -26,17 +26,26 @@ Changes that matter to people using Verily, newest first. Versions before 0.7.0 
   `GITHUB_CLIENT_SECRET` are both set, like Discord and YouTube.
 - **An instance names a missing setting.** It stops at startup with the name of a required
   setting that is not set.
-- **`/records` shows an account's join date on its name's line,** as every other card does.
-- **An instance's settings page shows each connection as one card:** the account with its link, id and join date, its state, and its actions in one row. Expiry reads as a date and a distance, such as "Nov 13, 2026 (in 30 days)".
-- **Retiring an account or removing a connection asks first,** on a page of its own at `/confirm`.
-- **`/records` groups connections by site,** with live ones first, and draws each as the settings page does, with who it is linked to on a line of its own.
-- **Server pages draw the badge's marks.** A card's heading shows the provider's mark, and a record's state shows the badge's V in the same colours: on an instance's cards, the evidence page's heading and each account's status line.
+- **An instance's settings page shows each connection as one card:** the account with its
+  link, id and join date, its state, and its actions. Expiry reads as a date and a
+  distance, such as "Nov 13, 2026 (in 30 days)".
+- **Retiring an account or removing a connection asks first,** on a page of its own at
+  `/confirm`.
+- **`/records` groups connections by site,** live ones first, and draws each as the
+  settings page does, join date included, with who it is linked to on a line of its own.
+- **Server pages draw the badge's marks.** A card's heading shows the provider's mark, and
+  a record's state shows the badge's V in the same colours: on an instance's cards, the
+  evidence page's heading and each account's status line.
+- **An instance's short pages, such as sign-in, sit centred in a narrower column.**
 - **A refusal page links back to the start page.**
 
 ### Fixed
 
-- **The embed snippet on an instance's settings page loads the badge script from the published package.** It named `/assets/verily.js`, a path on the site it was pasted into. It also has a copy button now.
-- **Buttons on every Verily page use the page's font.** The stylesheet's `font` line for buttons was invalid, so browsers drew them in their default font.
+- **The embed snippet on an instance's settings page loads the badge script from the
+  published package.** It named `/assets/verily.js`, a path on the site it was pasted
+  into. It also has a copy button now.
+- **Buttons on every Verily page use the page's font.** The stylesheet's `font` line for
+  buttons was invalid, so browsers drew them in their default font.
 
 ### Removed
 
