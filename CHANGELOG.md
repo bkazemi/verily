@@ -3,6 +3,56 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.8.0] - 2026-10-13
+
+### Added
+
+- **The standalone backend is in the package.** `createInstance` from
+  `@bkazemi/verily/instance` is the complete app that was the Cloudflare Worker in this
+  repository: one owner who signs in with a key, registered sites, rate limits and upkeep.
+  It takes a store and returns a request handler and `upkeep()`.
+- **Instances run on Node.** `verily serve` runs one from the environment, with Postgres
+  for storage. `PostgresStore` and `nodeListener` are exported for a server of your own.
+- **A Cloudflare instance installs from npm.** `npx @bkazemi/verily init cloudflare <dir>`
+  writes a project of four files that imports `@bkazemi/verily/instance/cloudflare`. It
+  takes a new release by updating the dependency.
+- **The `verily` command,** with `serve` and `init cloudflare`.
+- **One set of settings for every host.** `fromEnv` reads the same names on Node and
+  Cloudflare, so both offer the same methods.
+
+### Changed
+
+- **GitHub sign-in on an instance is optional.** It is offered when `GITHUB_CLIENT_ID` and
+  `GITHUB_CLIENT_SECRET` are both set, like Discord and YouTube.
+- **An instance names a missing setting.** It stops at startup with the name of a required
+  setting that is not set.
+- **`/records` shows an account's join date on its name's line,** as every other card does.
+- **An instance's settings page shows each connection as one card:** the account with its link, id and join date, its state, and its actions in one row. Expiry reads as a date and a distance, such as "Nov 13, 2026 (in 30 days)".
+- **Retiring an account or removing a connection asks first,** on a page of its own at `/confirm`.
+- **`/records` groups connections by site,** with live ones first.
+- **A refusal page links back to the start page.**
+
+### Fixed
+
+- **The embed snippet on an instance's settings page loads the badge script from the published package.** It named `/assets/verily.js`, a path on the site it was pasted into. It also has a copy button now.
+- **Buttons on every Verily page use the page's font.** The stylesheet's `font` line for buttons was invalid, so browsers drew them in their default font.
+
+### Removed
+
+- **`wrangler.example.jsonc`.** `verily init cloudflare` writes the same settings file.
+
+### Upgrading
+
+- A Cloudflare instance deployed from a clone of this repository keeps working after a
+  pull: `cloudflare/worker.ts` is still the entry. Deploy it with `npx wrangler deploy`,
+  since the `cloudflare:deploy` script is gone.
+- To move that instance to an installed project, run `init cloudflare` and copy your
+  `account_id`, `name`, routes and `vars` into the new `wrangler.jsonc`. Keep `name`, the
+  `VERILY` binding, the `VerilyStore` class and the `v1` migration as they are: the stored
+  connections belong to that Worker and that class.
+
+[Full changelog](https://github.com/bkazemi/verily/compare/v0.7.0...v0.8.0)
+
 ## [0.7.0] - 2026-10-12
 
 ### Added
