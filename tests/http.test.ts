@@ -131,15 +131,13 @@ test('the verify page names what is linked, which is not always an account', asy
       await (
         await fixture(providers).request('/verify', { headers: { cookie: 'local=alice' } })
       ).text()
-    ).match(/between this \w+ and your ([^<]*)\.<\/p>/)![1];
+    ).match(/Show you control your ([^<]*) to link it/)![1];
 
   assert.equal(await said([fakeProvider()]), 'GitHub account');
 
-  // A key and a domain are not accounts, and two ways of showing one domain name it once.
-  assert.equal(
-    await said([fakeProvider(), fakeDocumentProvider(), dnsProvider(), wellKnownProvider()]),
-    'GitHub account, Keys key or domain',
-  );
+  // a key and a domain are not accounts
+  assert.equal(await said([fakeDocumentProvider()]), 'Keys key');
+  assert.equal(await said([dnsProvider()]), 'domain');
 });
 
 test('a domain proof is said to name the subject only where it publishes its address', async () => {

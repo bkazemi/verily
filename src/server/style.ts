@@ -240,6 +240,10 @@ dd { margin: 0; font-variant-numeric: tabular-nums; }
 section dl { margin: .5rem 0 1rem; padding-top: 0; border-top: 0; }
 .side dl { margin: .625rem 0 0; padding-top: .625rem; }
 
+/* The links under a record, ruled off from the record and its disclaimer. */
+footer { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+footer > :last-child { margin-bottom: 0; }
+
 section {
   margin: 0 0 1.25rem;
   padding: 1.25rem 1.375rem;
@@ -303,6 +307,23 @@ a.button.secondary { border-color: var(--line); background: none; color: var(--i
 .choice { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.5rem; }
 .choice form { margin: 0; }
 
+/* Ways to verify: one full-width button per method, none filled over the others. */
+.choices { display: grid; gap: .5rem; margin-bottom: 1.5rem; }
+.choices form { margin: 0; }
+
+.choices button {
+  width: 100%;
+  text-align: left;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.choices button:hover { border-color: var(--muted); }
+
+/* A provider's mark before a button's label, at the height of the letters. */
+button .provider { width: 1rem; height: 1rem; margin-right: .5rem; vertical-align: -.1875rem; }
+
 /* A control that ends something. Filled where it is the page's one action. */
 button.danger { border-color: var(--warn); background: var(--warn); }
 
@@ -336,7 +357,9 @@ button.danger { border-color: var(--warn); background: var(--warn); }
 .verdict { flex-shrink: 0; width: 1rem; height: 1rem; }
 .verdict.pending { opacity: .45; }
 .how .verdict { width: .875rem; height: .875rem; margin-right: .3125rem; vertical-align: -.125rem; }
-h1 .verdict { width: 1.25rem; height: 1.25rem; margin-right: .5rem; vertical-align: -.0625rem; }
+/* Cropped to its strokes and taller than the heading's letters, centred beside them. */
+h1:has(.verdict) { display: flex; align-items: center; gap: .75rem; }
+h1 .verdict { width: auto; height: 2.25rem; }
 
 /*
  * In a state pill the V is cropped to its strokes and fills the pill's height, so its arms

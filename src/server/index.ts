@@ -367,6 +367,21 @@ function heldNames(providers: Provider[]): string {
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0]!;
 }
 
+/** What proving control is for on each kind of /verify page. */
+function purpose(kind: string, held: string, noun: string, several: boolean): string {
+  const ways: Record<string, string> = {
+    connect: several
+      ? `Choose an account to link to this ${noun}. You show you control it, then review the link before it's made.`
+      : `Show you control your ${held} to link it to this ${noun}. You review the link before it's made.`,
+    renew: `A connection lapses unless it's renewed. Show you still control your ${held} to extend it. It keeps its ID, so anywhere that shows it keeps working.`,
+    visibility: `Only someone who controls both accounts can change this. Show you still control your ${held}, then choose.`,
+    revoke: `Show you control the ${held} on this connection, and you can then remove it.`,
+    'share-revoke': `Show you control the ${held} on this connection, and you can then revoke its sharing link. The connection itself stays.`,
+  };
+
+  return ways[kind]!;
+}
+
 /** Provider setup with the flow’s return instructions, shared by HTML and the dialog. */
 function proofInstructions(provider: ArtifactProvider, flow: Flow): Instruction[] {
   return [
@@ -468,6 +483,7 @@ function evidencePage(
       undefined,
       attestationNote(e.attestations.local, names),
     ) +
+      joiner +
       externalCard(
         marked(names.provider, e.provider, e.attestations.external[0]!.method),
         e.external,
@@ -504,12 +520,12 @@ function evidencePage(
       `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
     ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? `<br>${keyLine(base, keyId, named)}` : ''}<br><a href="${escape(safeUrl(e.signedUrl))}">Download signed record</a> · <a href="${escape(base)}/check">Check a record</a></p>` : ''}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
-    <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
-    ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
-    <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p>`,
+    <footer><p class="fine">Is this your account? <a href="${escape(base)}/external-revoke/${escape(e.id)}?provider=${encodeURIComponent(e.provider)}">Remove this connection</a></p>
+    ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}?provider=${encodeURIComponent(e.provider)}">Revoke only this sharing link using your external account</a></p>` : ''}
+    <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p></footer>`,
     '',
     '',
-    verdict(toneOf(e, Date.now())),
+    verdict(toneOf(e, Date.now()), true),
   );
 }
 
@@ -640,6 +656,7 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
         undefined,
         attestationNote(d.attestations.local, names),
       ) +
+      joiner +
       externalCard(
         marked(names.provider, d.provider, d.attestations.external[0]!.method),
         d.external,
@@ -1048,32 +1065,44 @@ export function createVerily(options: ServerOptions) {
           // A new link started from this page always ends on its approval, as it did when
           // this form was a GET, so it says so: `/verify` is an address any site can send a
           // browser to, and the approval is where the holder sees what they are linking.
+          // the provider's mark where it has one, then what the button does
+          const label = (text: string, p: Provider) => {
+            const heading = marked(text, p.id, providerMethod(p));
+
+            return typeof heading === 'string'
+              ? escape(heading)
+              : `${heading.mark}<span>${escape(heading.text)}</span>`;
+          };
+
           const forms = offered
             .map(
               (p) =>
-                `<form method="post" action="${escape(prefix)}/sessions"><input type="hidden" name="kind" value="${kind}">${kind === 'connect' ? '<input type="hidden" name="unattended" value="1">' : ''}<input type="hidden" name="connectionId" value="${escape(id)}"><input type="hidden" name="provider" value="${escape(p.id)}"><input type="hidden" name="method" value="${escape(providerMethod(p))}"><button>${escape(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`)}</button></form>`,
+                `<form method="post" action="${escape(prefix)}/sessions"><input type="hidden" name="kind" value="${kind}">${kind === 'connect' ? '<input type="hidden" name="unattended" value="1">' : ''}<input type="hidden" name="connectionId" value="${escape(id)}"><input type="hidden" name="provider" value="${escape(p.id)}"><input type="hidden" name="method" value="${escape(providerMethod(p))}"><button>${label(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`, p)}</button></form>`,
             )
             .join('');
+
+          // several methods stack as one list of equal buttons, as in the dialog
+          const choices = offered.length > 1 ? `<div class="choices">${forms}</div>` : forms;
 
           return html(
             page(
               prefix,
               external
-                ? 'Remove a connection'
+                ? kind === 'share-revoke'
+                  ? 'Revoke a sharing link'
+                  : 'Remove a connection'
                 : kind === 'renew'
                   ? 'Renew this connection'
-                  : several
-                    ? 'Verify an account'
-                    : `Verify with ${providerNames(offered)}`,
+                  : kind === 'visibility'
+                    ? 'Change who can see this connection'
+                    : several
+                      ? 'Verify an account'
+                      : `Verify with ${providerNames(offered)}`,
               `
-            ${
-              user
-                ? card(subject(user).heading, subject(user).value, user.profileUrl)
-                : '<p>Authenticate with the matching external account to review and remove this link.</p>'
-            }
-            <p>Confirm the connection between this ${escape(subjectNoun(user?.kind) ?? 'site')} and your ${escape(heldNames(offered))}.</p>
+            ${user ? card(subject(user).heading, subject(user).value, user.profileUrl) : ''}
+            <p>${escape(purpose(kind, heldNames(offered), subjectNoun(user?.kind) ?? 'site', several))}</p>
             ${kind === 'renew' && offered.length > 1 ? '<p class="fine">Renewing another way adds that method beneath the one this connection was first shown by.</p>' : ''}
-            ${forms}`,
+            ${choices}`,
             ),
           );
         }
@@ -1201,6 +1230,7 @@ export function createVerily(options: ServerOptions) {
                     : 'Confirm connection',
               `
             ${card(subject(flow.local!).heading, subject(flow.local!).value, flow.local!.profileUrl)}
+            ${joiner}
             ${externalCard(marked(provider.name, provider.id, providerMethod(provider)), flow.external!)}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             ${found ? `<p>${escape(found)}</p>` : ''}
