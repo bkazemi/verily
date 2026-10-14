@@ -3,6 +3,26 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.8.1] - 2026-10-14
+
+### Changed
+
+- **`/verify` lists several methods as one stack of equal buttons,** each with its
+  provider's mark, as the connect dialog does.
+- **Each `/verify` page says what proving control is for:** linking, renewing, changing
+  visibility, removing a connection or revoking a sharing link. Changing visibility and
+  revoking a sharing link have headings of their own.
+- **The evidence, signed-record and approval pages draw the link between the two cards,**
+  as the dialogs do.
+- **The V in the evidence page's heading is larger than the heading's text.**
+- **The evidence page's links sit below a rule, apart from the disclaimer,** and the
+  removal link reads "Is this your account? Remove this connection".
+
+### Fixed
+
+- **Removing a connection from its evidence page offers only the record's own provider.**
+  It offered every method, and named every kind of account as the one on the connection.
+
 ## [0.8.0] - 2026-10-14
 
 ### Added
