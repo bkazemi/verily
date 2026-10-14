@@ -455,7 +455,14 @@ test('a site holder connects, returns with a signed result, and manages from a s
       /Only Partner can read this connection, and it chooses who there sees it/,
     );
 
-    assert.match(settings, /action="\/disconnect"/);
+    // Disconnecting goes by a page that asks first, and that page posts the disconnect.
+    assert.match(settings, /<form action="\/confirm" method="get">/);
+    assert.ok(!settings.includes('action="/disconnect"'));
+
+    const confirming = await a.fetch(`/confirm?do=remove&connection=${connected.connection}`);
+
+    assert.match(await confirming.text(), /<form action="\/disconnect" method="post">/);
+    assert.equal((await a.fetch('/confirm?do=remove&connection=nope')).status, 404);
     assert.ok(!settings.includes('verily-badge'));
     assert.ok(!settings.includes('Sign out'));
 
@@ -491,7 +498,12 @@ test('a site holder connects, returns with a signed result, and manages from a s
 
     assert.match(listing, /<form action="\/mark" method="post">/);
     assert.match(listing, /Mark as preferred/);
-    assert.match(listing, /Retiring keeps this record as history/);
+    assert.ok(!listing.includes('value="retired"'));
+
+    assert.match(
+      await (await a.fetch(`/confirm?do=retire&connection=${connected.connection}`)).text(),
+      /Retiring keeps this record as history[^]*name="as" value="retired"/,
+    );
 
     // The library's own route would change the record and tell the site nothing.
     assert.equal(
@@ -660,8 +672,9 @@ test('a site holder connects, returns with a signed result, and manages from a s
     // The operator sees every record on the instance, the sites' holders' among them.
     const records = await (await owner.fetch('/records')).text();
 
-    assert.match(records, /shirkadeh\.test · public · Verified/);
-    assert.match(records, /Partner · (public|unlisted) · /);
+    // Grouped under each site, with its count, and the state on each card.
+    assert.match(records, /<h2>shirkadeh\.test · 1<\/h2>[^]*public · Verified/);
+    assert.match(records, /<h2>Partner · \d+<\/h2>[^]*(public|unlisted) · /);
     assert.match(records, /\d+ on this instance: \d+ public, \d+ unlisted\./);
     // The account's creation date is on the name's line, as on every other card.
     assert.match(records, /<span class="since">Joined 2011-01-25<\/span>/);

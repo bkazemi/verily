@@ -15,6 +15,7 @@ export const stylesheet = `:root {
   --surface: #fff;
   --raised: #f7f9f7;
   --accent: #245f43;
+  --warn: #a4442b;
   color-scheme: light dark;
   accent-color: var(--accent);
 }
@@ -27,6 +28,7 @@ export const stylesheet = `:root {
     --surface: #161a18;
     --raised: #1d2220;
     --accent: #7fc4a2;
+    --warn: #e59a82;
   }
 }
 
@@ -73,6 +75,13 @@ h1 {
  * from the record beneath it, and a page that only asks for a key has no record to divide.
  */
 main.single h1 { margin-bottom: 1.25rem; padding-bottom: 0; border-bottom: none; }
+
+/*
+ * A page holding one thing sits in the middle of the window rather than at its top,
+ * where it would leave most of the window empty below it.
+ */
+body:has(main.single) { display: flex; min-height: 100vh; min-height: 100dvh; }
+main.single { width: 100%; max-width: 24rem; margin: auto; padding-bottom: 3rem; }
 
 h2 { margin: 2rem 0 .75rem; font-size: 1.125rem; font-weight: 620; letter-spacing: -.01em; }
 
@@ -163,6 +172,7 @@ main:has(.accounts) { max-width: 54rem; }
 }
 
 .listing.preferred { border-color: var(--accent); color: var(--accent); }
+}
 
 /* The times sit at the foot of the card, so they line up along a row of uneven cards. */
 .accounts .side dl { margin-top: auto; }
@@ -264,11 +274,99 @@ button {
   border-radius: 6px;
   background: var(--accent);
   color: var(--surface);
-  font: 500 .9375rem/1.4 inherit;
+  font: 500 .9375rem/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
   cursor: pointer;
 }
 
+/* A link that starts something, drawn as a button. */
+a.button {
+  display: inline-block;
+  padding: .5rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 500;
+  font-size: .9375rem;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
 button + button { margin-left: .5rem; border-color: var(--line); background: none; color: var(--ink); }
+
+/* The other choice beside a page's one action, such as Cancel. */
+a.button.secondary { border-color: var(--line); background: none; color: var(--ink); }
+
+/* A page's action and its alternative, side by side. */
+.choice { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.5rem; }
+.choice form { margin: 0; }
+
+/* A control that ends something. Filled where it is the page's one action. */
+button.danger { border-color: var(--warn); background: var(--warn); }
+
+/*
+ * A connection on the settings page: the account's card, then what can be done with it.
+ * Its state sits in the card's corner, on the line that names the method.
+ */
+.connection { position: relative; margin-bottom: 1rem; }
+
+.state {
+  position: absolute;
+  top: .75rem;
+  right: .875rem;
+  padding: .0625rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: .6875rem;
+  font-weight: 550;
+}
+
+.state.verified { border-color: var(--accent); color: var(--accent); }
+.state.expired, .state.revoked { border-color: var(--warn); color: var(--warn); }
+
+/*
+ * A pill's line includes room for descenders below the letters, which leaves its text
+ * sitting high. Trimmed to the letters, the padding alone sets the space above and below.
+ */
+@supports (text-box: trim-both cap alphabetic) {
+  .listing, .state { padding: .3125rem .5rem; text-box: trim-both cap alphabetic; }
+
+/* Links that sit together on one line, wrapping where there is no room. */
+.links { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; font-size: .875rem; }
+
+/* Under the account's id, with the facts about it rather than the controls. */
+.evidence { margin: .375rem 0 0; font-size: .8125rem; }
+
+.connection dl { margin-bottom: .75rem; }
+.connection pre { margin: .75rem 0; background: var(--surface); }
+.connection .actions { margin-top: .875rem; }
+
+/* The buttons for one connection in a row, wrapping where there is no room. */
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.actions form { display: contents; }
+
+.actions button, .actions a.button {
+  margin: 0;
+  padding: .3125rem .75rem;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: .8125rem;
+}
+
+.actions button:hover, .actions a.button:hover { border-color: var(--muted); }
+
+/* The controls that cannot be undone, together at the foot of the card. */
+.ending { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+.ending form { margin: 0; }
+
+.ending button.danger {
+  padding: .3125rem .75rem;
+  background: var(--surface);
+  color: var(--warn);
+  font-size: .8125rem;
+}
 
 fieldset { margin: 0 0 1.25rem; padding: 1rem 1.125rem .25rem; border: 1px solid var(--line); border-radius: 8px; }
 

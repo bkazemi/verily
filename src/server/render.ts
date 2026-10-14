@@ -13,9 +13,10 @@ import { styleVersion } from './style.js';
 /**
  * The shell every Verily page shares: the stylesheet, the logotype and the heading. `variant`
  * is a class on the page's `main`, such as `single` for a page with one thing on it.
+ * `script` is the path of one script the page runs.
  */
-export const page = (prefix: string, title: string, body: string, variant = '') =>
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verily</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(title)}</h1>${body}</main></body></html>`;
+export const page = (prefix: string, title: string, body: string, variant = '', script = '') =>
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verily</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(title)}</h1>${body}</main>${script && `<script src="${escape(script)}" defer></script>`}</body></html>`;
 
 /**
  * One side of a link, with each thing known about it on its own line. A name, the
@@ -73,6 +74,26 @@ export function side(
 
 /** A day, as the date alone. */
 export const day = (time: number) => new Date(time).toISOString().slice(0, 10);
+
+/** A day as it is said, such as "Jan 11, 2027". In UTC, as every other time here is. */
+export const date = (time: number) =>
+  new Date(time).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+
+/** How far off a time is in whole days, such as "in 90 days" or "12 days ago". */
+export function distance(time: number, now: number) {
+  const days = Math.round((time - now) / 86400000);
+
+  if (days === 0) return 'today';
+
+  const count = `${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'}`;
+
+  return days > 0 ? `in ${count}` : `${count} ago`;
+}
 
 /** Seconds are the finest thing a record measured in days can mean; milliseconds are noise. */
 export const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');

@@ -12,17 +12,16 @@ import {
   type LocalAccount,
   type Provider,
 } from '../core/index.js';
-import { logo } from '../logo.js';
 import { escape } from '../server/escape.js';
-import { card, day, moment, side } from '../server/render.js';
-import { styleVersion } from '../server/style.js';
+import { card, date, day, distance, externalCard, page, side } from '../server/render.js';
+import { version } from '../version.js';
 import { createVerily, generateSigningKey } from '../server/index.js';
 import { recordStorage, type Store } from './store.js';
 import { OwnerAuth } from './auth.js';
 import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
 import { allow, client, limits, prune } from './limits.js';
 import { own } from './routes.js';
-import { html, safeHeaders } from './page.js';
+import { html, safeHeaders, unavailable } from './page.js';
 
 export { fromEnv, type InstanceEnv } from './env.js';
 
@@ -110,7 +109,7 @@ const maxBodyBytes = 65536;
 /** How a holder may have an account listed, as the library's mark route takes it. */
 const listings: readonly Listing[] = ['preferred', 'current', 'unused', 'retired'];
 
-/** Said beside the control that retires an account, since nothing here asks twice. */
+/** Said on the page that asks before an account is retired. */
 const retiringNote =
   'Retiring keeps this record as history. It will no longer read as verified, and who can read it cannot be changed afterwards.';
 
@@ -187,7 +186,7 @@ const enterScript = `const status=document.getElementById('status');const fail=(
 
 const enterPage = () =>
   new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Verily</title><link rel="stylesheet" href="/style.css?v=${styleVersion}"><body><main class="single">${logo}<h1>Sign in</h1><p id="status">Opening the sign-in page.</p></main><script src="/site/enter.js"></script></body></html>`,
+    page('', 'Sign in', '<p id="status">Opening the sign-in page.</p>', 'single', '/site/enter.js'),
     {
       headers: {
         ...safeHeaders,
@@ -242,7 +241,7 @@ async function boundedBody(request: Request): Promise<ArrayBuffer | undefined> {
 export async function admit(request: Request, origin: string): Promise<Request | Response> {
   const url = new URL(request.url);
 
-  if (url.origin !== origin) return html('Unavailable', '', 404);
+  if (url.origin !== origin) return unavailable();
 
   // Asked by a browser before a page on another origin may send the dialog's headers.
   if (
@@ -251,14 +250,14 @@ export async function admit(request: Request, origin: string): Promise<Request |
   )
     return preflight(request);
 
-  if (!['GET', 'POST'].includes(request.method)) return html('Unavailable', '', 405);
+  if (!['GET', 'POST'].includes(request.method)) return unavailable(405);
 
   let body: ArrayBuffer | undefined;
 
   try {
     body = await boundedBody(request);
   } catch {
-    return html('Request too large', '', 413);
+    return html('Request too large', '', 413, 'single');
   }
 
   return new Request(request.url, {
@@ -379,7 +378,7 @@ class Server {
 
       response = admitted instanceof Response ? admitted : await this.route(admitted, address);
     } catch {
-      response = html('Temporarily unavailable', '', 503);
+      response = html('Temporarily unavailable', '<p>Try again shortly.</p>', 503, 'single');
     }
 
     // An approval or disconnect form redirects on to the holder's site, and Chromium holds
@@ -413,10 +412,10 @@ class Server {
         request.headers.get('origin') !== this.origin ||
         !request.headers.get('content-type')?.startsWith('application/json')
       )
-        return html('Unavailable', '', 403);
+        return unavailable(403);
 
       if (!(await this.allowed(request, url, address)))
-        return html('Too many requests', '<p>Try again later.</p>', 429);
+        return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
 
       return this.enter(request);
     }
@@ -438,7 +437,7 @@ class Server {
       return shared(await this.dialog(request, url, address), request);
 
     if (!(await this.allowed(request, url, address)))
-      return html('Too many requests', '<p>Try again later.</p>', 429);
+      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
 
     if (request.method === 'POST' && url.pathname === '/site/session') {
       const opened = await this.sites.dialog(
@@ -450,10 +449,10 @@ class Server {
 
       return shared(
         opened === 'limited'
-          ? html('Too many requests', '<p>Try again later.</p>', 429)
+          ? html('Too many requests', '<p>Try again later.</p>', 429, 'single')
           : opened
             ? data({ session: opened.session })
-            : html('Unavailable', '', 404),
+            : unavailable(),
         request,
       );
     }
@@ -468,7 +467,7 @@ class Server {
     if (request.method === 'POST') {
       if (url.pathname === '/login') {
         if (!(await this.auth.allow('login', 10, 15 * 60000)))
-          return html('Too many requests', '<p>Try again in fifteen minutes.</p>', 429);
+          return html('Too many requests', '<p>Try again in fifteen minutes.</p>', 429, 'single');
 
         const key = new URLSearchParams(await request.text()).get('key') ?? '';
         const cookie = await this.auth.login(key);
@@ -478,7 +477,7 @@ class Server {
 
       if (url.pathname === '/logout') return redirect(await this.auth.logout(request));
 
-      if (request.headers.get('origin') !== this.origin) return html('Unavailable', '', 403);
+      if (request.headers.get('origin') !== this.origin) return unavailable(403);
 
       if (url.pathname === '/disconnect') return this.disconnect(request);
 
@@ -494,7 +493,7 @@ class Server {
         url.searchParams.get('purpose'),
       );
 
-      return begun ? see(begun.location, [begun.cookie]) : html('Unavailable', '', 404);
+      return begun ? see(begun.location, [begun.cookie]) : unavailable();
     }
 
     if (request.method === 'GET' && url.pathname === '/handoff/accept') {
@@ -532,7 +531,7 @@ class Server {
       // instance, which reports it back to the site, and has no sharing links. The library's
       // routes would do neither.
       if (manages(request.method, url.pathname) && (await this.sites.open(request)))
-        return html('Unavailable', '', 404);
+        return unavailable();
 
       // Some browsers omit Origin on native same-origin form posts. The request
       // already passed the exact public-origin check above; flow cookies are
@@ -547,13 +546,13 @@ class Server {
       return this.app.handle(request);
     }
 
+    if (request.method === 'GET' && url.pathname === '/confirm') return this.confirm(request, url);
+
     // Every record on the instance, for whoever holds the owner key and nobody else.
     if (request.method === 'GET' && url.pathname === '/records')
-      return (await this.auth.authenticated(request))
-        ? this.records()
-        : html('Unavailable', '', 404);
+      return (await this.auth.authenticated(request)) ? this.records() : unavailable();
 
-    if (request.method !== 'GET' || url.pathname !== '/') return html('Unavailable', '', 404);
+    if (request.method !== 'GET' || url.pathname !== '/') return unavailable();
 
     const found = await this.sites.session(request);
 
@@ -605,34 +604,33 @@ class Server {
   private async dialog(request: Request, url: URL, address: string | null): Promise<Response> {
     // Counted against the sender's address, as a refused read is: a request turned away
     // here never reaches the counting a served one gets, and each costs a lookup.
-    const unavailable = async () =>
+    const turnedAway = async () =>
       (await allow(this.store, [{ key: client(address), limit: limits.client }]))
-        ? html('Unavailable', '', 404)
-        : html('Too many requests', '<p>Try again later.</p>', 429);
+        ? unavailable()
+        : html('Too many requests', '<p>Try again later.</p>', 429, 'single');
 
     const session = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '';
     const binding = request.headers.get(flowHeader) ?? '';
     const post = request.method === 'POST';
     const body = post ? await request.text() : undefined;
 
-    if (!opaque.test(session) || (binding && !opaque.test(binding))) return unavailable();
+    if (!opaque.test(session) || (binding && !opaque.test(binding))) return turnedAway();
 
     // What the dialogs on a registered site's own page may ask for is the library's to say:
     // the methods, a flow's start, state, proof and approval, and the removal or the
     // listing of one of the holder's own accounts. Everything else stays same-origin.
     const route = dialogRoute(request.method, url.pathname, url.searchParams);
 
-    if (!route) return unavailable();
+    if (!route) return turnedAway();
 
     if (post) {
-      if (!request.headers.get('content-type')?.startsWith('application/json'))
-        return unavailable();
+      if (!request.headers.get('content-type')?.startsWith('application/json')) return turnedAway();
 
       // The dialog connects an account or renews one. Every other kind of flow has a page
       // of its own here. Parsed as the library parses it, so the kind checked is the kind
       // it will run.
       if (route === 'start' && !['connect', 'renew'].includes(String(parsed(body!)?.kind)))
-        return unavailable();
+        return turnedAway();
     }
 
     const inner = new Request(request.url, {
@@ -648,10 +646,10 @@ class Server {
     const found = await this.sites.open(inner);
 
     if (!found || this.site(found.session).origin !== request.headers.get('origin'))
-      return unavailable();
+      return turnedAway();
 
     if (!(await this.allowed(inner, url, address)))
-      return html('Too many requests', '<p>Try again later.</p>', 429);
+      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
 
     const response = await this.app.handle(inner);
     const answer = new Response(response.body, response);
@@ -678,13 +676,13 @@ class Server {
     const { flow: id, binding, origin } = await fields(request);
 
     if (typeof id !== 'string' || typeof binding !== 'string' || !opaque.test(binding))
-      return html('Unavailable', '', 404);
+      return unavailable();
 
     const flow = await this.app.service.flow(id, binding).catch(() => undefined);
     const site = flow?.local && this.siteOf(flow.local);
 
     if (!flow || !['connect', 'renew'].includes(flow.kind) || !site || site.origin !== origin)
-      return html('Unavailable', '', 404);
+      return unavailable();
 
     return new Response(null, {
       status: 204,
@@ -715,9 +713,9 @@ class Server {
           : { key: client(address), limit: limits.client },
       ]))
     )
-      return html('Too many requests', '<p>Try again later.</p>', 429);
+      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
 
-    if (!asked) return html('Unavailable', '', 404);
+    if (!asked) return unavailable();
 
     // No prototype, so an id such as `__proto__` is an entry like any other.
     const connections: Record<string, Evidence[]> = Object.create(null);
@@ -796,7 +794,7 @@ class Server {
     const found = await this.sites.session(request);
     const connection = new URLSearchParams(await request.text()).get('connection') ?? '';
 
-    if (!found || !connection) return html('Unavailable', '', 404);
+    if (!found || !connection) return unavailable();
 
     const { key, session } = found;
     const held = session.operation;
@@ -805,11 +803,11 @@ class Server {
     if (!current) {
       const owned = (await this.app.service.mine(session.local)).find((e) => e.id === connection);
 
-      if (!owned) return html('Unavailable', '', 404);
+      if (!owned) return unavailable();
 
       current = await this.sites.pending(key, connection, owned.visibility);
 
-      if (!current) return html('Unavailable', '', 404);
+      if (!current) return unavailable();
     }
 
     if (current.operation!.finishedAt === undefined) {
@@ -840,7 +838,7 @@ class Server {
     const connection = fields.get('connection') ?? '';
     const as = listings.find((listing) => listing === fields.get('as'));
 
-    if (!found || !connection || !as) return html('Unavailable', '', 404);
+    if (!found || !connection || !as) return unavailable();
 
     const { key, session } = found;
     const held = session.operation;
@@ -851,11 +849,11 @@ class Server {
 
       // Checked before anything is held: what cannot be done must not be left pending.
       if (!owned || owned.status === 'revoked' || (owned.status === 'retired' && as !== 'retired'))
-        return html('Unavailable', '', 404);
+        return unavailable();
 
       current = await this.sites.pending(key, connection, owned.visibility, as);
 
-      if (!current) return html('Unavailable', '', 404);
+      if (!current) return unavailable();
     }
 
     if (current.operation!.finishedAt === undefined) {
@@ -882,14 +880,25 @@ class Server {
   private async settings(subject: LocalAccount, site?: Site) {
     const connections = await this.app.service.mine(subject);
     const local = localSide(subject, this.options.siteName);
+    const now = Date.now();
+
+    // The copy button's script, on the one page that has something to copy.
+    const embeds = !site && connections.some((e) => e.visibility === 'public');
 
     return html(
       site ? 'Your connections' : 'Owner settings',
       `${card(local.heading, local.value, undefined, subject.reference)}
-      <p><a href="/verify">Verify an account${site ? '' : ' or renew a connection'}</a></p>
-      ${site ? '' : '<p class="fine">Approve a public connection to display it on your site. Renew an existing one to extend it in place; only a new pair needs a new connection.</p><p><a href="/records">Every connection on this instance</a></p>'}
-      ${connections.map((e) => this.connection(e, site)).join('')}
+      <p class="links"><a class="button" href="/verify">Verify an account</a>${site ? '' : '<a href="/records">Every connection on this instance</a>'}</p>
+      ${
+        connections.length
+          ? `<p class="fine">Renewing a connection extends it and keeps its ID, so anything that shows it goes on working.${site ? '' : ' Only a public connection can be embedded.'}</p>`
+          : '<p>No connections yet. Verify an account to make the first one.</p>'
+      }
+      ${connections.map((e) => this.connection(e, now, site)).join('')}
       ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
+      200,
+      '',
+      embeds ? '/copy.js' : '',
     );
   }
 
@@ -902,77 +911,178 @@ class Server {
     const all = await this.app.service.all();
     const now = Date.now();
     const count = (visibility: string) => all.filter((e) => e.visibility === visibility).length;
+    const live = (e: Evidence) => ['Verified', 'Unconfirmed'].includes(statusLabel(e, now));
+    const sites = [...new Set(all.map((e) => e.siteName))];
 
     return html(
       'All connections',
       `<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
-      ${all
-        .map((e) =>
-          // The same card as everywhere else, so what a card shows of an account, such as
-          // when it was created, shows here too.
-          side(
-            `${e.siteName} · ${e.visibility} · ${statusLabel(e, now)}`,
-            `${e.local.label} and ${e.providerName} ${externalName(e.external)}`,
-            e.visibility === 'public' ? e.evidenceUrl : undefined,
-            `${e.local.reference} · connected ${day(e.connectedAt)}`,
-            externalSince(e.external, day),
-            [],
-          ),
-        )
+      ${sites
+        .map((name) => {
+          // Live records first. The sort is stable, so each half keeps the stored order.
+          const records = all
+            .filter((e) => e.siteName === name)
+            .sort((a, b) => Number(live(b)) - Number(live(a)));
+
+          return `<h2>${escape(name)} · ${records.length}</h2>${records
+            .map((e) =>
+              // The same card as everywhere else, so what a card shows of an account, such
+              // as when it was created, shows here too.
+              side(
+                `${e.visibility} · ${statusLabel(e, now)}`,
+                `${e.local.label} and ${e.providerName} ${externalName(e.external)}`,
+                e.visibility === 'public' ? e.evidenceUrl : undefined,
+                `${e.local.reference} · connected ${day(e.connectedAt)}`,
+                externalSince(e.external, day),
+                [],
+              ),
+            )
+            .join('')}`;
+        })
         .join('')}
       <p><a href="/">Back to owner settings</a></p>`,
     );
   }
 
-  /** One connection, with the state, the visibility and the expiry each said once. */
-  private connection(e: Evidence, site?: Site) {
-    const embed = `<script src="/assets/verily.js" defer></script>\n<verily-badge backend-url="${this.origin}" connection-id="${e.id}"></verily-badge>`;
+  /**
+   * Asks before an account is retired or a connection is removed, since neither can be
+   * undone. The page's one button posts to the route that does it.
+   */
+  private async confirm(request: Request, url: URL) {
+    const found = await this.sites.session(request);
+
+    const site =
+      found && !found.session.closed && !found.session.operation
+        ? this.site(found.session)
+        : undefined;
+
+    const subject = site
+      ? found!.session.local
+      : (await this.auth.authenticated(request))
+        ? this.local
+        : undefined;
+
+    const action = url.searchParams.get('do');
+    const id = url.searchParams.get('connection');
+    const e = subject && (await this.app.service.mine(subject)).find((e) => e.id === id);
+
+    if (!e || (action !== 'retire' && action !== 'remove')) return unavailable();
+
+    // What the settings page offers for this record, and nothing it does not.
+    if (action === 'retire' ? ['revoked', 'retired'].includes(e.status) : e.status === 'revoked')
+      return unavailable();
+
+    const held = site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : '';
+
+    const [heading, note, form] =
+      action === 'retire'
+        ? [
+            'Retire this account?',
+            retiringNote,
+            `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${held}<input type="hidden" name="as" value="retired"><button class="danger">Retire</button></form>`,
+          ]
+        : site
+          ? [
+              'Disconnect this account?',
+              `This removes the link between your ${site.name} account and this one. It cannot be undone. To link them again you would verify the account again.`,
+              `<form action="/disconnect" method="post">${held}<button class="danger">Disconnect</button></form>`,
+            ]
+          : [
+              'Revoke this connection?',
+              'This ends the connection, and it will read as revoked wherever it is shown. It cannot be undone. Verifying the account again makes a new connection with a new ID.',
+              `<form action="/connections/${escape(e.id)}/disconnect" method="post"><button class="danger">Revoke connection</button></form>`,
+            ];
+
+    return html(
+      heading,
+      `${externalCard(e.providerName ?? e.provider, e.external)}
+      <p>${escape(note)}</p>
+      <div class="choice">${form}<a class="button secondary" href="/">Cancel</a></div>`,
+      200,
+      'single',
+    );
+  }
+
+  /** One connection: the account's card, its state, and what can be done with it. */
+  private connection(e: Evidence, now: number, site?: Site) {
+    // The script is the published package's, since a page on another site cannot load a
+    // path on this one that the instance does not serve.
+    const embed = `<script src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@${version.slice(1)}/dist/verily.js" defer></script>\n<verily-badge backend-url="${this.origin}" connection-id="${e.id}"></verily-badge>`;
+
+    const state = statusLabel(e, now);
+    const retired = e.status === 'retired';
+    const open = !['revoked', 'retired'].includes(e.status);
+    const when = (time: number) => `${date(time)} (${distance(time, now)})`;
+
+    const rows: [string, string][] = [
+      ['Visibility', e.visibility === 'public' ? 'Public' : 'Unlisted'],
+      ...(retired
+        ? ([
+            ['Last verified', date(lastProved(e))],
+            ['Retired', date(e.retiredAt!)],
+          ] as [string, string][])
+        : ([['Expires', when(e.expiresAt)]] as [string, string][])),
+      ...(e.mark === 'preferred' || e.mark === 'unused'
+        ? ([['Listed as', e.mark === 'preferred' ? 'Preferred' : 'No longer used']] as [
+            string,
+            string,
+          ][])
+        : []),
+    ];
 
     const shown = site
       ? e.visibility === 'public'
-        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><p class="fine">Anyone can view this connection, on ${escape(site.name)} or anywhere else.</p>`
-        : `<p class="fine">Only ${escape(site.name)} can read this connection, and it chooses who there sees it.</p>`
-      : e.visibility === 'public'
-        ? `<p><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p><label>Embed on your site<textarea readonly rows="4" cols="80">${escape(embed)}</textarea></label>`
-        : '<p class="fine">Unlisted connections cannot appear in a public pill.</p>';
+        ? `Anyone can view this connection, on ${site.name} or anywhere else.`
+        : `Only ${site.name} can read this connection, and it chooses who there sees it.`
+      : '';
 
-    const retired = e.status === 'retired';
+    // A site's holder cannot act on a record already revoked.
+    const acts = !(site && e.status === 'revoked');
+
+    // Renewing and changing visibility start a flow on a page of their own, so they are
+    // links, drawn as buttons beside the others that act on the connection.
+    const goes = [
+      acts ? `<a class="button" href="/renew/${escape(e.id)}">Renew</a>` : '',
+      acts && !retired && site?.visibility?.length !== 1
+        ? `<a class="button" href="/visibility/${escape(e.id)}">Change visibility</a>`
+        : '',
+    ].join('');
 
     // How the holder lists the account, which acts on every record of it they have. A
     // site's holder is sent back to the site with the change, as with a disconnect.
-    const listing = ['revoked', 'retired'].includes(e.status)
-      ? ''
-      : `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : ''}
+    const listing = open
+      ? `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : ''}
       ${e.mark === 'preferred' ? '' : '<button name="as" value="preferred">Mark as preferred</button>'}
       ${e.mark === 'unused' ? '' : '<button name="as" value="unused">Mark as unused</button>'}
-      ${e.mark === undefined ? '' : '<button name="as" value="current">Mark as current</button>'}
-      <button name="as" value="retired">Retire</button>
-      <p class="fine">${escape(retiringNote)}</p></form>`;
+      ${e.mark === undefined ? '' : '<button name="as" value="current">Mark as current</button>'}</form>`
+      : '';
 
-    const actions =
-      site && e.status === 'revoked'
+    // Retiring and removing go by a page that asks first, since neither can be undone.
+    const asks = (action: string, label: string, danger = false) =>
+      `<form action="/confirm" method="get"><input type="hidden" name="connection" value="${escape(e.id)}"><button${danger ? ' class="danger"' : ''} name="do" value="${action}">${label}</button></form>`;
+
+    // Retiring and removing cannot be undone, so they sit together on a line of their own
+    // below the rest, where nothing else lines up with them.
+    const ends =
+      e.status === 'revoked'
         ? ''
-        : `<p><a href="/renew/${escape(e.id)}">Renew this connection</a></p>
-      <p class="fine">Renewing keeps the same connection ID, so embeds stay valid.</p>
-      ${retired || site?.visibility?.length === 1 ? '' : `<p><a href="/visibility/${escape(e.id)}">Change visibility</a></p>`}
-      ${listing}
-      ${
-        site
-          ? `<form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(e.id)}"><button>Disconnect</button></form>`
-          : `<form action="/connections/${escape(e.id)}/disconnect" method="post"><button>Revoke connection</button></form>`
-      }`;
+        : `${open ? asks('retire', 'Retire', true) : ''}${asks('remove', site ? 'Disconnect' : 'Revoke', true)}`;
 
-    return `<section><p class="who">${escape(e.providerName ?? e.provider)}</p>
-      <h3>${escape(externalName(e.external))}</h3>
-      <dl><dt>Status</dt><dd>${escape(statusLabel(e, Date.now()))}</dd>
-      <dt>Visibility</dt><dd>${escape(e.visibility)}</dd>
-      ${
-        retired
-          ? `<dt>Last verified</dt><dd>${escape(moment(lastProved(e)))}</dd><dt>Retired</dt><dd>${escape(moment(e.retiredAt!))}</dd>`
-          : `<dt>Expires</dt><dd>${escape(moment(e.expiresAt))}</dd>`
-      }</dl>
-      ${e.mark === 'preferred' ? '<p class="fine">Preferred</p>' : e.mark === 'unused' ? '<p class="fine">No longer used</p>' : ''}
-      ${shown}
-      ${actions}</section>`;
+    const ending = ends && `<div class="ending">${ends}</div>`;
+
+    return `<div class="connection">${externalCard(
+      e.providerName ?? e.provider,
+      e.external,
+      `<span class="state ${escape(state.toLowerCase())}">${escape(state)}</span>`,
+      e.visibility === 'public'
+        ? `<p class="evidence"><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p>`
+        : '',
+      `<dl>${rows.map(([label, value]) => `<dt>${label}</dt><dd>${escape(value)}</dd>`).join('')}</dl>`,
+      shown && `<p class="fine">${escape(shown)}</p>`,
+      !site && e.visibility === 'public'
+        ? `<p class="fine">Embed on your site</p><pre><code>${escape(embed)}</code></pre>`
+        : '',
+      `${goes || listing ? `<div class="actions">${goes}${listing}</div>` : ''}${ending}`,
+    )}</div>`;
   }
 }
