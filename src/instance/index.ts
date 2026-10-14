@@ -1,8 +1,6 @@
 import {
   dialogPath,
   dialogRoute,
-  externalName,
-  externalSince,
   lastProved,
   localSide,
   routeOf,
@@ -13,7 +11,8 @@ import {
   type Provider,
 } from '../core/index.js';
 import { escape } from '../server/escape.js';
-import { card, date, day, distance, externalCard, page, side } from '../server/render.js';
+import { card, date, distance, externalCard, marked, page, verdict } from '../server/render.js';
+import { toneOf } from '../marks.js';
 import { version } from '../version.js';
 import { createVerily, generateSigningKey } from '../server/index.js';
 import { recordStorage, type Store } from './store.js';
@@ -112,6 +111,10 @@ const listings: readonly Listing[] = ['preferred', 'current', 'unused', 'retired
 /** Said on the page that asks before an account is retired. */
 const retiringNote =
   'Retiring keeps this record as history. It will no longer read as verified, and who can read it cannot be changed afterwards.';
+
+/** A connection's card heading: the provider's mark and name, and anything after the name. */
+const cardHeading = (e: Evidence, after = '') =>
+  marked(`${e.providerName ?? e.provider}${after}`, e.provider, e.attestations.external[0]?.method);
 
 /** Carries a flow's binding for a page on another origin, where the cookie cannot. */
 const flowHeader = 'X-Verily-Flow';
@@ -925,18 +928,25 @@ class Server {
             .sort((a, b) => Number(live(b)) - Number(live(a)));
 
           return `<h2>${escape(name)} · ${records.length}</h2>${records
-            .map((e) =>
-              // The same card as everywhere else, so what a card shows of an account, such
-              // as when it was created, shows here too.
-              side(
-                `${e.visibility} · ${statusLabel(e, now)}`,
-                `${e.local.label} and ${e.providerName} ${externalName(e.external)}`,
-                e.visibility === 'public' ? e.evidenceUrl : undefined,
-                `${e.local.reference} · connected ${day(e.connectedAt)}`,
-                externalSince(e.external, day),
-                [],
-              ),
-            )
+            .map((e) => {
+              const state = statusLabel(e, now);
+
+              const local =
+                e.local.reference && e.local.reference !== e.local.label
+                  ? `${e.local.label} · ${e.local.reference}`
+                  : e.local.label;
+
+              // The card the settings page draws, without its controls: this page only reads.
+              return `<div class="connection">${externalCard(
+                cardHeading(e, ` · ${e.visibility}`),
+                e.external,
+                `<span class="state">${verdict(toneOf(e, now), true)}<span>${escape(state)}</span></span>`,
+                e.visibility === 'public'
+                  ? `<p class="evidence"><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p>`
+                  : '',
+                `<dl><dt>Linked to</dt><dd>${escape(local)}</dd><dt>Connected</dt><dd>${escape(date(e.connectedAt))}</dd></dl>`,
+              )}</div>`;
+            })
             .join('')}`;
         })
         .join('')}
@@ -995,7 +1005,7 @@ class Server {
 
     return html(
       heading,
-      `${externalCard(e.providerName ?? e.provider, e.external)}
+      `${externalCard(cardHeading(e), e.external)}
       <p>${escape(note)}</p>
       <div class="choice">${form}<a class="button secondary" href="/">Cancel</a></div>`,
       200,
@@ -1071,9 +1081,9 @@ class Server {
     const ending = ends && `<div class="ending">${ends}</div>`;
 
     return `<div class="connection">${externalCard(
-      e.providerName ?? e.provider,
+      cardHeading(e),
       e.external,
-      `<span class="state ${escape(state.toLowerCase())}">${escape(state)}</span>`,
+      `<span class="state">${verdict(toneOf(e, now), true)}<span>${escape(state)}</span></span>`,
       e.visibility === 'public'
         ? `<p class="evidence"><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p>`
         : '',

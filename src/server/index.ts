@@ -40,8 +40,9 @@ import {
 } from './service.js';
 import { copyScript, waitScript } from './copy.js';
 import { escape } from './escape.js';
-import { card, externalCard, moment, page, safeUrl, times } from './render.js';
+import { card, externalCard, marked, moment, page, safeUrl, times, verdict } from './render.js';
 import { logo } from '../logo.js';
+import { toneOf } from '../marks.js';
 import { stylesheet, styleVersion } from './style.js';
 
 export { VerilyService, Unavailable } from './service.js';
@@ -467,7 +468,11 @@ function evidencePage(
       undefined,
       attestationNote(e.attestations.local, names),
     ) +
-      externalCard(names.provider, e.external, externalNotes(e.attestations, names)) +
+      externalCard(
+        marked(names.provider, e.provider, e.attestations.external[0]!.method),
+        e.external,
+        externalNotes(e.attestations, names),
+      ) +
       times(
         e.status === 'retired'
           ? [
@@ -502,6 +507,9 @@ function evidencePage(
     <p class="fine"><a href="${escape(base)}/external-revoke/${escape(e.id)}">Remove this connection using your external account</a></p>
     ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}">Revoke only this sharing link using your external account</a></p>` : ''}
     <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p>`,
+    '',
+    '',
+    verdict(toneOf(e, Date.now())),
   );
 }
 
@@ -526,9 +534,9 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
   const record = escape(safeUrl(e.evidenceUrl));
 
   return externalCard(
-    e.providerName,
+    marked(e.providerName, e.provider, e.attestations.external[0]!.method),
     e.external,
-    `<p class="how">${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? `<a class="signed-mark" href="${record}#signed">signed</a>` : ''}</p>`,
+    `<p class="how">${verdict(toneOf(e, now))}${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? `<a class="signed-mark" href="${record}#signed">signed</a>` : ''}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
     times(
       retired
@@ -632,7 +640,11 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
         undefined,
         attestationNote(d.attestations.local, names),
       ) +
-      externalCard(names.provider, d.external, externalNotes(d.attestations, names)) +
+      externalCard(
+        marked(names.provider, d.provider, d.attestations.external[0]!.method),
+        d.external,
+        externalNotes(d.attestations, names),
+      ) +
       times(
         retired
           ? [
@@ -1189,7 +1201,7 @@ export function createVerily(options: ServerOptions) {
                     : 'Confirm connection',
               `
             ${card(subject(flow.local!).heading, subject(flow.local!).value, flow.local!.profileUrl)}
-            ${externalCard(provider.name, flow.external!)}
+            ${externalCard(marked(provider.name, provider.id, providerMethod(provider)), flow.external!)}
             ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
             ${found ? `<p>${escape(found)}</p>` : ''}
             <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>

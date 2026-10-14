@@ -7,16 +7,60 @@ import {
   type ExternalAccount,
 } from '../core/index.js';
 import { logo } from '../logo.js';
+import { markOf, pathAttributes, tones, verification, type MarkTone } from '../marks.js';
 import { escape } from './escape.js';
 import { styleVersion } from './style.js';
 
 /**
  * The shell every Verily page shares: the stylesheet, the logotype and the heading. `variant`
  * is a class on the page's `main`, such as `single` for a page with one thing on it.
- * `script` is the path of one script the page runs.
+ * `script` is the path of one script the page runs. `mark` is drawn before the heading.
  */
-export const page = (prefix: string, title: string, body: string, variant = '', script = '') =>
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verily</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${escape(title)}</h1>${body}</main>${script && `<script src="${escape(script)}" defer></script>`}</body></html>`;
+export const page = (
+  prefix: string,
+  title: string,
+  body: string,
+  variant = '',
+  script = '',
+  mark = '',
+) =>
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Verily</title><link rel="stylesheet" href="${escape(prefix)}/style.css?v=${styleVersion}"><body><main${variant && ` class="${variant}"`}>${logo}<h1>${mark}${escape(title)}</h1>${body}</main>${script && `<script src="${escape(script)}" defer></script>`}</body></html>`;
+
+/**
+ * The V the badge draws for a record, in the tone that says how the record stands.
+ * `cropped` fits the box to the strokes, for a V that has to meet the edges around it.
+ */
+export function verdict(tone: MarkTone, cropped = false) {
+  const [first, second] = tones[tone];
+  const stroke = 'stroke-width="32" stroke-linejoin="miter"';
+
+  const check = Object.entries(verification.check)
+    .map(([name, value]) => ` ${name}="${value}"`)
+    .join('');
+
+  return `<svg class="verdict ${tone}" viewBox="${cropped ? verification.strokes : verification.viewBox}" fill="none" aria-hidden="true" focusable="false"><path d="${verification.path}" ${stroke} stroke="${first}"/><path d="${verification.path}" ${stroke}${check} stroke="${second}"/></svg>`;
+}
+
+/** A card's heading: its text, and the provider's mark before it where there is one. */
+export type Heading = string | { text: string; mark: string };
+
+/** A provider's name with its mark, for a card's heading. */
+export function marked(text: string, provider: string, method?: string): Heading {
+  const mark = markOf(provider, method);
+
+  if (!mark) return text;
+
+  const attributes = pathAttributes(mark)
+    .map(([name, value]) => ` ${name}="${value}"`)
+    .join('');
+
+  return {
+    text,
+    mark: `<svg class="provider" viewBox="${mark.viewBox}" fill="${mark.stroke ? 'none' : 'currentColor'}" aria-hidden="true" focusable="false">${mark.paths
+      .map((d) => `<path d="${escape(d)}"${attributes}/>`)
+      .join('')}</svg>`,
+  };
+}
 
 /**
  * One side of a link, with each thing known about it on its own line. A name, the
@@ -26,7 +70,7 @@ export const page = (prefix: string, title: string, body: string, variant = '', 
  * Both sides render as the same card, so the pair reads as a pair.
  */
 export function card(
-  heading: string,
+  heading: Heading,
   name: string,
   url: string | undefined,
   reference?: string | string[],
@@ -39,7 +83,7 @@ export function card(
  * The card for an external account: its name, link and id, with the "Joined <date>" text
  * on the name's line when the creation date is known.
  */
-export function externalCard(heading: string, external: ExternalAccount, ...extra: string[]) {
+export function externalCard(heading: Heading, external: ExternalAccount, ...extra: string[]) {
   return side(
     heading,
     externalName(external),
@@ -52,7 +96,7 @@ export function externalCard(heading: string, external: ExternalAccount, ...extr
 }
 
 export function side(
-  heading: string,
+  heading: Heading,
   name: string,
   url: string | undefined,
   reference: string | string[] | undefined,
@@ -61,7 +105,9 @@ export function side(
 ) {
   const profile = url && safeUrl(url);
 
-  return `<div class="side"><p class="who">${escape(heading)}</p><p class="name">${
+  return `<div class="side"><p class="who">${
+    typeof heading === 'string' ? escape(heading) : `${heading.mark}${escape(heading.text)}`
+  }</p><p class="name">${
     profile ? `<a href="${escape(profile)}" rel="noreferrer">${escape(name)}</a>` : escape(name)
   }${since ? `<span class="since">${escape(since)}</span>` : ''}</p>${
     typeof reference === 'string'

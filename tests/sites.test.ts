@@ -673,12 +673,12 @@ test('a site holder connects, returns with a signed result, and manages from a s
     const records = await (await owner.fetch('/records')).text();
 
     // Grouped under each site, with its count, and the state on each card.
-    assert.match(records, /<h2>shirkadeh\.test · 1<\/h2>[^]*public · Verified/);
-    assert.match(records, /<h2>Partner · \d+<\/h2>[^]*(public|unlisted) · /);
+    assert.match(records, /<h2>shirkadeh\.test · 1<\/h2>[^]*GitHub · public[^]*>Verified</);
+    assert.match(records, /<h2>Partner · \d+<\/h2>[^]*GitHub · (public|unlisted)/);
     assert.match(records, /\d+ on this instance: \d+ public, \d+ unlisted\./);
     // The account's creation date is on the name's line, as on every other card.
     assert.match(records, /<span class="since">Joined 2011-01-25<\/span>/);
-    assert.match(records, /connected \d{4}-\d\d-\d\d<\/p>/);
+    assert.match(records, /<dt>Connected<\/dt><dd>[A-Z][a-z]{2} \d{1,2}, \d{4}<\/dd>/);
 
     // Nobody else does: a site's holder and a stranger are told nothing is there.
     assert.equal((await a.fetch('/records')).status, 404);

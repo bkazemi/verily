@@ -1,15 +1,6 @@
-/**
- * How sure the mark is: `current` for a verification that holds, `inactive` for one that
- * does not, and `pending` for one nobody has confirmed yet, which claims nothing and is
- * drawn in the surrounding text colour.
- */
-export type MarkTone = 'current' | 'inactive' | 'pending';
+import { tones, verification, type MarkTone } from '../marks.js';
 
-const tones: Record<MarkTone, [string, string]> = {
-  current: ['#D3444C', '#149766'],
-  inactive: ['#149766', '#D3444C'],
-  pending: ['currentColor', 'currentColor'],
-};
+export type { MarkTone };
 
 /**
  * The check draws itself in from its left end once the verification holds: when a pill's
@@ -37,7 +28,7 @@ export function verificationMark(tone: MarkTone = 'current'): SVGSVGElement {
   const namespace = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(namespace, 'svg');
 
-  svg.setAttribute('viewBox', '-4 -4 264 264');
+  svg.setAttribute('viewBox', verification.viewBox);
   svg.setAttribute('fill', 'none');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('focusable', 'false');
@@ -45,15 +36,13 @@ export function verificationMark(tone: MarkTone = 'current'): SVGSVGElement {
   for (const layer of [0, 1]) {
     const path = document.createElementNS(namespace, 'path');
 
-    path.setAttribute('d', 'M40 36 128 220 216 36');
+    path.setAttribute('d', verification.path);
     path.setAttribute('stroke-width', '32');
     path.setAttribute('stroke-linejoin', 'miter');
 
-    if (layer === 1) {
-      path.setAttribute('pathLength', '176');
-      path.setAttribute('stroke-dasharray', '108 176');
-      path.setAttribute('stroke-dashoffset', '-54');
-    }
+    if (layer === 1)
+      for (const [name, value] of Object.entries(verification.check))
+        path.setAttribute(name, value);
 
     svg.append(path);
   }

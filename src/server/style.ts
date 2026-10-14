@@ -172,7 +172,6 @@ main:has(.accounts) { max-width: 54rem; }
 }
 
 .listing.preferred { border-color: var(--accent); color: var(--accent); }
-}
 
 /* The times sit at the foot of the card, so they line up along a row of uneven cards. */
 .accounts .side dl { margin-top: auto; }
@@ -188,6 +187,9 @@ main:has(.accounts) { max-width: 54rem; }
   font-weight: 550;
   letter-spacing: .02em;
 }
+
+/* A provider's mark before its name, at the height of the letters. */
+.who .provider { display: inline-block; width: .875rem; height: .875rem; margin-right: .375rem; vertical-align: -.125rem; }
 
 /* Clipped 4px left of the text, which hides the date's dot when the date wraps to a new line. */
 .name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1rem; margin: 0 0 0 -4px; padding-left: 4px; overflow-x: clip; font-size: 1.0625rem; font-weight: 620; letter-spacing: -.01em; }
@@ -314,23 +316,43 @@ button.danger { border-color: var(--warn); background: var(--warn); }
   position: absolute;
   top: .75rem;
   right: .875rem;
-  padding: .0625rem .5rem;
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  height: 1.625rem;
+  padding: 0 .75rem 0 .5rem;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--muted);
-  font-size: .6875rem;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: .8125rem;
   font-weight: 550;
 }
 
-.state.verified { border-color: var(--accent); color: var(--accent); }
-.state.expired, .state.revoked { border-color: var(--warn); color: var(--warn); }
+/*
+ * The V the badge draws, in the tone that says how the record stands. A record that claims
+ * nothing is drawn faint in the text colour, as the badge draws it.
+ */
+.verdict { flex-shrink: 0; width: 1rem; height: 1rem; }
+.verdict.pending { opacity: .45; }
+.how .verdict { width: .875rem; height: .875rem; margin-right: .3125rem; vertical-align: -.125rem; }
+h1 .verdict { width: 1.25rem; height: 1.25rem; margin-right: .5rem; vertical-align: -.0625rem; }
+
+/*
+ * In a state pill the V is cropped to its strokes and fills the pill's height, so its arms
+ * and its foot meet the border. The pill's left padding keeps the arms clear of its curve.
+ */
+.state .verdict { width: auto; height: 100%; }
 
 /*
  * A pill's line includes room for descenders below the letters, which leaves its text
  * sitting high. Trimmed to the letters, the padding alone sets the space above and below.
+ * In a state pill the word alone is trimmed, so it centres on the V by its letters.
  */
 @supports (text-box: trim-both cap alphabetic) {
-  .listing, .state { padding: .3125rem .5rem; text-box: trim-both cap alphabetic; }
+  .listing { padding: .3125rem .5rem; text-box: trim-both cap alphabetic; }
+  .state > span { text-box: trim-both cap alphabetic; }
+}
 
 /* Links that sit together on one line, wrapping where there is no room. */
 .links { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; font-size: .875rem; }
@@ -339,6 +361,7 @@ button.danger { border-color: var(--warn); background: var(--warn); }
 .evidence { margin: .375rem 0 0; font-size: .8125rem; }
 
 .connection dl { margin-bottom: .75rem; }
+.connection .side > :last-child { margin-bottom: 0; }
 .connection pre { margin: .75rem 0; background: var(--surface); }
 .connection .actions { margin-top: .875rem; }
 

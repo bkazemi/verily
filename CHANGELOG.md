@@ -29,7 +29,8 @@ Changes that matter to people using Verily, newest first. Versions before 0.7.0 
 - **`/records` shows an account's join date on its name's line,** as every other card does.
 - **An instance's settings page shows each connection as one card:** the account with its link, id and join date, its state, and its actions in one row. Expiry reads as a date and a distance, such as "Nov 13, 2026 (in 30 days)".
 - **Retiring an account or removing a connection asks first,** on a page of its own at `/confirm`.
-- **`/records` groups connections by site,** with live ones first.
+- **`/records` groups connections by site,** with live ones first, and draws each as the settings page does, with who it is linked to on a line of its own.
+- **Server pages draw the badge's marks.** A card's heading shows the provider's mark, and a record's state shows the badge's V in the same colours: on an instance's cards, the evidence page's heading and each account's status line.
 - **A refusal page links back to the start page.**
 
 ### Fixed
