@@ -256,6 +256,10 @@ section {
 
 section > :last-child { margin-bottom: 0; }
 
+/* What holds a control that cannot be undone. */
+section.danger { margin-top: 2rem; border-color: var(--warn); }
+section > h2:first-child { margin-top: 0; }
+
 form { margin: 0 0 1.5rem; }
 
 label { display: block; margin: 0 0 .75rem; color: var(--muted); font-size: .8125rem; }

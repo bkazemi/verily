@@ -120,6 +120,16 @@ const operatorsPrefix = 'site/operators/';
 /** Where an id that has been used is kept once its site is gone, so it is never reused. */
 const retiredPrefix = 'site/retired/';
 
+/** What is kept of a stored site once it is gone: that its id was used, when, and why. */
+export interface Retired {
+  retiredAt: number;
+  /** `deleted` by an operator, or `lapsed` after a month suspended. */
+  reason: 'deleted' | 'lapsed';
+}
+
+/** How long a stored site stays suspended before it is deleted. */
+export const lapseMs = 30 * 24 * 3600000;
+
 /** Where the last DNS check of a stored site is kept, under its id. */
 export const dnsPrefix = 'site/dns/';
 
@@ -500,6 +510,26 @@ export class Sites {
       const { previousKey, previousUntil, ...site } = stored;
 
       await tx.put<Site>(`${registeredPrefix}${id}`, site);
+    });
+
+    await this.refresh();
+  }
+
+  /**
+   * Removes a stored site with its operators and DNS state, and keeps its id so no other
+   * site is ever given it. Its users' records stay, but their site starts nothing new.
+   */
+  async retire(id: string, reason: Retired['reason']): Promise<void> {
+    if (this.pinned.has(id)) throw new Error(`Site ${id} is set by the host`);
+
+    await this.storage.transaction(async (tx) => {
+      if (!(await tx.get<Site>(`${registeredPrefix}${id}`)))
+        throw new Error(`Site ${id} is not registered`);
+
+      await tx.put<Retired>(`${retiredPrefix}${id}`, { retiredAt: Date.now(), reason });
+      await tx.delete(`${registeredPrefix}${id}`);
+      await tx.delete(`${operatorsPrefix}${id}`);
+      await tx.delete(`${dnsPrefix}${id}`);
     });
 
     await this.refresh();

@@ -21,6 +21,7 @@ export const own = new Set([
   '/dashboard/settings',
   '/dashboard/rotate',
   '/dashboard/previous-key',
+  '/dashboard/delete',
   '/handoff/request',
   '/handoff/accept',
   '/site/connections',

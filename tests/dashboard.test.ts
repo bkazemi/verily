@@ -151,6 +151,7 @@ test('a session ends once its dashboard key is removed, and sign-ins are limited
 
   assert.match(suspended, /<dd>Suspended since Jan 1, 1970<\/dd>/);
   assert.match(suspended, /no longer has <code>verily-verifier=instance\.test<\/code>/);
+  assert.match(suspended, /Otherwise the site is deleted on Jan 31, 1970\./);
 
   await store.put('site/operators/managed', []);
   assert.match(await (await request('/dashboard', { headers: { cookie } })).text(), /Sign in/);
@@ -263,4 +264,41 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
   assert.equal((await post('/dashboard/rotate', { keep: 'none' })).status, 403);
   assert.equal((await post('/dashboard/previous-key', {})).status, 403);
   assert.equal(await read(third), 200);
+});
+
+test('an operator deletes the site once they type its id, and the id is never reused', async () => {
+  const { store, request, post, login } = await managed();
+  const { cookie } = await login();
+
+  const page = await (await request('/dashboard', { headers: { cookie } })).text();
+
+  assert.match(page, /<form action="\/dashboard\/delete" method="post">/);
+
+  // Anything but the id itself deletes nothing.
+  assert.equal((await post('/dashboard/delete', { confirm: 'pinned' }, cookie)).status, 400);
+  assert.ok(await store.get('site/registered/managed'));
+
+  // Without a session, nothing is deleted.
+  assert.equal((await post('/dashboard/delete', { confirm: 'managed' })).status, 403);
+
+  await store.put('site/dns/managed', { attemptedAt: 0, checkedAt: 0 });
+
+  const deleted = await post('/dashboard/delete', { confirm: 'managed' }, cookie);
+
+  assert.equal(deleted.status, 200);
+  assert.match(deleted.headers.get('set-cookie')!, /^verily_dashboard=;.*Max-Age=0/);
+  assert.match(await deleted.text(), /<code>managed<\/code>, cannot be registered again/);
+
+  for (const key of ['registered', 'operators', 'dns'])
+    assert.equal(await store.get(`site/${key}/managed`), undefined);
+
+  assert.equal((await store.get<{ reason: string }>('site/retired/managed'))!.reason, 'deleted');
+  assert.equal((await request('/handoff/request?site=managed&purpose=connect')).status, 404);
+  assert.equal((await login()).response.status, 403);
+  assert.match(await (await request('/dashboard', { headers: { cookie } })).text(), /Sign in/);
+
+  await assert.rejects(
+    new Sites(store, new Map()).register(site, { kind: 'key', hash: 'h', addedAt: 0 }),
+    /taken/,
+  );
 });

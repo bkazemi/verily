@@ -263,6 +263,58 @@ test('a stored site whose DNS stops naming the instance is suspended until it do
   assert.equal(await handoff(), 303);
 });
 
+test('a site suspended for 30 days is deleted once a lookup confirms its record is gone', async () => {
+  const records = new Map<string, string[] | null>([['_verily.lapsed.test', []]]);
+  const { store, request, instance } = registering(records);
+  const day = 24 * 3600000;
+
+  await new Sites(store, new Map()).register(site('lapsed'), first);
+
+  // Suspended for `days`, and last asked `ago` ms back.
+  const suspend = (days: number, ago = 2 * 3600000) =>
+    store.put<DnsCheck>('site/dns/lapsed', {
+      attemptedAt: Date.now() - ago,
+      checkedAt: Date.now() - ago,
+      absentSince: Date.now() - days * day,
+    });
+
+  const kept = async () => !!(await store.get('site/registered/lapsed'));
+
+  await suspend(29);
+  await instance.upkeep();
+  assert.ok(await kept());
+
+  // Past the deadline, a site not due for a lookup, or whose lookup fails, is kept.
+  await suspend(31, 60000);
+  await instance.upkeep();
+  assert.ok(await kept());
+
+  records.set('_verily.lapsed.test', null);
+  await suspend(31);
+  await instance.upkeep();
+  assert.ok(await kept());
+
+  // A record restored after the deadline but before the lookup keeps the site, and serves it.
+  records.set('_verily.lapsed.test', ['verily-verifier=instance.test']);
+  await suspend(31);
+  await instance.upkeep();
+  assert.ok(await kept());
+  assert.equal((await request('/handoff/request?site=lapsed&purpose=connect')).status, 303);
+
+  // A lookup that answers without the record deletes it.
+  records.set('_verily.lapsed.test', []);
+  await suspend(31);
+  await instance.upkeep();
+
+  assert.ok(!(await kept()));
+  assert.equal(await store.get('site/dns/lapsed'), undefined);
+  assert.equal((await store.get<{ reason: string }>('site/retired/lapsed'))!.reason, 'lapsed');
+  assert.equal((await request('/handoff/request?site=lapsed&purpose=connect')).status, 404);
+  assert.equal(await readStatus(request, 'lapsed', site('lapsed').key), 404);
+
+  await assert.rejects(new Sites(store, new Map()).register(site('lapsed'), first), /taken/);
+});
+
 test('sites that are always due cannot keep the others from being checked', async () => {
   const hour = 3600000;
   const now = Date.now();

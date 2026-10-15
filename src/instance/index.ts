@@ -361,8 +361,13 @@ class Server {
             }
           : undefined;
       },
-      // A site's holders get the providers that site chose. The owner has no site.
-      providersFor: (local) => this.siteOf(local)?.providers,
+      // A site's holders get the providers that site chose. A holder whose site is gone gets
+      // none, rather than every one. The owner has no site.
+      providersFor: (local) => {
+        const site = this.siteOf(local);
+
+        return site || !local.id.includes(':') ? site?.providers : [];
+      },
       visibilityFor: (local) => this.siteOf(local)?.visibility,
       finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
     });
@@ -523,6 +528,8 @@ class Server {
 
       if (url.pathname === '/dashboard/previous-key')
         return this.dashboard.retirePreviousKey(request);
+
+      if (url.pathname === '/dashboard/delete') return this.dashboard.delete(request);
 
       if (this.registrations) {
         if (url.pathname === '/register') return this.registrations.request(request);

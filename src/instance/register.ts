@@ -2,7 +2,16 @@ import { html, type Html } from '../server/html.js';
 import { domainOf, namedVerifiers, published, type DnsOptions } from '../server/domain.js';
 import { hash, secret } from '../server/service.js';
 import { respond, readCookie, see, setCookie } from './page.js';
-import { checked, dnsPrefix, open, sign, type DnsCheck, type Site, type Sites } from './sites.js';
+import {
+  checked,
+  dnsPrefix,
+  lapseMs,
+  open,
+  sign,
+  type DnsCheck,
+  type Site,
+  type Sites,
+} from './sites.js';
 import type { Store } from './store.js';
 
 /** Whether anyone may register a site here. `open` serves a site once its DNS checks out. */
@@ -135,7 +144,7 @@ export class Registrations {
       html`${message}<p>Add two TXT records named <code>${name}</code>:</p>
 <pre><code>${`${claimPrefix}${claim.code}`}</code></pre>
 <pre><code>${`verily-verifier=${this.host}`}</code></pre>
-<p>The first proves you control ${claim.site.name}, and can be removed once the site is registered. The second says this instance verifies for your site. Keep it: if it is removed, the site stops being served within a day.</p>
+<p>The first proves you control ${claim.site.name}, and can be removed once the site is registered. The second says this instance verifies for your site. Keep it: if it is removed, the site stops being served within a day, and is deleted 30 days later.</p>
 <p>DNS changes can take up to 72 hours to appear.</p>
 <form action="/register/check" method="post"><button>Check the records</button></form>
 <form action="/register/cancel" method="post"><button>Start over</button></form>`,
@@ -224,6 +233,8 @@ const recheckBudget = 20;
  * Reads each stored site's DNS again when it is due, and suspends a site whose DNS no
  * longer names this instance, or lifts the suspension once it does again. A lookup that
  * could not be made changes nothing: only an answer without the record suspends a site.
+ * A site whose record is still missing when it is checked `lapseMs` after it went is
+ * deleted.
  * Sites in `SITES` are the host's to configure, and are not checked.
  *
  * Every attempt is recorded, answered or not, and the due sites asked longest ago go
@@ -269,16 +280,20 @@ export async function recheckSites(
 
     const named = values && namedVerifiers(values).some((found) => found.host === host);
 
-    await store.put<DnsCheck>(
-      `${dnsPrefix}${site.id}`,
-      values
-        ? {
-            attemptedAt: now,
-            checkedAt: now,
-            ...(named ? {} : { absentSince: last?.absentSince ?? now }),
-          }
-        : { ...last, attemptedAt: now },
-    );
+    const check: DnsCheck = values
+      ? {
+          attemptedAt: now,
+          checkedAt: now,
+          ...(named ? {} : { absentSince: last?.absentSince ?? now }),
+        }
+      : { ...last, attemptedAt: now };
+
+    await store.put<DnsCheck>(`${dnsPrefix}${site.id}`, check);
+
+    // A site suspended for a month is deleted, and its id is never used again. Only an
+    // answer just given can do it: a failed lookup, or one from an earlier run, may be stale.
+    if (values && !named && now - check.absentSince! >= lapseMs)
+      await sites.retire(site.id, 'lapsed');
   }
 
   await sites.refresh();

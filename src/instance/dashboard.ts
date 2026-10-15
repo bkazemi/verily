@@ -5,7 +5,7 @@ import { date, minute } from '../server/render.js';
 import { hash, secret } from '../server/service.js';
 import { allow } from './limits.js';
 import { respond, readCookie, see, setCookie, unavailable } from './page.js';
-import { dnsPrefix, validId, type DnsCheck, type Site, type Sites } from './sites.js';
+import { dnsPrefix, lapseMs, validId, type DnsCheck, type Site, type Sites } from './sites.js';
 import type { Store } from './store.js';
 
 const cookieName = 'verily_dashboard';
@@ -188,6 +188,35 @@ export class Dashboard {
     return see('/dashboard');
   }
 
+  /**
+   * Deletes the site, once the operator has typed its id to confirm. Its id is never used
+   * again, so the same domain can only come back as a new site.
+   */
+  async delete(request: Request): Promise<Response> {
+    const found = await this.session(request);
+
+    if (!found) return unavailable(403);
+
+    const typed = new URLSearchParams(await request.text()).get('confirm')?.trim();
+
+    if (typed !== found.site.id)
+      return this.render(found.site, html`<p>Type the site id to delete the site.</p>`, 400);
+
+    await this.sites.retire(found.site.id, 'deleted');
+    await this.store.delete(found.key);
+
+    const response = respond(
+      'Site deleted',
+      html`<p>${found.site.name} is deleted and no longer served here. Its id, <code>${found.site.id}</code>, cannot be registered again.</p>`,
+      200,
+      'single',
+    );
+
+    response.headers.append('Set-Cookie', sessionSet('', 0));
+
+    return response;
+  }
+
   /** The provider ids this instance offers, each once, with a name to show. */
   private offered(): Map<string, string> {
     return new Map(this.providers.map((provider) => [provider.id, provider.name]));
@@ -208,7 +237,7 @@ export class Dashboard {
     // The one thing on the page the operator has to act on, so the one sentence.
     const restore =
       suspended &&
-      html`<p><code>${record}</code> no longer has <code>verily-verifier=${this.host}</code>. Add it back and the site is served again within an hour.</p>`;
+      html`<p><code>${record}</code> no longer has <code>verily-verifier=${this.host}</code>. Add it back and the site is served again within an hour. Otherwise the site is deleted on ${date(check.absentSince! + lapseMs)}.</p>`;
 
     const overlapping = !!site.previousKey && (site.previousUntil ?? 0) > Date.now();
 
@@ -245,6 +274,12 @@ ${
 <div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
 }
 <div class="actions"><form action="/dashboard/rotate" method="post"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div>
+<section class="danger"><h2>Delete the site</h2>
+<p class="fine">The site stops being served here at once, and its id can never be registered again. To come back, register the domain as a new site; your users then connect their accounts again.</p>
+<form action="/dashboard/delete" method="post">
+<label>Type <code>${site.id}</code> to confirm <input name="confirm" autocomplete="off" required></label>
+<button class="danger">Delete the site</button>
+</form></section>
 <footer><div class="actions"><form action="/dashboard/logout" method="post"><button>Sign out</button></form></div></footer>`,
       status,
     );
