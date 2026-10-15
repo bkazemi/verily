@@ -55,6 +55,8 @@ export interface InstanceEnv {
    */
   SITES?: string | unknown[];
   [key: `SITE_${string}_KEY`]: string | undefined;
+  /** `open` lets anyone register a site at `/register`. Off unless set. */
+  REGISTRATION?: string;
 }
 
 /** The configured count of mailed messages a day, if it is a count at all. */
@@ -139,5 +141,6 @@ export function fromEnv(env: InstanceEnv): Omit<InstanceOptions, 'store'> {
     sites: registry(env.SITES, env as unknown as Record<string, unknown>),
     signingKey: env.SIGNING === 'off' ? false : env.SIGNING_KEY || undefined,
     mailPerDay: dailyMail(env.EMAIL_DAILY_LIMIT),
+    registration: env.REGISTRATION === 'open' ? 'open' : 'off',
   };
 }

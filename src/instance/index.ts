@@ -19,6 +19,8 @@ import { recordStorage, type Store } from './store.js';
 import { OwnerAuth } from './auth.js';
 import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
 import { allow, client, limits, prune } from './limits.js';
+import { recheckSites, Registrations, type Registration } from './register.js';
+import type { DnsOptions } from '../server/domain.js';
 import { own } from './routes.js';
 import { html, safeHeaders, unavailable } from './page.js';
 
@@ -54,6 +56,13 @@ export interface InstanceOptions {
   signingKey?: string | false;
   /** How many codes may be mailed in a day, where the mail allowance is not the default. */
   mailPerDay?: number;
+  /**
+   * Whether anyone may register a site at `/register`. With `open`, a site is served once
+   * its domain's DNS shows the requester controls it. `off` by default.
+   */
+  registration?: Registration;
+  /** Replaces how DNS is read, for a host behind an egress proxy, or for tests. */
+  dns?: DnsOptions;
   /** How often each published proof is re-read. Six hours by default. */
   recheckMs?: number;
   /** How many proofs one `upkeep()` re-reads per provider. 10 by default. */
@@ -287,6 +296,7 @@ class Server {
   private readonly origin: string;
   private readonly auth: OwnerAuth;
   private readonly sites: Sites;
+  private readonly registrations?: Registrations;
   private readonly local: LocalAccount;
 
   constructor(private readonly options: InstanceOptions) {
@@ -299,6 +309,9 @@ class Server {
     this.store = options.store;
     this.auth = new OwnerAuth(this.store, options.ownerKey);
     this.sites = new Sites(this.store, options.sites ?? new Map());
+
+    if (options.registration === 'open')
+      this.registrations = new Registrations(this.store, this.sites, this.origin, options.dns);
 
     const ownerOrigin = new URL(options.owner.profileUrl).origin;
 
@@ -315,7 +328,7 @@ class Server {
         : { signingKey: options.signingKey ?? (() => this.signingKey()) }),
       // Whether this origin's DNS names its signing key, and whether a site's names this
       // instance as its verifier. Both go to the resolver the domain method already asks.
-      dns: true,
+      dns: options.dns ?? true,
       // The whole origin is this instance, so the library's routes sit at its root.
       baseUrl: this.origin,
       siteName: options.siteName,
@@ -370,6 +383,7 @@ class Server {
     await this.app.service.recheck(this.options.recheckBudget ?? 10);
     await this.auth.prune();
     await prune(this.store);
+    await recheckSites(this.store, this.sites, this.origin, this.options.dns);
   }
 
   /**
@@ -491,7 +505,18 @@ class Server {
       if (url.pathname === '/disconnect') return this.disconnect(request);
 
       if (url.pathname === '/mark') return this.mark(request);
+
+      if (this.registrations) {
+        if (url.pathname === '/register') return this.registrations.request(request);
+
+        if (url.pathname === '/register/check') return this.registrations.check(request);
+
+        if (url.pathname === '/register/cancel') return this.registrations.cancel();
+      }
     }
+
+    if (request.method === 'GET' && url.pathname === '/register' && this.registrations)
+      return this.registrations.page(request);
 
     if (request.method === 'GET' && url.pathname === '/site/connections')
       return this.read(request, address);

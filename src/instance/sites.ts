@@ -101,12 +101,38 @@ function secureOrigin(value: string) {
 /** Where a site registered on the instance itself is kept, under its id. */
 const registeredPrefix = 'site/registered/';
 
+/** Where a site's operators are kept, under its id. */
+const operatorsPrefix = 'site/operators/';
+
+/** Where an id that has been used is kept once its site is gone, so it is never reused. */
+const retiredPrefix = 'site/retired/';
+
+/** Where the last DNS check of a stored site is kept, under its id. */
+export const dnsPrefix = 'site/dns/';
+
+/** What the last DNS check of a stored site found. */
+export interface DnsCheck {
+  /** When the DNS was last asked, whether or not it answered. */
+  attemptedAt: number;
+  /** When the DNS last answered. Absent if it never has. */
+  checkedAt?: number;
+  /** When the site's `verily-verifier` record was first found missing. Absent while it is there. */
+  absentSince?: number;
+}
+
+/** Someone who may manage a stored site. Only a dashboard key, for now, kept hashed. */
+export interface Operator {
+  kind: 'key';
+  hash: string;
+  addedAt: number;
+}
+
 /** A site's key: base64url, of at least 32 bytes. */
 const validKey = (key: unknown): key is string =>
   typeof key === 'string' && /^[A-Za-z0-9_-]{43,}$/.test(key);
 
 /** A site entry checked field by field, without its key. Throws on the first thing wrong. */
-function checked(entry: Record<string, unknown>): Omit<Site, 'key'> {
+export function checked(entry: Record<string, unknown>): Omit<Site, 'key'> {
   const { id, name, origin, authorizeUrl, returnUrl, providers, visibility } = entry ?? {};
 
   if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id))
@@ -282,6 +308,12 @@ export class Sites {
   sites: Map<string, Site>;
 
   /**
+   * Stored sites whose DNS no longer names this instance. They start nothing new, but their
+   * backends can still read their connections, so they can move elsewhere.
+   */
+  suspended = new Set<string>();
+
+  /**
    * `pinned` are the sites the host configures, from `SITES`. They cannot be changed here,
    * and a stored site with the same id or origin is not served.
    */
@@ -307,14 +339,34 @@ export class Sites {
       origins.add(site.origin);
     }
 
+    const suspended = new Set<string>();
+
+    for (const [key, check] of await this.storage.list<DnsCheck>(dnsPrefix)) {
+      const id = key.slice(dnsPrefix.length);
+
+      if (check.absentSince !== undefined && !this.pinned.has(id)) suspended.add(id);
+    }
+
     this.sites = sites;
+    this.suspended = suspended;
+  }
+
+  /** The sites kept in the store and served, which are the ones whose DNS is checked. */
+  stored(): Site[] {
+    return [...this.sites.values()].filter((site) => !this.pinned.has(site.id));
+  }
+
+  /** A site that may start something new: served, and not suspended. */
+  private active(id: string): Site | undefined {
+    return this.suspended.has(id) ? undefined : this.sites.get(id);
   }
 
   /**
-   * Keeps a site in the store, as a new one or a change to one already kept. Refused if the
-   * entry is malformed, or its id or origin belongs to another site.
+   * Keeps a site in the store, as a change to one already kept, or as a new one with its
+   * first operator. Refused if the entry is malformed, or its id or origin belongs to
+   * another site. A new site is refused an id that is in use or has ever been used.
    */
-  async save(site: Site): Promise<void> {
+  async save(site: Site, first?: Operator): Promise<void> {
     const entry = { ...checked(site as unknown as Record<string, unknown>), key: site.key };
 
     if (!validKey(entry.key)) throw new Error(`Site ${entry.id} needs a base64url key`);
@@ -322,6 +374,13 @@ export class Sites {
     if (this.pinned.has(entry.id)) throw new Error(`Site ${entry.id} is set by the host`);
 
     await this.storage.transaction(async (tx) => {
+      const existing = await tx.get(`${registeredPrefix}${entry.id}`);
+
+      if (first && (existing || (await tx.get(`${retiredPrefix}${entry.id}`))))
+        throw new Error(`The id ${entry.id} is taken`);
+
+      if (!first && !existing) throw new Error(`Site ${entry.id} is not registered`);
+
       for (const [, other] of [
         ...this.pinned.entries(),
         ...(await tx.list<Site>(registeredPrefix)),
@@ -330,6 +389,8 @@ export class Sites {
           throw new Error(`${entry.origin} is already registered`);
 
       await tx.put<Site>(`${registeredPrefix}${entry.id}`, entry);
+
+      if (first) await tx.put<Operator[]>(`${operatorsPrefix}${entry.id}`, [first]);
     });
 
     await this.refresh();
@@ -340,7 +401,7 @@ export class Sites {
    * sent to the site to sign into its token. Returns where to go and the cookie to set.
    */
   async begin(site: string | null, purpose: string | null) {
-    const registered = this.sites.get(site ?? '');
+    const registered = this.active(site ?? '');
 
     if (!registered || !['connect', 'manage'].includes(purpose ?? '')) return undefined;
 
@@ -369,7 +430,7 @@ export class Sites {
     token: string,
     validate: (local: LocalAccount) => LocalAccount,
   ): Promise<{ purpose: Purpose; cookies: string[] } | undefined> {
-    const site = this.sites.get(String(peek(token)?.site ?? ''));
+    const site = this.active(String(peek(token)?.site ?? ''));
 
     if (!site) return undefined;
 
@@ -445,7 +506,7 @@ export class Sites {
     validate: (local: LocalAccount) => LocalAccount,
     admit: (site: Site) => Promise<boolean>,
   ): Promise<{ site: Site; session: string } | 'limited' | undefined> {
-    const site = this.sites.get(String(peek(token)?.site ?? ''));
+    const site = this.active(String(peek(token)?.site ?? ''));
 
     if (!site || origin !== site.origin) return undefined;
 
@@ -548,7 +609,12 @@ export class Sites {
   async open(request: Request) {
     const found = await this.session(request);
 
-    return found && !found.session.closed && !found.session.operation ? found : undefined;
+    return found &&
+      !found.session.closed &&
+      !found.session.operation &&
+      !this.suspended.has(found.session.site)
+      ? found
+      : undefined;
   }
 
   /**
