@@ -1,7 +1,7 @@
-import { escape } from '../server/escape.js';
+import { html, type Html } from '../server/html.js';
 import { domainOf, namedVerifiers, published, type DnsOptions } from '../server/domain.js';
 import { hash, secret } from '../server/service.js';
-import { html, readCookie, see, setCookie } from './page.js';
+import { respond, readCookie, see, setCookie } from './page.js';
 import { checked, dnsPrefix, open, sign, type DnsCheck, type Site, type Sites } from './sites.js';
 import type { Store } from './store.js';
 
@@ -28,15 +28,15 @@ const claimed = (value: string, ms: number) => setCookie(claimCookie, value, ms,
 
 const field = (form: URLSearchParams, name: string) => (form.get(name) ?? '').trim();
 
-const form = (message = '', values: Record<string, string> = {}) =>
-  html(
+const form = (message?: Html, values: Record<string, string> = {}) =>
+  respond(
     'Register a site',
-    `${message}<p>Register your site to send its users here to verify their accounts. You will need to add two DNS records to your domain.</p>
+    html`${message}<p>Register your site to send its users here to verify their accounts. You will need to add two DNS records to your domain.</p>
 <form action="/register" method="post">
-<label>Domain <input name="domain" value="${escape(values.domain ?? '')}" placeholder="example.com" required></label>
-<label>Site id <input name="id" value="${escape(values.id ?? '')}" pattern="[a-z0-9-]{1,32}" placeholder="example" required></label>
-<label>Authorize URL <input name="authorizeUrl" type="url" value="${escape(values.authorizeUrl ?? '')}" placeholder="https://example.com/api/verily/authorize" required></label>
-<label>Return URL <input name="returnUrl" type="url" value="${escape(values.returnUrl ?? '')}" placeholder="https://example.com/api/verily/return" required></label>
+<label>Domain <input name="domain" value="${values.domain ?? ''}" placeholder="example.com" required></label>
+<label>Site id <input name="id" value="${values.id ?? ''}" pattern="[a-z0-9-]{1,32}" placeholder="example" required></label>
+<label>Authorize URL <input name="authorizeUrl" type="url" value="${values.authorizeUrl ?? ''}" placeholder="https://example.com/api/verily/authorize" required></label>
+<label>Return URL <input name="returnUrl" type="url" value="${values.returnUrl ?? ''}" placeholder="https://example.com/api/verily/return" required></label>
 <button>Continue</button>
 </form>`,
     message ? 400 : 200,
@@ -98,7 +98,7 @@ export class Registrations {
     const shown = Object.fromEntries([...values].map(([name, value]) => [name, value.trim()]));
 
     if (!domainOf(`https://${domain}`))
-      return form('<p>Enter a public domain name, such as example.com.</p>', shown);
+      return form(html`<p>Enter a public domain name, such as example.com.</p>`, shown);
 
     let site: Omit<Site, 'key'>;
 
@@ -112,13 +112,13 @@ export class Registrations {
       });
     } catch {
       return form(
-        '<p>Use an id of lowercase letters, digits and hyphens, and URLs on your domain.</p>',
+        html`<p>Use an id of lowercase letters, digits and hyphens, and URLs on your domain.</p>`,
         shown,
       );
     }
 
     if (this.sites.sites.has(site.id))
-      return form('<p>That id is taken. Choose another.</p>', shown);
+      return form(html`<p>That id is taken. Choose another.</p>`, shown);
 
     const exp = Math.floor((Date.now() + claimMs) / 1000);
     const token = sign(await this.key(), { site, code: secret(), exp });
@@ -127,15 +127,15 @@ export class Registrations {
   }
 
   /** What to publish for a claim, and the button that checks it. */
-  private records(claim: Claim, message = '', status = 200): Response {
+  private records(claim: Claim, message?: Html, status = 200): Response {
     const name = `_verily.${new URL(claim.site.origin).hostname}`;
 
-    return html(
+    return respond(
       'Add the DNS records',
-      `${message}<p>Add two TXT records named <code>${escape(name)}</code>:</p>
-<pre><code>${escape(`${claimPrefix}${claim.code}`)}</code></pre>
-<pre><code>${escape(`verily-verifier=${this.host}`)}</code></pre>
-<p>The first proves you control ${escape(claim.site.name)}, and can be removed once the site is registered. The second says this instance verifies for your site. Keep it: if it is removed, the site stops being served within a day.</p>
+      html`${message}<p>Add two TXT records named <code>${name}</code>:</p>
+<pre><code>${`${claimPrefix}${claim.code}`}</code></pre>
+<pre><code>${`verily-verifier=${this.host}`}</code></pre>
+<p>The first proves you control ${claim.site.name}, and can be removed once the site is registered. The second says this instance verifies for your site. Keep it: if it is removed, the site stops being served within a day.</p>
 <p>DNS changes can take up to 72 hours to appear.</p>
 <form action="/register/check" method="post"><button>Check the records</button></form>
 <form action="/register/cancel" method="post"><button>Start over</button></form>`,
@@ -147,7 +147,7 @@ export class Registrations {
   async check(request: Request): Promise<Response> {
     const claim = await this.claim(request);
 
-    if (!claim) return form('<p>That registration expired. Start again.</p>');
+    if (!claim) return form(html`<p>That registration expired. Start again.</p>`);
 
     const domain = new URL(claim.site.origin).hostname;
 
@@ -156,7 +156,7 @@ export class Registrations {
       .catch(() => undefined);
 
     if (!values)
-      return this.records(claim, '<p>DNS could not be read. Try again shortly.</p>', 503);
+      return this.records(claim, html`<p>DNS could not be read. Try again shortly.</p>`, 503);
 
     // The code is public once published, so a plain comparison gives nothing away.
     const proved = values.some(
@@ -169,7 +169,7 @@ export class Registrations {
     if (!proved || !named)
       return this.records(
         claim,
-        `<p>${!proved && !named ? 'Neither record was' : !proved ? 'The verily-claim record was not' : 'The verily-verifier record was not'} found yet.</p>`,
+        html`<p>${!proved && !named ? 'Neither record was' : !proved ? 'The verily-claim record was not' : 'The verily-verifier record was not'} found yet.</p>`,
         409,
       );
 
@@ -182,20 +182,20 @@ export class Registrations {
         { kind: 'key', hash: hash(dashboardKey), addedAt: Date.now() },
       );
     } catch {
-      return html(
+      return respond(
         'Not registered',
-        '<p>That id or domain was registered by someone else first.</p><form action="/register/cancel" method="post"><button>Start over</button></form>',
+        html`<p>That id or domain was registered by someone else first.</p><form action="/register/cancel" method="post"><button>Start over</button></form>`,
         409,
       );
     }
 
-    const response = html(
+    const response = respond(
       'Site registered',
-      `<p>${escape(claim.site.name)} is registered as <code>${escape(claim.site.id)}</code>. These keys are shown once and cannot be shown again.</p>
+      html`<p>${claim.site.name} is registered as <code>${claim.site.id}</code>. These keys are shown once and cannot be shown again.</p>
 <p>Site key, for your backend only. It signs handoffs and reads your users' connections.</p>
-<pre><code>${escape(siteKey)}</code></pre>
+<pre><code>${siteKey}</code></pre>
 <p>Dashboard key, for whoever manages the site here. Keep it in a password manager.</p>
-<pre><code>${escape(dashboardKey)}</code></pre>
+<pre><code>${dashboardKey}</code></pre>
 <p>If both keys are lost, the site cannot be recovered. Registering the domain again makes a new site, and your users have to connect their accounts again.</p>`,
     );
 

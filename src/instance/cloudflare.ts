@@ -1,7 +1,8 @@
 import type { Storage } from '../core/index.js';
 import { admit, createInstance, type Instance } from './index.js';
 import { fromEnv, type InstanceEnv } from './env.js';
-import { html } from './page.js';
+import { respond } from './page.js';
+import { html } from '../server/html.js';
 import { recordStorage, type KeyValue, type Store } from './store.js';
 
 /**
@@ -92,7 +93,7 @@ export default {
         },
       );
     } catch {
-      return html('Temporarily unavailable', '', 503);
+      return respond('Temporarily unavailable', html``, 503);
     }
   },
 };

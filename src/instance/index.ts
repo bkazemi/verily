@@ -10,7 +10,7 @@ import {
   type LocalAccount,
   type Provider,
 } from '../core/index.js';
-import { escape } from '../server/escape.js';
+import { html, raw, type Html } from '../server/html.js';
 import { card, date, distance, externalCard, marked, page, verdict } from '../server/render.js';
 import { toneOf } from '../marks.js';
 import { version } from '../version.js';
@@ -23,7 +23,7 @@ import { recheckSites, Registrations, type Registration } from './register.js';
 import { Dashboard } from './dashboard.js';
 import type { DnsOptions } from '../server/domain.js';
 import { own } from './routes.js';
-import { html, safeHeaders, see, unavailable } from './page.js';
+import { respond, safeHeaders, see, unavailable } from './page.js';
 
 export { fromEnv, type InstanceEnv } from './env.js';
 
@@ -75,10 +75,10 @@ export interface InstanceOptions {
  * reaches it either holds the owner key or has no business past it, so it carries one
  * field and no account of what lies behind.
  */
-const signIn = (message = '', status = 200) =>
-  html(
+const signIn = (message?: Html, status = 200) =>
+  respond(
     'Sign in',
-    `${message}<form action="/login" method="post"><label>Owner key <input name="key" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>`,
+    html`${message}<form action="/login" method="post"><label>Owner key <input name="key" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>`,
     status,
     'single',
   );
@@ -87,9 +87,9 @@ const redirect = (cookie: string) => see('/', [cookie]);
 
 /** Every refused handoff looks the same, so nobody can learn which check it failed. */
 const refused = () =>
-  html(
+  respond(
     'Link expired',
-    '<p>This link has expired or was already used. Start again from the site that sent you.</p>',
+    html`<p>This link has expired or was already used. Start again from the site that sent you.</p>`,
     403,
     'single',
   );
@@ -194,7 +194,13 @@ const enterScript = `const status=document.getElementById('status');const fail=(
 
 const enterPage = () =>
   new Response(
-    page('', 'Sign in', '<p id="status">Opening the sign-in page.</p>', 'single', '/site/enter.js'),
+    page(
+      '',
+      'Sign in',
+      html`<p id="status">Opening the sign-in page.</p>`,
+      'single',
+      '/site/enter.js',
+    ),
     {
       headers: {
         ...safeHeaders,
@@ -265,7 +271,7 @@ export async function admit(request: Request, origin: string): Promise<Request |
   try {
     body = await boundedBody(request);
   } catch {
-    return html('Request too large', '', 413, 'single');
+    return respond('Request too large', html``, 413, 'single');
   }
 
   return new Request(request.url, {
@@ -397,7 +403,7 @@ class Server {
 
       response = admitted instanceof Response ? admitted : await this.route(admitted, address);
     } catch {
-      response = html('Temporarily unavailable', '<p>Try again shortly.</p>', 503, 'single');
+      response = respond('Temporarily unavailable', html`<p>Try again shortly.</p>`, 503, 'single');
     }
 
     // An approval or disconnect form redirects on to the holder's site, and Chromium holds
@@ -434,7 +440,7 @@ class Server {
         return unavailable(403);
 
       if (!(await this.allowed(request, url, address)))
-        return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
+        return respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single');
 
       return this.enter(request);
     }
@@ -456,7 +462,7 @@ class Server {
       return shared(await this.dialog(request, url, address), request);
 
     if (!(await this.allowed(request, url, address)))
-      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
+      return respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single');
 
     if (request.method === 'POST' && url.pathname === '/site/session') {
       const opened = await this.sites.dialog(
@@ -468,7 +474,7 @@ class Server {
 
       return shared(
         opened === 'limited'
-          ? html('Too many requests', '<p>Try again later.</p>', 429, 'single')
+          ? respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single')
           : opened
             ? data({ session: opened.session })
             : unavailable(),
@@ -486,12 +492,17 @@ class Server {
     if (request.method === 'POST') {
       if (url.pathname === '/login') {
         if (!(await this.auth.allow('login', 10, 15 * 60000)))
-          return html('Too many requests', '<p>Try again in fifteen minutes.</p>', 429, 'single');
+          return respond(
+            'Too many requests',
+            html`<p>Try again in fifteen minutes.</p>`,
+            429,
+            'single',
+          );
 
         const key = new URLSearchParams(await request.text()).get('key') ?? '';
         const cookie = await this.auth.login(key);
 
-        return cookie ? redirect(cookie) : signIn('<p>Incorrect owner key.</p>', 403);
+        return cookie ? redirect(cookie) : signIn(html`<p>Incorrect owner key.</p>`, 403);
       }
 
       if (url.pathname === '/logout') return redirect(await this.auth.logout(request));
@@ -608,15 +619,15 @@ class Server {
       const { connection, mark } = found.session.operation;
 
       return mark
-        ? html(
+        ? respond(
             'Change not finished',
-            `<p>Changing how this account is listed did not finish.</p><form action="/mark" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><input type="hidden" name="as" value="${escape(mark)}"><button>Try again</button></form>`,
+            html`<p>Changing how this account is listed did not finish.</p><form action="/mark" method="post"><input type="hidden" name="connection" value="${connection}"><input type="hidden" name="as" value="${mark}"><button>Try again</button></form>`,
             200,
             'single',
           )
-        : html(
+        : respond(
             'Disconnect not finished',
-            `<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${escape(connection)}"><button>Try again</button></form>`,
+            html`<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${connection}"><button>Try again</button></form>`,
             200,
             'single',
           );
@@ -627,9 +638,9 @@ class Server {
     if (found) {
       const site = this.site(found.session);
 
-      return html(
+      return respond(
         'Session ended',
-        `<p>You are finished here. <a href="${escape(site.origin)}">Return to ${escape(site.name)}</a> to start again.</p>`,
+        html`<p>You are finished here. <a href="${site.origin}">Return to ${site.name}</a> to start again.</p>`,
         200,
         'single',
       );
@@ -651,7 +662,7 @@ class Server {
     const turnedAway = async () =>
       (await allow(this.store, [{ key: client(address), limit: limits.client }]))
         ? unavailable()
-        : html('Too many requests', '<p>Try again later.</p>', 429, 'single');
+        : respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single');
 
     const session = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1] ?? '';
     const binding = request.headers.get(flowHeader) ?? '';
@@ -693,7 +704,7 @@ class Server {
       return turnedAway();
 
     if (!(await this.allowed(inner, url, address)))
-      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
+      return respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single');
 
     const response = await this.app.handle(inner);
     const answer = new Response(response.body, response);
@@ -757,7 +768,7 @@ class Server {
           : { key: client(address), limit: limits.client },
       ]))
     )
-      return html('Too many requests', '<p>Try again later.</p>', 429, 'single');
+      return respond('Too many requests', html`<p>Try again later.</p>`, 429, 'single');
 
     if (!asked) return unavailable();
 
@@ -941,17 +952,17 @@ class Server {
     // The copy button's script, on the one page that has something to copy.
     const embeds = !site && connections.some((e) => e.visibility === 'public');
 
-    return html(
+    return respond(
       site ? 'Your connections' : 'Owner settings',
-      `${card(local.heading, local.value, undefined, subject.reference)}
-      <p class="links"><a class="button" href="/verify">Verify an account</a>${site ? '' : '<a href="/records">Every connection on this instance</a>'}</p>
+      html`${card(local.heading, local.value, undefined, subject.reference)}
+      <p class="links"><a class="button" href="/verify">Verify an account</a>${!site && html`<a href="/records">Every connection on this instance</a>`}</p>
       ${
         connections.length
-          ? `<p class="fine">Renewing a connection extends it and keeps its ID, so anything that shows it goes on working.${site ? '' : ' Only a public connection can be embedded.'}</p>`
-          : '<p>No connections yet. Verify an account to make the first one.</p>'
+          ? html`<p class="fine">Renewing a connection extends it and keeps its ID, so anything that shows it goes on working.${site ? '' : ' Only a public connection can be embedded.'}</p>`
+          : html`<p>No connections yet. Verify an account to make the first one.</p>`
       }
-      ${connections.map((e) => this.connection(e, now, site)).join('')}
-      ${site ? `<p><a href="${escape(site.origin)}">Back to ${escape(site.name)}</a></p>` : '<form action="/logout" method="post"><button>Sign out</button></form>'}`,
+      ${connections.map((e) => this.connection(e, now, site))}
+      ${site ? html`<p><a href="${site.origin}">Back to ${site.name}</a></p>` : html`<form action="/logout" method="post"><button>Sign out</button></form>`}`,
       200,
       '',
       embeds ? '/copy.js' : '',
@@ -970,39 +981,34 @@ class Server {
     const live = (e: Evidence) => ['Verified', 'Unconfirmed'].includes(statusLabel(e, now));
     const sites = [...new Set(all.map((e) => e.siteName))];
 
-    return html(
+    return respond(
       'All connections',
-      `<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
-      ${sites
-        .map((name) => {
-          // Live records first. The sort is stable, so each half keeps the stored order.
-          const records = all
-            .filter((e) => e.siteName === name)
-            .sort((a, b) => Number(live(b)) - Number(live(a)));
+      html`<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
+      ${sites.map((name) => {
+        // Live records first. The sort is stable, so each half keeps the stored order.
+        const records = all
+          .filter((e) => e.siteName === name)
+          .sort((a, b) => Number(live(b)) - Number(live(a)));
 
-          return `<h2>${escape(name)} · ${records.length}</h2>${records
-            .map((e) => {
-              const state = statusLabel(e, now);
+        return html`<h2>${name} · ${records.length}</h2>${records.map((e) => {
+          const state = statusLabel(e, now);
 
-              const local =
-                e.local.reference && e.local.reference !== e.local.label
-                  ? `${e.local.label} · ${e.local.reference}`
-                  : e.local.label;
+          const local =
+            e.local.reference && e.local.reference !== e.local.label
+              ? `${e.local.label} · ${e.local.reference}`
+              : e.local.label;
 
-              // The card the settings page draws, without its controls: this page only reads.
-              return `<div class="connection">${externalCard(
-                cardHeading(e, ` · ${e.visibility}`),
-                e.external,
-                `<span class="state">${verdict(toneOf(e, now), true)}<span>${escape(state)}</span></span>`,
-                e.visibility === 'public'
-                  ? `<p class="evidence"><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p>`
-                  : '',
-                `<dl><dt>Linked to</dt><dd>${escape(local)}</dd><dt>Connected</dt><dd>${escape(date(e.connectedAt))}</dd></dl>`,
-              )}</div>`;
-            })
-            .join('')}`;
-        })
-        .join('')}
+          // The card the settings page draws, without its controls: this page only reads.
+          return html`<div class="connection">${externalCard(
+            cardHeading(e, ` · ${e.visibility}`),
+            e.external,
+            html`<span class="state">${verdict(toneOf(e, now), true)}<span>${state}</span></span>`,
+            e.visibility === 'public' &&
+              html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
+            html`<dl><dt>Linked to</dt><dd>${local}</dd><dt>Connected</dt><dd>${date(e.connectedAt)}</dd></dl>`,
+          )}</div>`;
+        })}`;
+      })}
       <p><a href="/">Back to owner settings</a></p>`,
     );
   }
@@ -1035,31 +1041,31 @@ class Server {
     if (action === 'retire' ? ['revoked', 'retired'].includes(e.status) : e.status === 'revoked')
       return unavailable();
 
-    const held = site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : '';
+    const held = site && html`<input type="hidden" name="connection" value="${e.id}">`;
 
     const [heading, note, form] =
       action === 'retire'
         ? [
             'Retire this account?',
             retiringNote,
-            `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${held}<input type="hidden" name="as" value="retired"><button class="danger">Retire</button></form>`,
+            html`<form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">${held}<input type="hidden" name="as" value="retired"><button class="danger">Retire</button></form>`,
           ]
         : site
           ? [
               'Disconnect this account?',
               `This removes the link between your ${site.name} account and this one. It cannot be undone. To link them again you would verify the account again.`,
-              `<form action="/disconnect" method="post">${held}<button class="danger">Disconnect</button></form>`,
+              html`<form action="/disconnect" method="post">${held}<button class="danger">Disconnect</button></form>`,
             ]
           : [
               'Revoke this connection?',
               'This ends the connection, and it will read as revoked wherever it is shown. It cannot be undone. Verifying the account again makes a new connection with a new ID.',
-              `<form action="/connections/${escape(e.id)}/disconnect" method="post"><button class="danger">Revoke connection</button></form>`,
+              html`<form action="/connections/${e.id}/disconnect" method="post"><button class="danger">Revoke connection</button></form>`,
             ];
 
-    return html(
+    return respond(
       heading,
-      `${externalCard(cardHeading(e), e.external)}
-      <p>${escape(note)}</p>
+      html`${externalCard(cardHeading(e), e.external)}
+      <p>${note}</p>
       <div class="choice">${form}<a class="button secondary" href="/">Cancel</a></div>`,
       200,
       'single',
@@ -1105,47 +1111,44 @@ class Server {
     // Renewing and changing visibility start a flow on a page of their own, so they are
     // links, drawn as buttons beside the others that act on the connection.
     const goes = [
-      acts ? `<a class="button" href="/renew/${escape(e.id)}">Renew</a>` : '',
-      acts && !retired && site?.visibility?.length !== 1
-        ? `<a class="button" href="/visibility/${escape(e.id)}">Change visibility</a>`
-        : '',
-    ].join('');
+      acts && html`<a class="button" href="/renew/${e.id}">Renew</a>`,
+      acts &&
+        !retired &&
+        site?.visibility?.length !== 1 &&
+        html`<a class="button" href="/visibility/${e.id}">Change visibility</a>`,
+    ].filter((go) => go !== false);
 
     // How the holder lists the account, which acts on every record of it they have. A
     // site's holder is sent back to the site with the change, as with a disconnect.
-    const listing = open
-      ? `<form action="${site ? '/mark' : `/connections/${escape(e.id)}/mark`}" method="post">${site ? `<input type="hidden" name="connection" value="${escape(e.id)}">` : ''}
-      ${e.mark === 'preferred' ? '' : '<button name="as" value="preferred">Mark as preferred</button>'}
-      ${e.mark === 'unused' ? '' : '<button name="as" value="unused">Mark as unused</button>'}
-      ${e.mark === undefined ? '' : '<button name="as" value="current">Mark as current</button>'}</form>`
-      : '';
+    const listing =
+      open &&
+      html`<form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">${site && html`<input type="hidden" name="connection" value="${e.id}">`}
+      ${e.mark !== 'preferred' && html`<button name="as" value="preferred">Mark as preferred</button>`}
+      ${e.mark !== 'unused' && html`<button name="as" value="unused">Mark as unused</button>`}
+      ${e.mark !== undefined && html`<button name="as" value="current">Mark as current</button>`}</form>`;
 
     // Retiring and removing go by a page that asks first, since neither can be undone.
     const asks = (action: string, label: string, danger = false) =>
-      `<form action="/confirm" method="get"><input type="hidden" name="connection" value="${escape(e.id)}"><button${danger ? ' class="danger"' : ''} name="do" value="${action}">${label}</button></form>`;
+      html`<form action="/confirm" method="get"><input type="hidden" name="connection" value="${e.id}"><button${danger && raw(' class="danger"')} name="do" value="${action}">${label}</button></form>`;
 
     // Retiring and removing cannot be undone, so they sit together on a line of their own
     // below the rest, where nothing else lines up with them.
-    const ends =
-      e.status === 'revoked'
-        ? ''
-        : `${open ? asks('retire', 'Retire', true) : ''}${asks('remove', site ? 'Disconnect' : 'Revoke', true)}`;
+    const ending =
+      e.status !== 'revoked' &&
+      html`<div class="ending">${open && asks('retire', 'Retire', true)}${asks('remove', site ? 'Disconnect' : 'Revoke', true)}</div>`;
 
-    const ending = ends && `<div class="ending">${ends}</div>`;
-
-    return `<div class="connection">${externalCard(
+    return html`<div class="connection">${externalCard(
       cardHeading(e),
       e.external,
-      `<span class="state">${verdict(toneOf(e, now), true)}<span>${escape(state)}</span></span>`,
-      e.visibility === 'public'
-        ? `<p class="evidence"><a href="${escape(e.evidenceUrl)}">Inspect evidence</a></p>`
-        : '',
-      `<dl>${rows.map(([label, value]) => `<dt>${label}</dt><dd>${escape(value)}</dd>`).join('')}</dl>`,
-      shown && `<p class="fine">${escape(shown)}</p>`,
-      !site && e.visibility === 'public'
-        ? `<p class="fine">Embed on your site</p><pre><code>${escape(embed)}</code></pre>`
-        : '',
-      `${goes || listing ? `<div class="actions">${goes}${listing}</div>` : ''}${ending}`,
+      html`<span class="state">${verdict(toneOf(e, now), true)}<span>${state}</span></span>`,
+      e.visibility === 'public' &&
+        html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
+      html`<dl>${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${value}</dd>`)}</dl>`,
+      shown && html`<p class="fine">${shown}</p>`,
+      !site &&
+        e.visibility === 'public' &&
+        html`<p class="fine">Embed on your site</p><pre><code>${embed}</code></pre>`,
+      html`${(goes.length > 0 || listing) && html`<div class="actions">${goes}${listing}</div>`}${ending}`,
     )}</div>`;
   }
 }

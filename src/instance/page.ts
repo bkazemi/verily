@@ -1,3 +1,4 @@
+import { html, type Html } from '../server/html.js';
 import { page } from '../server/render.js';
 
 export const safeHeaders = {
@@ -39,7 +40,7 @@ export function see(location: string, cookies: string[] = []) {
  * logotype above already says whose it is, so the heading never has to repeat that.
  * `script` is the path of one script the page runs, which its policy then allows.
  */
-export const html = (heading: string, body: string, status = 200, variant = '', script = '') =>
+export const respond = (heading: string, body: Html, status = 200, variant = '', script = '') =>
   new Response(page('', heading, body, variant, script), {
     status,
     headers: {
@@ -61,9 +62,9 @@ export const html = (heading: string, body: string, status = 200, variant = '', 
  * link goes to the root, which shows whoever asks the page that is theirs.
  */
 export const unavailable = (status = 404) =>
-  html(
+  respond(
     'Unavailable',
-    '<p>This resource is unavailable. <a href="/">Go to the start page</a>.</p>',
+    html`<p>This resource is unavailable. <a href="/">Go to the start page</a>.</p>`,
     status,
     'single',
   );

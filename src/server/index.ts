@@ -39,7 +39,7 @@ import {
   type ServiceOptions,
 } from './service.js';
 import { copyScript, waitScript } from './copy.js';
-import { escape } from './escape.js';
+import { html, type Content } from './html.js';
 import { card, externalCard, marked, moment, page, safeUrl, times, verdict } from './render.js';
 import { logo } from '../logo.js';
 import { toneOf } from '../marks.js';
@@ -170,7 +170,8 @@ function wants(request: Request, url: URL): 'json' | 'signed' | 'page' {
     : 'page';
 }
 
-const html = (body: string, status = 200) =>
+/** A page as a response. */
+const pageResponse = (body: string, status = 200) =>
   new Response(body, {
     status,
     headers: { ...headers, 'Content-Type': 'text/html; charset=utf-8' },
@@ -218,7 +219,7 @@ function attestationNote(
 ) {
   const label = attestationLabel(attestation.method, names, attestation);
 
-  if (!label) return '';
+  if (!label) return undefined;
 
   // Set by a provider implementation from holder-supplied input, so it reaches an href
   // only after being confirmed http(s).
@@ -226,10 +227,10 @@ function attestationNote(
 
   const how = `how${additional ? ' additional' : ''}`;
 
-  return `<p class="${how}">${additional ? '+ ' : ''}${
+  return html`<p class="${how}">${additional && '+ '}${
     artifact
-      ? `<a href="${escape(artifact)}" rel="noreferrer" title="${escape(proofTitle(attestation, moment))}">${escape(label)}</a>`
-      : escape(label)
+      ? html`<a href="${artifact}" rel="noreferrer" title="${proofTitle(attestation, moment)}">${label}</a>`
+      : label
   }</p>`;
 }
 
@@ -237,7 +238,7 @@ function attestationNote(
 function externalNotes(attestations: Attestations, names: { site: string; provider: string }) {
   const [main, ...rest] = attestations.external;
 
-  return attestationNote(main, names) + rest.map((a) => attestationNote(a, names, true)).join('');
+  return html`${attestationNote(main, names)}${rest.map((a) => attestationNote(a, names, true))}`;
 }
 
 /**
@@ -399,26 +400,24 @@ function proofInstructions(provider: ArtifactProvider, flow: Flow): Instruction[
  * reflowed: it is copied character for character, and one wrapped line is a broken command.
  */
 function instructions(parts: Instruction[]) {
-  return parts
-    .map((part) =>
-      typeof part === 'string'
-        ? `<p>${escape(part)}</p>`
-        : Array.isArray(part)
-          ? `<p>${part.map(inline).join('')}</p>`
-          : `<pre><code>${escape(part.code)}</code></pre>`,
-    )
-    .join('');
+  return html`${parts.map((part) =>
+    typeof part === 'string'
+      ? html`<p>${part}</p>`
+      : Array.isArray(part)
+        ? html`<p>${part.map(inline)}</p>`
+        : html`<pre><code>${part.code}</code></pre>`,
+  )}`;
 }
 
 /** A piece of a paragraph. A link that is not http(s) is written as its text alone. */
-function inline(piece: Inline) {
-  if (typeof piece === 'string') return escape(piece);
+function inline(piece: Inline): Content {
+  if (typeof piece === 'string') return piece;
 
   const href = safeUrl(piece.href);
 
   return href
-    ? `<a href="${escape(href)}" rel="noreferrer" target="_blank">${escape(piece.text)}</a>`
-    : escape(piece.text);
+    ? html`<a href="${href}" rel="noreferrer" target="_blank">${piece.text}</a>`
+    : piece.text;
 }
 
 /**
@@ -445,9 +444,9 @@ function visibilityChoice(local: LocalAccount, allowed: Visibility[], signed: bo
       : 'Public: anyone can view both sides of this link') + (signed ? `. ${signedNote}` : '');
 
   if (allowed.length === 1)
-    return `<input type="hidden" name="visibility" value="${allowed[0]}"><p class="fine">${escape(allowed[0] === 'unlisted' ? `Unlisted. ${unlisted}` : `${shown}.`)}</p>`;
+    return html`<input type="hidden" name="visibility" value="${allowed[0]}"><p class="fine">${allowed[0] === 'unlisted' ? `Unlisted. ${unlisted}` : `${shown}.`}</p>`;
 
-  return `<fieldset><legend>Evidence visibility</legend><label><input type="radio" name="visibility" value="unlisted" checked>Unlisted</label><p>${escape(unlisted)}</p><label><input type="radio" name="visibility" value="public">${escape(shown)}</label></fieldset>`;
+  return html`<fieldset><legend>Evidence visibility</legend><label><input type="radio" name="visibility" value="unlisted" checked>Unlisted</label><p>${unlisted}</p><label><input type="radio" name="visibility" value="public">${shown}</label></fieldset>`;
 }
 
 /**
@@ -476,53 +475,49 @@ function evidencePage(
     // The heading already names the site and the card already names the subject, so the
     // site's own reference would be a third line saying the same thing. The provider's
     // identifier stays: that one is the provider's word, not the site's own wording.
-    card(
+    html`${card(
       local.heading,
       local.value,
       e.local.profileUrl,
       undefined,
       attestationNote(e.attestations.local, names),
-    ) +
-      joiner +
-      externalCard(
-        marked(names.provider, e.provider, e.attestations.external[0]!.method),
-        e.external,
-        externalNotes(e.attestations, names),
-      ) +
-      times(
-        e.status === 'retired'
-          ? [
-              ['Approved', e.approvedAt],
-              // Two rows, always, so a reader sees any gap between them: an account retired
-              // weeks after it was last proved went unproved for those weeks.
-              ['Last verified', lastProved(e)],
-              ['Retired', e.retiredAt],
-              ['Sharing link expires', e.linkExpiresAt],
-            ]
-          : [
-              ['Approved', e.approvedAt],
-              ['Authenticated', e.authenticatedAt],
-              [
-                current ? 'Valid until' : 'Expired on',
-                e.status === 'revoked' ? undefined : e.expiresAt,
-              ],
-              ['Revoked on', e.revokedAt],
-              // Only a method that publishes an artifact drifts; a sign-in does not go stale.
-              [
-                'Last checked',
-                e.attestations.external[0].artifactUrl
-                  ? e.attestations.external[0].confirmedAt
-                  : undefined,
-              ],
-              ['Sharing link expires', e.linkExpiresAt],
+    )}${joiner}${externalCard(
+      marked(names.provider, e.provider, e.attestations.external[0]!.method),
+      e.external,
+      externalNotes(e.attestations, names),
+    )}${times(
+      e.status === 'retired'
+        ? [
+            ['Approved', e.approvedAt],
+            // Two rows, always, so a reader sees any gap between them: an account retired
+            // weeks after it was last proved went unproved for those weeks.
+            ['Last verified', lastProved(e)],
+            ['Retired', e.retiredAt],
+            ['Sharing link expires', e.linkExpiresAt],
+          ]
+        : [
+            ['Approved', e.approvedAt],
+            ['Authenticated', e.authenticatedAt],
+            [
+              current ? 'Valid until' : 'Expired on',
+              e.status === 'revoked' ? undefined : e.expiresAt,
             ],
-      ) +
-      `${e.linkExpiresAt ? '<p class="fine">Anyone with this link can view and forward it.</p>' : ''}
-    ${e.signedUrl ? `<p class="signed" id="signed"><strong>Signed by ${escape(e.verifierName)}</strong>${keyId ? `<br>${keyLine(base, keyId, named)}` : ''}<br><a href="${escape(safeUrl(e.signedUrl))}">Download signed record</a> · <a href="${escape(base)}/check">Check a record</a></p>` : ''}
+            ['Revoked on', e.revokedAt],
+            // Only a method that publishes an artifact drifts; a sign-in does not go stale.
+            [
+              'Last checked',
+              e.attestations.external[0].artifactUrl
+                ? e.attestations.external[0].confirmedAt
+                : undefined,
+            ],
+            ['Sharing link expires', e.linkExpiresAt],
+          ],
+    )}${e.linkExpiresAt !== undefined && html`<p class="fine">Anyone with this link can view and forward it.</p>`}
+    ${e.signedUrl && html`<p class="signed" id="signed"><strong>Signed by ${e.verifierName}</strong>${keyId && html`<br>${keyLine(base, keyId, named)}`}<br><a href="${safeUrl(e.signedUrl)}">Download signed record</a> · <a href="${base}/check">Check a record</a></p>`}
     <p class="fine">This connection does not establish legal identity, trustworthiness, content authorship, or permanent ownership.</p>
-    <footer><p class="fine">Is this your account? <a href="${escape(base)}/external-revoke/${escape(e.id)}?provider=${encodeURIComponent(e.provider)}">Remove this connection</a></p>
-    ${e.visibility === 'unlisted' ? `<p class="fine"><a href="${escape(base)}/external-share-revoke/${escape(e.id)}?provider=${encodeURIComponent(e.provider)}">Revoke only this sharing link using your external account</a></p>` : ''}
-    <p class="fine"><a href="${escape(report)}" rel="noreferrer">Report an incorrect record</a></p></footer>`,
+    <footer><p class="fine">Is this your account? <a href="${base}/external-revoke/${e.id}?provider=${encodeURIComponent(e.provider)}">Remove this connection</a></p>
+    ${e.visibility === 'unlisted' && html`<p class="fine"><a href="${base}/external-share-revoke/${e.id}?provider=${encodeURIComponent(e.provider)}">Revoke only this sharing link using your external account</a></p>`}
+    <p class="fine"><a href="${report}" rel="noreferrer">Report an incorrect record</a></p></footer>`,
     '',
     '',
     verdict(toneOf(e, Date.now()), true),
@@ -530,16 +525,13 @@ function evidencePage(
 }
 
 /** Joins a subject's card to its accounts: the link itself, drawn as the dialog draws it. */
-const joiner =
-  '<svg class="joiner" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">' +
-  [
-    'M10.5 7.5 13 5a4.95 4.95 0 0 1 7 7l-2.5 2.5',
-    'M13.5 16.5 11 19a4.95 4.95 0 0 1-7-7l2.5-2.5',
-    'M9 15l6-6',
-  ]
-    .map((d) => `<path d="${d}" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`)
-    .join('') +
-  '</svg>';
+const joiner = html`<svg class="joiner" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">${[
+  'M10.5 7.5 13 5a4.95 4.95 0 0 1 7 7l-2.5 2.5',
+  'M13.5 16.5 11 19a4.95 4.95 0 0 1-7-7l2.5-2.5',
+  'M9 15l6-6',
+].map(
+  (d) => html`<path d="${d}" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
+)}</svg>`;
 
 /**
  * One account as a badge's dialog draws it: what it is and how it stands, the verifier's
@@ -547,12 +539,12 @@ const joiner =
  */
 function accountCard(e: Evidence, external: Attestations['external'], now: number) {
   const retired = e.status === 'retired';
-  const record = escape(safeUrl(e.evidenceUrl));
+  const record = safeUrl(e.evidenceUrl);
 
   return externalCard(
     marked(e.providerName, e.provider, e.attestations.external[0]!.method),
     e.external,
-    `<p class="how">${verdict(toneOf(e, now))}${escape(statusLabel(e, now))} · via: <a href="${record}">${escape(e.verifierName)}</a>${e.signedUrl ? `<a class="signed-mark" href="${record}#signed">signed</a>` : ''}</p>`,
+    html`<p class="how">${verdict(toneOf(e, now))}${statusLabel(e, now)} · via: <a href="${record}">${e.verifierName}</a>${e.signedUrl && html`<a class="signed-mark" href="${record}#signed">signed</a>`}</p>`,
     externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
     times(
       retired
@@ -569,11 +561,11 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
     ),
     // The holder's own word on the account, which nothing checked, so it sits apart from
     // the methods, in the card's corner as the dialog has it.
-    retired || !e.mark
-      ? ''
-      : e.mark === 'preferred'
-        ? '<div class="listing preferred">Preferred</div>'
-        : '<div class="listing">No longer used</div>',
+    !retired &&
+      e.mark &&
+      (e.mark === 'preferred'
+        ? html`<div class="listing preferred">Preferred</div>`
+        : html`<div class="listing">No longer used</div>`),
   );
 }
 
@@ -595,20 +587,15 @@ function publishedPage(records: Evidence[], base: string) {
     base,
     'Public connections',
     records.length
-      ? [...subjects.values()]
-          .map((held) => {
-            const local = localSide(held[0]!.local, held[0]!.siteName);
+      ? html`${[...subjects.values()].map((held) => {
+          const local = localSide(held[0]!.local, held[0]!.siteName);
 
-            return (
-              card(local.heading, local.value, held[0]!.local.profileUrl) +
-              joiner +
-              `<div class="accounts">${accountsOf(held, now)
-                .map(({ lead, external }) => accountCard(lead, external, now))
-                .join('')}</div>`
-            );
-          })
-          .join('')
-      : '<p>No public connections.</p>',
+          return html`${card(local.heading, local.value, held[0]!.local.profileUrl)}${joiner}<div class="accounts">${accountsOf(
+            held,
+            now,
+          ).map(({ lead, external }) => accountCard(lead, external, now))}</div>`;
+        })}`
+      : html`<p>No public connections.</p>`,
   );
 }
 
@@ -623,15 +610,14 @@ type Named = { domain: string; lookup: string; dnssec: boolean };
  * beside it gives for its verifier.
  */
 function keyLine(base: string, keyId: string, named?: Named) {
-  const key = `Key <a href="${escape(base)}/keys.asc" title="${escape(keyId)}">${escape(short(keyId))}</a>`;
+  const key = html`Key <a href="${base}/keys.asc" title="${keyId}">${short(keyId)}</a>`;
 
   return named
-    ? `${key} · <a href="${escape(named.lookup)}" rel="noreferrer" title="${escape(`View the lookup for ${named.domain}`)}">confirmed in DNS${named.dnssec ? ' (DNSSEC)' : ''}</a>`
+    ? html`${key} · <a href="${named.lookup}" rel="noreferrer" title="${`View the lookup for ${named.domain}`}">confirmed in DNS${named.dnssec && ' (DNSSEC)'}</a>`
     : key;
 }
 
-const checkForm =
-  '<form method="post"><label>Signed record <textarea name="record" rows="8" cols="72" required></textarea></label><button>Check</button></form>';
+const checkForm = html`<form method="post"><label>Signed record <textarea name="record" rows="8" cols="72" required></textarea></label><button>Check</button></form>`;
 
 /**
  * What a signed record says, once its signature has been checked against this verifier's
@@ -648,36 +634,31 @@ function checkedPage(d: SignedDocument, keyId: string, base: string, named?: Nam
   return page(
     base,
     retired ? 'Retired connection' : 'Signed record',
-    `<p>${escape(d.verifierName)} signed this record. It shows what stood when it was signed, not what stands now.</p>` +
-      card(
-        local.heading,
-        local.value,
-        d.local.profileUrl,
-        undefined,
-        attestationNote(d.attestations.local, names),
-      ) +
-      joiner +
-      externalCard(
-        marked(names.provider, d.provider, d.attestations.external[0]!.method),
-        d.external,
-        externalNotes(d.attestations, names),
-      ) +
-      times(
-        retired
-          ? [
-              ['Signed', d.issuedAt],
-              ['Approved', d.approvedAt],
-              ['Last verified', lastProved(d)],
-              ['Retired', d.retiredAt],
-            ]
-          : [
-              ['Signed', d.issuedAt],
-              ['Approved', d.approvedAt],
-              ['Valid until', d.expiresAt],
-            ],
-      ) +
-      `<p class="fine">${keyLine(base, keyId, named)}</p>
-    <p class="fine"><a href="${escape(safeUrl(d.evidenceUrl))}">See whether this connection still stands</a></p>`,
+    html`<p>${d.verifierName} signed this record. It shows what stood when it was signed, not what stands now.</p>${card(
+      local.heading,
+      local.value,
+      d.local.profileUrl,
+      undefined,
+      attestationNote(d.attestations.local, names),
+    )}${joiner}${externalCard(
+      marked(names.provider, d.provider, d.attestations.external[0]!.method),
+      d.external,
+      externalNotes(d.attestations, names),
+    )}${times(
+      retired
+        ? [
+            ['Signed', d.issuedAt],
+            ['Approved', d.approvedAt],
+            ['Last verified', lastProved(d)],
+            ['Retired', d.retiredAt],
+          ]
+        : [
+            ['Signed', d.issuedAt],
+            ['Approved', d.approvedAt],
+            ['Valid until', d.expiresAt],
+          ],
+    )}<p class="fine">${keyLine(base, keyId, named)}</p>
+    <p class="fine"><a href="${safeUrl(d.evidenceUrl)}">See whether this connection still stands</a></p>`,
   );
 }
 
@@ -842,11 +823,11 @@ export function createVerily(options: ServerOptions) {
 
   /** A failure names its reason when the provider gave one meant for the holder. */
   function result(outcome: string, id = '', reason?: string) {
-    return html(
+    return pageResponse(
       page(
         prefix,
         'Verification result',
-        `<p>${escape(outcome)}</p>${reason ? `<p>${escape(reason)}.</p>` : ''}<div id="verily-result" data-outcome="${escape(outcome)}" data-id="${escape(id)}"></div><script src="${escape(prefix)}/result.js" defer></script><p>You can close this window and return to account settings.</p>`,
+        html`<p>${outcome}</p>${reason && html`<p>${reason}.</p>`}<div id="verily-result" data-outcome="${outcome}" data-id="${id}"></div><script src="${prefix}/result.js" defer></script><p>You can close this window and return to account settings.</p>`,
       ),
     );
   }
@@ -966,13 +947,13 @@ export function createVerily(options: ServerOptions) {
    * nowhere to go.
    */
   const confirmed = (flow: Flow) =>
-    html(
+    pageResponse(
       page(
         prefix,
         flow.phase === 'failed' ? 'Address not confirmed' : 'Address confirmed',
         flow.phase === 'failed'
-          ? `<p>${escape(flow.reason ?? 'This address could not be confirmed')}.</p>`
-          : '<p>You can close this tab now.</p>',
+          ? html`<p>${flow.reason ?? 'This address could not be confirmed'}.</p>`
+          : html`<p>You can close this tab now.</p>`,
       ),
     );
 
@@ -983,7 +964,7 @@ export function createVerily(options: ServerOptions) {
       url.origin !== base.origin ||
       !(url.pathname === prefix || url.pathname.startsWith(prefix + '/'))
     )
-      return html(page(prefix, 'Unavailable', ''), 404);
+      return pageResponse(page(prefix, 'Unavailable', html``), 404);
 
     const path = url.pathname.slice(prefix.length);
 
@@ -1070,21 +1051,19 @@ export function createVerily(options: ServerOptions) {
             const heading = marked(text, p.id, providerMethod(p));
 
             return typeof heading === 'string'
-              ? escape(heading)
-              : `${heading.mark}<span>${escape(heading.text)}</span>`;
+              ? heading
+              : html`${heading.mark}<span>${heading.text}</span>`;
           };
 
-          const forms = offered
-            .map(
-              (p) =>
-                `<form method="post" action="${escape(prefix)}/sessions"><input type="hidden" name="kind" value="${kind}">${kind === 'connect' ? '<input type="hidden" name="unattended" value="1">' : ''}<input type="hidden" name="connectionId" value="${escape(id)}"><input type="hidden" name="provider" value="${escape(p.id)}"><input type="hidden" name="method" value="${escape(providerMethod(p))}"><button>${label(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`, p)}</button></form>`,
-            )
-            .join('');
+          const forms = offered.map(
+            (p) =>
+              html`<form method="post" action="${prefix}/sessions"><input type="hidden" name="kind" value="${kind}">${kind === 'connect' && html`<input type="hidden" name="unattended" value="1">`}<input type="hidden" name="connectionId" value="${id}"><input type="hidden" name="provider" value="${p.id}"><input type="hidden" name="method" value="${providerMethod(p)}"><button>${label(offered.length > 1 ? methodAction(p) : `Continue with ${p.name}`, p)}</button></form>`,
+          );
 
           // several methods stack as one list of equal buttons, as in the dialog
-          const choices = offered.length > 1 ? `<div class="choices">${forms}</div>` : forms;
+          const choices = offered.length > 1 ? html`<div class="choices">${forms}</div>` : forms;
 
-          return html(
+          return pageResponse(
             page(
               prefix,
               external
@@ -1098,10 +1077,10 @@ export function createVerily(options: ServerOptions) {
                     : several
                       ? 'Verify an account'
                       : `Verify with ${providerNames(offered)}`,
-              `
-            ${user ? card(subject(user).heading, subject(user).value, user.profileUrl) : ''}
-            <p>${escape(purpose(kind, heldNames(offered), subjectNoun(user?.kind) ?? 'site', several))}</p>
-            ${kind === 'renew' && offered.length > 1 ? '<p class="fine">Renewing another way adds that method beneath the one this connection was first shown by.</p>' : ''}
+              html`
+            ${user && card(subject(user).heading, subject(user).value, user.profileUrl)}
+            <p>${purpose(kind, heldNames(offered), subjectNoun(user?.kind) ?? 'site', several)}</p>
+            ${kind === 'renew' && offered.length > 1 && html`<p class="fine">Renewing another way adds that method beneath the one this connection was first shown by.</p>`}
             ${choices}`,
             ),
           );
@@ -1153,21 +1132,21 @@ export function createVerily(options: ServerOptions) {
             if (!['revoke', 'share-revoke'].includes(flow.kind))
               if ((await local(request)).id !== flow.local?.id) throw new Unavailable();
 
-            return html(
+            return pageResponse(
               page(
                 prefix,
                 `Verify with ${provider.name}`,
-                `${instructions(proofInstructions(provider, flow))}
-            ${flow.tries ? `<p>${escape(refusedNote(flow))}</p>` : ''}
-            <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
-            <label>${escape(artifactField(provider))} ${
+                html`${instructions(proofInstructions(provider, flow))}
+            ${flow.tries ? html`<p>${refusedNote(flow)}</p>` : ''}
+            <form method="post" action="${prefix}/flows/${flow.id}/submit">
+            <label>${artifactField(provider)} ${
               provider.artifact === 'document'
-                ? `<textarea name="artifact" rows="14" cols="72" required>${escape(flow.artifact ?? '')}</textarea>`
-                : `<input name="artifact" type="${provider.input ?? 'url'}" value="${escape(flow.artifact ?? flow.suggested ?? '')}" autocapitalize="none" spellcheck="false" required>`
+                ? html`<textarea name="artifact" rows="14" cols="72" required>${flow.artifact ?? ''}</textarea>`
+                : html`<input name="artifact" type="${provider.input ?? 'url'}" value="${flow.artifact ?? flow.suggested ?? ''}" autocapitalize="none" spellcheck="false" required>`
             }</label>
             <button>Check my proof</button></form>
-            <p class="fine">${escape(artifactNote(provider, flow.expect))}</p>
-            <script src="${escape(prefix)}/copy.js" defer></script>`,
+            <p class="fine">${artifactNote(provider, flow.expect)}</p>
+            <script src="${prefix}/copy.js" defer></script>`,
               ),
             );
           }
@@ -1179,27 +1158,27 @@ export function createVerily(options: ServerOptions) {
 
             const step = codeStep(provider, flow);
 
-            return html(
+            return pageResponse(
               page(
                 prefix,
                 `Verify with ${provider.name}`,
-                `${
+                html`${
                   step.sentTo === undefined
                     ? ''
-                    : `<p>A message was sent to ${escape(step.sentTo)}. Press the button in it, and this page carries on.</p><noscript><p><a href="${escape(prefix)}/flows/${escape(flow.id)}">I pressed the button</a></p></noscript><p>Or enter the code from the message here.</p>${
+                    : html`<p>A message was sent to ${step.sentTo}. Press the button in it, and this page carries on.</p><noscript><p><a href="${prefix}/flows/${flow.id}">I pressed the button</a></p></noscript><p>Or enter the code from the message here.</p>${
                         step.wrong
-                          ? `<p>That code did not match. ${step.triesLeft === 1 ? 'One try is' : `${step.triesLeft} tries are`} left.</p>`
+                          ? html`<p>That code did not match. ${step.triesLeft === 1 ? 'One try is' : `${step.triesLeft} tries are`} left.</p>`
                           : ''
                       }`
                 }
-            <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/submit">
-            <label>${escape(step.sentTo === undefined ? step.field : 'Your code')} ${
+            <form method="post" action="${prefix}/flows/${flow.id}/submit">
+            <label>${step.sentTo === undefined ? step.field : 'Your code'} ${
               step.sentTo === undefined
-                ? `<input name="artifact" type="${step.input}" autocomplete="${step.input}" required>`
-                : '<input name="artifact" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>'
+                ? html`<input name="artifact" type="${step.input}" autocomplete="${step.input}" required>`
+                : html`<input name="artifact" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>`
             }</label>
-            <button>${step.sentTo === undefined ? `Send the ${escape(provider.name.toLowerCase())}` : 'Check my code'}</button></form>
-            ${step.sentTo === undefined ? `<p class="fine">${escape(codeNote)}</p>` : `<script src="${escape(prefix)}/wait.js" defer></script>`}`,
+            <button>${step.sentTo === undefined ? `Send the ${provider.name.toLowerCase()}` : 'Check my code'}</button></form>
+            ${step.sentTo === undefined ? html`<p class="fine">${codeNote}</p>` : html`<script src="${prefix}/wait.js" defer></script>`}`,
               ),
             );
           }
@@ -1218,7 +1197,7 @@ export function createVerily(options: ServerOptions) {
           const kept = ['revoke', 'share-revoke', 'renew'].includes(flow.kind) || joined;
           const found = standingNote(flow, service.siteOf(flow.local!));
 
-          return html(
+          return pageResponse(
             page(
               prefix,
               ['revoke', 'share-revoke'].includes(flow.kind)
@@ -1228,17 +1207,17 @@ export function createVerily(options: ServerOptions) {
                   : joined
                     ? 'Add to connection'
                     : 'Confirm connection',
-              `
+              html`
             ${card(subject(flow.local!).heading, subject(flow.local!).value, flow.local!.profileUrl)}
             ${joiner}
             ${externalCard(marked(provider.name, provider.id, providerMethod(provider)), flow.external!)}
-            ${joined ? `<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${escape(joined.visibility)}.</p>` : ''}
-            ${found ? `<p>${escape(found)}</p>` : ''}
-            <p class="fine">${escape(service.siteOf(flow.local!))} receives the result. Verified via ${escape(options.verifierName)}.</p>
-            <form method="post" action="${escape(prefix)}/flows/${escape(flow.id)}/approve">
-            ${kept ? '<input type="hidden" name="visibility" value="unlisted">' : visibilityChoice(flow.local!, visibilities(flow.local!), signs)}
+            ${joined && html`<p>This account is already linked here. Confirming adds this method to that connection, beneath the one it was first shown by, and it stays ${joined.visibility}.</p>`}
+            ${found && html`<p>${found}</p>`}
+            <p class="fine">${service.siteOf(flow.local!)} receives the result. Verified via ${options.verifierName}.</p>
+            <form method="post" action="${prefix}/flows/${flow.id}/approve">
+            ${kept ? html`<input type="hidden" name="visibility" value="unlisted">` : visibilityChoice(flow.local!, visibilities(flow.local!), signs)}
             <button name="action" value="approve">${['revoke', 'share-revoke'].includes(flow.kind) ? (flow.kind === 'share-revoke' ? 'Revoke sharing link' : 'Revoke connection') : flow.kind === 'renew' ? 'Renew connection' : joined ? 'Add to connection' : 'Confirm connection'}</button>
-            <button name="action" value="cancel">Cancel</button></form><p><a href="${escape(prefix)}/verify">Use a different external account</a></p>`,
+            <button name="action" value="cancel">Cancel</button></form><p><a href="${prefix}/verify">Use a different external account</a></p>`,
             ),
           );
         }
@@ -1266,15 +1245,15 @@ export function createVerily(options: ServerOptions) {
             'share-revoke': 'revoke its sharing link',
           };
 
-          return html(
+          return pageResponse(
             page(
               prefix,
               'Confirm your address',
-              `${asked.local ? card(subject(asked.local).heading, subject(asked.local).value, asked.local.profileUrl) : ''}
+              html`${asked.local && card(subject(asked.local).heading, subject(asked.local).value, asked.local.profileUrl)}
             ${card(asked.provider.name, externalName(asked.account), undefined)}
-            <p>Confirming shows that this address is yours, so the page that asked can go on to ${escape(next[asked.kind]!)}. Nothing changes until that page is approved too.</p>
-            <form method="post" action="${escape(prefix)}/confirm/${escape(confirmation[1]!)}">
-            <input type="hidden" name="token" value="${escape(token)}">
+            <p>Confirming shows that this address is yours, so the page that asked can go on to ${next[asked.kind]!}. Nothing changes until that page is approved too.</p>
+            <form method="post" action="${prefix}/confirm/${confirmation[1]!}">
+            <input type="hidden" name="token" value="${token}">
             <button>Confirm this address</button></form>
             <p class="fine">If you did not ask for this, close this page. Nothing happens unless you confirm.</p>`,
             ),
@@ -1293,7 +1272,7 @@ export function createVerily(options: ServerOptions) {
             url.searchParams.get('format') !== 'json' &&
             /\btext\/html\b/i.test(request.headers.get('accept') ?? '')
           )
-            return html(publishedPage(await service.listed(subject), prefix));
+            return pageResponse(publishedPage(await service.listed(subject), prefix));
 
           const response = json(await service.published(subject));
 
@@ -1318,11 +1297,11 @@ export function createVerily(options: ServerOptions) {
         if (path === '/keys.asc' && signs) return plain(await service.armoredKeys());
 
         if (path === '/check' && signs)
-          return html(
+          return pageResponse(
             page(
               prefix,
               'Check a signed record',
-              `<p>Paste the contents of a signed record saved from ${escape(options.verifierName)}.</p>${checkForm}`,
+              html`<p>Paste the contents of a signed record saved from ${options.verifierName}.</p>${checkForm}`,
             ),
           );
 
@@ -1333,7 +1312,7 @@ export function createVerily(options: ServerOptions) {
 
           return wants(request, url) === 'json'
             ? json(evidence)
-            : html(evidencePage(evidence, prefix, options.reportUrl));
+            : pageResponse(evidencePage(evidence, prefix, options.reportUrl));
         }
 
         const hosted = path.match(/^\/connections\/([^/]+)\/proof$/);
@@ -1367,7 +1346,7 @@ export function createVerily(options: ServerOptions) {
 
           const keyId = (await service.keys())[0]?.id;
 
-          return html(
+          return pageResponse(
             evidencePage(
               evidence,
               prefix,
@@ -1393,16 +1372,16 @@ export function createVerily(options: ServerOptions) {
             const by = (await signedBy(signed))!;
 
             if (document)
-              return html(checkedPage(document, by, prefix, await service.keyNamed(by)));
+              return pageResponse(checkedPage(document, by, prefix, await service.keyNamed(by)));
           } catch {
             // A record this build cannot draw is not one it can vouch for.
           }
 
-          return html(
+          return pageResponse(
             page(
               prefix,
               'Check a signed record',
-              `<p>This is not a record signed by ${escape(options.verifierName)}.</p>${checkForm}`,
+              html`<p>This is not a record signed by ${options.verifierName}.</p>${checkForm}`,
             ),
           );
         }
@@ -1545,9 +1524,12 @@ export function createVerily(options: ServerOptions) {
     } catch (error) {
       // Never serialize/log exceptions: provider responses and request URLs can contain secrets.
       if (error instanceof Unavailable || error instanceof SyntaxError)
-        return html(page(prefix, 'Unavailable', '<p>This resource is unavailable.</p>'), 404);
+        return pageResponse(
+          page(prefix, 'Unavailable', html`<p>This resource is unavailable.</p>`),
+          404,
+        );
 
-      return html(page(prefix, 'Request failed', '<p>Please try again.</p>'), 500);
+      return pageResponse(page(prefix, 'Request failed', html`<p>Please try again.</p>`), 500);
     }
   }
 

@@ -1,10 +1,10 @@
 import { timingSafeEqual } from 'node:crypto';
 import { expired, type Provider, type Visibility } from '../core/index.js';
-import { escape } from '../server/escape.js';
+import { html, raw, type Html } from '../server/html.js';
 import { date, minute } from '../server/render.js';
 import { hash, secret } from '../server/service.js';
 import { allow } from './limits.js';
-import { html, readCookie, see, setCookie, unavailable } from './page.js';
+import { respond, readCookie, see, setCookie, unavailable } from './page.js';
 import { dnsPrefix, validId, type DnsCheck, type Site, type Sites } from './sites.js';
 import type { Store } from './store.js';
 
@@ -27,10 +27,10 @@ interface DashboardSession {
 /** The session cookie, sent only to the dashboard's pages. */
 const sessionSet = (value: string, ms: number) => setCookie(cookieName, value, ms, '/dashboard');
 
-const signIn = (message = '', status = 200) =>
-  html(
+const signIn = (message?: Html, status = 200) =>
+  respond(
     'Site dashboard',
-    `${message}<form action="/dashboard/login" method="post">
+    html`${message}<form action="/dashboard/login" method="post">
 <label>Site id <input name="id" autocomplete="username" required></label>
 <label>Dashboard key <input name="key" type="password" autocomplete="current-password" required></label>
 <button>Sign in</button>
@@ -40,7 +40,7 @@ const signIn = (message = '', status = 200) =>
   );
 
 const checkbox = (name: string, value: string, label: string, checked: boolean) =>
-  `<label><input type="checkbox" name="${name}" value="${escape(value)}"${checked ? ' checked' : ''}> ${escape(label)}</label>`;
+  html`<label><input type="checkbox" name="${name}" value="${value}"${checked && raw(' checked')}> ${label}</label>`;
 
 /**
  * Where the operators of a site registered here change its settings and replace its key.
@@ -87,17 +87,17 @@ export class Dashboard {
     const id = fields.get('id')?.trim() ?? '';
     const given = fields.get('key') ?? '';
 
-    if (!validId(id)) return signIn('<p>Incorrect site id or key.</p>', 403);
+    if (!validId(id)) return signIn(html`<p>Incorrect site id or key.</p>`, 403);
 
     if (!(await allow(this.store, [{ key: `dashboard/${id}`, limit: loginLimit }])))
-      return signIn('<p>Too many attempts. Try again in a minute.</p>', 429);
+      return signIn(html`<p>Too many attempts. Try again in a minute.</p>`, 429);
 
     const operator = (await this.sites.operators(id)).find((candidate) =>
       timingSafeEqual(Buffer.from(candidate.hash), Buffer.from(hash(given))),
     );
 
     if (!operator || !this.sites.stored().some((site) => site.id === id))
-      return signIn('<p>Incorrect site id or key.</p>', 403);
+      return signIn(html`<p>Incorrect site id or key.</p>`, 403);
 
     const session = secret();
 
@@ -135,7 +135,7 @@ export class Dashboard {
     if (!providers.length || !visibility.length)
       return this.render(
         found.site,
-        '<p>Choose at least one provider and one visibility.</p>',
+        html`<p>Choose at least one provider and one visibility.</p>`,
         400,
       );
 
@@ -150,7 +150,7 @@ export class Dashboard {
     } catch {
       return this.render(
         found.site,
-        `<p>The authorize and return URLs must be on ${escape(found.site.origin)}.</p>`,
+        html`<p>The authorize and return URLs must be on ${found.site.origin}.</p>`,
         400,
       );
     }
@@ -172,8 +172,8 @@ export class Dashboard {
 
     return this.render(
       this.sites.sites.get(found.site.id)!,
-      `<p>The new site key is shown once. ${keep ? 'The old key keeps working for 24 hours.' : 'The old key no longer works.'}</p>
-<pre><code>${escape(key)}</code></pre>`,
+      html`<p>The new site key is shown once. ${keep ? 'The old key keeps working for 24 hours.' : 'The old key no longer works.'}</p>
+<pre><code>${key}</code></pre>`,
     );
   }
 
@@ -193,7 +193,7 @@ export class Dashboard {
     return new Map(this.providers.map((provider) => [provider.id, provider.name]));
   }
 
-  private async render(site: Site, message = '', status = 200): Promise<Response> {
+  private async render(site: Site, message?: Html, status = 200): Promise<Response> {
     const check = await this.store.get<DnsCheck>(`${dnsPrefix}${site.id}`);
     const record = `_verily.${new URL(site.origin).hostname}`;
 
@@ -206,37 +206,33 @@ export class Dashboard {
         : 'Served · DNS record not checked yet';
 
     // The one thing on the page the operator has to act on, so the one sentence.
-    const restore = suspended
-      ? `<p><code>${escape(record)}</code> no longer has <code>verily-verifier=${escape(this.host)}</code>. Add it back and the site is served again within an hour.</p>`
-      : '';
+    const restore =
+      suspended &&
+      html`<p><code>${record}</code> no longer has <code>verily-verifier=${this.host}</code>. Add it back and the site is served again within an hour.</p>`;
 
     const overlapping = !!site.previousKey && (site.previousUntil ?? 0) > Date.now();
 
-    const providers = [...this.offered()]
-      .map(([id, name]) =>
-        checkbox('provider', id, name, !site.providers || site.providers.includes(id)),
-      )
-      .join('');
+    const providers = [...this.offered()].map(([id, name]) =>
+      checkbox('provider', id, name, !site.providers || site.providers.includes(id)),
+    );
 
-    const visibility = (['public', 'unlisted'] as const)
-      .map((v) =>
-        checkbox(
-          'visibility',
-          v,
-          v[0]!.toUpperCase() + v.slice(1),
-          !site.visibility || site.visibility.includes(v),
-        ),
-      )
-      .join('');
+    const visibility = (['public', 'unlisted'] as const).map((v) =>
+      checkbox(
+        'visibility',
+        v,
+        v[0]!.toUpperCase() + v.slice(1),
+        !site.visibility || site.visibility.includes(v),
+      ),
+    );
 
-    return html(
+    return respond(
       'Site dashboard',
-      `${message}<dl><dt>Site</dt><dd>${escape(site.name)}</dd><dt>Site id</dt><dd>${escape(site.id)}</dd><dt>Status</dt><dd>${escape(standing)}</dd></dl>
+      html`${message}<dl><dt>Site</dt><dd>${site.name}</dd><dt>Site id</dt><dd>${site.id}</dd><dt>Status</dt><dd>${standing}</dd></dl>
 ${restore}
 <h2>Settings</h2>
 <form action="/dashboard/settings" method="post">
-<label>Authorize URL <input name="authorizeUrl" type="url" value="${escape(site.authorizeUrl)}" required></label>
-<label>Return URL <input name="returnUrl" type="url" value="${escape(site.returnUrl)}" required></label>
+<label>Authorize URL <input name="authorizeUrl" type="url" value="${site.authorizeUrl}" required></label>
+<label>Return URL <input name="returnUrl" type="url" value="${site.returnUrl}" required></label>
 <fieldset><legend>Providers your users may verify with</legend>${providers}</fieldset>
 <fieldset><legend>Visibility your users may choose</legend>${visibility}</fieldset>
 <button>Save</button>
@@ -244,10 +240,9 @@ ${restore}
 <h2>Site key</h2>
 <p class="fine">Your backend signs handoffs and reads connections with this key. A new key is shown once. Keep the old key working for 24 hours to deploy the new one without interruption, or stop it at once if it may have leaked.</p>
 ${
-  overlapping
-    ? `<section><p>The old key is accepted until ${escape(minute(site.previousUntil!))}. Stop accepting it once the new key is deployed.</p>
+  overlapping &&
+  html`<section><p>The old key is accepted until ${minute(site.previousUntil!)}. Stop accepting it once the new key is deployed.</p>
 <div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
-    : ''
 }
 <div class="actions"><form action="/dashboard/rotate" method="post"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div>
 <footer><div class="actions"><form action="/dashboard/logout" method="post"><button>Sign out</button></form></div></footer>`,
