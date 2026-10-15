@@ -18,6 +18,12 @@ export interface SiteClientOptions {
   /** The key the instance holds for this site. Never sent to a browser. */
   key: string;
   /**
+   * The key this one replaced, while the instance still accepts it. A user who began
+   * before the switch returns with a result signed with it, which `result()` then accepts
+   * too. Nothing is signed with it. Remove it once the instance stops accepting it.
+   */
+  previousKey?: string;
+  /**
    * Set this and the site's user ids never leave it: every id this client is given is this
    * site's own, and the instance is sent a stand-in made with `pseudonym()`. A subject
    * given no `reference` gets one made the same way. At least 32 characters, kept for this
@@ -151,6 +157,12 @@ export function createSiteClient(options: SiteClientOptions) {
 
   if (!/^[A-Za-z0-9_-]{43,}$/.test(options.key))
     throw new Error('key must be the base64url key the instance holds for this site');
+
+  if (options.previousKey !== undefined && !/^[A-Za-z0-9_-]{43,}$/.test(options.previousKey))
+    throw new Error('previousKey must be the base64url key this site had before');
+
+  /** The keys a result may be signed with: the site's key, then the one it replaced. */
+  const resultKeys = [options.key, ...(options.previousKey ? [options.previousKey] : [])];
 
   const request = options.fetch ?? fetch;
   const idSecret = options.idSecret;
@@ -313,9 +325,12 @@ export function createSiteClient(options: SiteClientOptions) {
 
       try {
         const bytes = decode(payload);
+        let verified = false;
 
-        if (!(await crypto.subtle.verify('HMAC', await hmacKey(options.key), decode(mac), bytes)))
-          return undefined;
+        for (const key of resultKeys)
+          verified ||= await crypto.subtle.verify('HMAC', await hmacKey(key), decode(mac), bytes);
+
+        if (!verified) return undefined;
 
         const result = JSON.parse(new TextDecoder().decode(bytes)) as SiteResult;
 

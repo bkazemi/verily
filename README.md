@@ -399,6 +399,8 @@ const verily = createSiteClient({
 
 The client has no dependencies and uses only Web Crypto and `fetch`, so it runs on Node, Next.js, Workers, Deno and Bun. Use it only on your backend: the key is what the instance believes.
 
+When your key is replaced and the old one is kept for 24 hours, deploy with the new key as `key` and the old one as `previousKey`. A user who began before the switch comes back with a result signed with the old key, and `result()` accepts either. Nothing is signed with `previousKey`. Remove it on a later deploy, once the 24 hours are over.
+
 **1. Mount the handler.** It serves the endpoints the instance and the pill need. Give it your own session lookup, and mount it on every path under one prefix:
 
 ```ts

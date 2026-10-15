@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createInstance, registry } from '../src/instance/index.js';
-import { sign, Sites, type DnsCheck, type Site } from '../src/instance/sites.js';
+import { open, sign, Sites, type DnsCheck, type Site } from '../src/instance/sites.js';
+import { hash } from '../src/server/service.js';
 import { fakeProvider, MemoryStore } from './helpers.js';
 
 const site = (id: string, origin = `https://${id}.test`): Site => ({
@@ -22,38 +23,56 @@ test('stored sites are served beside the pinned ones, which win on a clash', asy
   const store = new MemoryStore();
   const sites = new Sites(store, pinned());
 
-  await sites.save(site('stored'), first);
+  await sites.register(site('stored'), first);
   assert.deepEqual([...sites.sites.keys()], ['pinned', 'stored']);
 
-  // A change to a stored site replaces it.
-  await sites.save({ ...site('stored'), name: 'Renamed' });
-  assert.equal(sites.sites.get('stored')!.name, 'Renamed');
+  // A change to a stored site's settings keeps everything else, its key included.
+  await sites.update('stored', {
+    authorizeUrl: 'https://stored.test/v2/authorize',
+    returnUrl: 'https://stored.test/v2/return',
+    providers: ['github'],
+  });
+
+  assert.equal(sites.sites.get('stored')!.authorizeUrl, 'https://stored.test/v2/authorize');
+  assert.deepEqual(sites.sites.get('stored')!.providers, ['github']);
+  assert.equal(sites.sites.get('stored')!.key, site('stored').key);
+
+  // URLs off the site's origin are refused.
+  await assert.rejects(
+    sites.update('stored', {
+      authorizeUrl: 'https://elsewhere.test/authorize',
+      returnUrl: 'https://stored.test/return',
+    }),
+    /own origin/,
+  );
 
   // A new site may not take a stored site's id, and a change needs a site to change.
-  await assert.rejects(sites.save(site('stored'), first), /is taken/);
-  await assert.rejects(sites.save(site('unknown')), /not registered/);
+  await assert.rejects(sites.register(site('stored'), first), /is taken/);
+  await assert.rejects(sites.update('unknown', site('unknown')), /not registered/);
 
   // An id that was ever used is never given out again.
   await store.put('site/retired/gone', { retiredAt: 0 });
-  await assert.rejects(sites.save(site('gone'), first), /is taken/);
+  await assert.rejects(sites.register(site('gone'), first), /is taken/);
 
   // The pinned site's id and origin, and another stored site's origin, are refused.
-  await assert.rejects(sites.save(site('pinned')), /set by the host/);
+  await assert.rejects(sites.register(site('pinned'), first), /set by the host/);
+  await assert.rejects(sites.update('pinned', site('pinned')), /set by the host/);
 
   await assert.rejects(
-    sites.save(site('copy', 'https://pinned.test'), first),
+    sites.register(site('copy', 'https://pinned.test'), first),
     /already registered/,
   );
 
   await assert.rejects(
-    sites.save(site('copy', 'https://stored.test'), first),
+    sites.register(site('copy', 'https://stored.test'), first),
     /already registered/,
   );
 
-  await assert.rejects(sites.save({ ...site('bad'), key: 'short' }), /base64url key/);
-  await assert.rejects(sites.save(site('plain', 'http://plain.test')), /HTTPS origin/);
+  await assert.rejects(sites.register({ ...site('bad'), key: 'short' }, first), /base64url key/);
 
-  // Written past save(), as a host's own tooling might, a clash is still not served.
+  await assert.rejects(sites.register(site('plain', 'http://plain.test'), first), /HTTPS origin/);
+
+  // Written past register(), as a host's own tooling might, a clash is still not served.
   await store.put('site/registered/sneaky', site('sneaky', 'https://pinned.test'));
   await sites.refresh();
   assert.deepEqual([...sites.sites.keys()], ['pinned', 'stored']);
@@ -109,7 +128,7 @@ test('a site written to the store is served on the next request, without a resta
   assert.equal((await handoff('later')).status, 404);
 
   // Another process registers the site.
-  await new Sites(store, new Map()).save(site('later'), first);
+  await new Sites(store, new Map()).register(site('later'), first);
 
   assert.match((await handoff('later')).headers.get('location')!, /^https:\/\/later\.test\//);
 
@@ -272,7 +291,7 @@ test('a stored site whose DNS stops naming the instance is suspended until it do
   const records = new Map([['_verily.moved.test', ['verily-verifier=instance.test']]]);
   const { store, request, instance } = registering(records);
 
-  await new Sites(store, new Map()).save(site('moved'), first);
+  await new Sites(store, new Map()).register(site('moved'), first);
 
   const handoff = async () => (await request('/handoff/request?site=moved&purpose=connect')).status;
 
@@ -331,7 +350,7 @@ test('sites that are always due cannot keep the others from being checked', asyn
   const sites = new Sites(store, new Map());
   const crowd = Array.from({ length: 20 }, (_, i) => `crowd-${i}`);
 
-  for (const id of [...crowd, 'last']) await sites.save(site(id), first);
+  for (const id of [...crowd, 'last']) await sites.register(site(id), first);
 
   const handoff = async (id: string) =>
     (await request(`/handoff/request?site=${id}&purpose=connect`)).status;
@@ -385,4 +404,134 @@ test('sites that are always due cannot keep the others from being checked', asyn
 
   await instance.upkeep();
   assert.equal(await handoff('last'), 303);
+});
+
+test('settings saved from a page loaded before a key change keep the new key', async () => {
+  const store = new MemoryStore();
+  const stale = new Sites(store, new Map());
+  const other = new Sites(store, new Map());
+
+  await stale.register(site('raced'), first);
+  await other.refresh();
+
+  // Another request replaces the key while this one still holds the old site.
+  const replaced = await other.rotate('raced', false);
+
+  await stale.update('raced', {
+    authorizeUrl: 'https://raced.test/v2/authorize',
+    returnUrl: 'https://raced.test/return',
+  });
+
+  const stored = (await store.get<Site>('site/registered/raced'))!;
+
+  assert.equal(stored.key, replaced);
+  assert.equal(stored.previousKey, undefined);
+  assert.equal(stored.authorizeUrl, 'https://raced.test/v2/authorize');
+});
+
+test('a session opened just before a key change gets its result under the key it was opened with', async () => {
+  const store = new MemoryStore();
+  const sites = new Sites(store, new Map());
+  const oldKey = site('handed').key;
+
+  await sites.register(site('handed'), first);
+
+  const begun = (await sites.begin('handed', 'connect'))!;
+  const state = new URL(begun.location).searchParams.get('state')!;
+
+  const token = sign(oldKey, {
+    site: 'handed',
+    state,
+    id: 'someone',
+    label: 'someone',
+    reference: 'someone',
+    txn: 'txn',
+    exp: Math.floor(Date.now() / 1000) + 60,
+  });
+
+  const started = await sites.start(
+    new Request('https://instance.test/handoff/accept', {
+      headers: { cookie: begun.cookie.split(';')[0]! },
+    }),
+    token,
+    (local) => local,
+  );
+
+  assert.ok(started);
+
+  const [, session] = (await store.list<{ signer?: string }>('site/session/'))[0]!;
+
+  // The routine change comes after the handoff, while the backend still has the old key.
+  const newKey = await sites.rotate('handed', true);
+
+  const result = new URL(
+    sites.returnUrl(
+      sites.sites.get('handed')!,
+      { id: 'handed:someone', label: 'someone', reference: 'someone' },
+      'txn',
+      { operation: 'connect', outcome: 'cancelled', finishedAt: Date.now() },
+      session.signer,
+    ),
+  ).searchParams.get('result')!;
+
+  assert.ok(open(oldKey, result));
+  assert.equal(open(newKey, result), undefined);
+});
+
+test('replacing a key ends the sessions opened with the key it replaces', async () => {
+  const store = new MemoryStore();
+  const sites = new Sites(store, new Map());
+
+  await sites.register(site('leaked'), first);
+
+  /** Opens a session with a handoff signed by `key`, and returns its cookie. */
+  const opened = async (key: string) => {
+    const begun = (await sites.begin('leaked', 'connect'))!;
+
+    const started = await sites.start(
+      new Request('https://instance.test/handoff/accept', {
+        headers: { cookie: begun.cookie.split(';')[0]! },
+      }),
+      sign(key, {
+        site: 'leaked',
+        state: new URL(begun.location).searchParams.get('state')!,
+        id: 'someone',
+        label: 'someone',
+        reference: 'someone',
+        txn: 'txn',
+        exp: Math.floor(Date.now() / 1000) + 60,
+      }),
+      (local) => local,
+    );
+
+    return started!.cookies[0]!.split(';')[0]!;
+  };
+
+  const live = async (cookie: string) =>
+    !!(await sites.open(new Request('https://instance.test/', { headers: { cookie } })));
+
+  const leaked = await opened(site('leaked').key);
+
+  assert.ok(await live(leaked));
+
+  // Replaced at once, the leaked key's session is over.
+  const second = await sites.rotate('leaked', false);
+
+  assert.ok(!(await live(leaked)));
+
+  // Kept for a day, the old key's sessions last until the overlap is ended early.
+  const routine = await opened(second);
+
+  await sites.rotate('leaked', true);
+  assert.ok(await live(routine));
+  await sites.retirePreviousKey('leaked');
+  assert.ok(!(await live(routine)));
+
+  // A session from before sessions named their key lasts its hour.
+  const key = `site/session/${hash(routine.slice(routine.indexOf('=') + 1))}`;
+  const { signer, ...unnamed } = (await store.get<{ signer?: string }>(key))!;
+
+  assert.ok(signer);
+  await store.put(key, unnamed);
+  assert.ok(await live(routine));
 });

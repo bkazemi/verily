@@ -188,7 +188,7 @@ export class Registrations {
     const dashboardKey = secret();
 
     try {
-      await this.sites.save(
+      await this.sites.register(
         { ...claim.site, key: siteKey },
         { kind: 'key', hash: hash(dashboardKey), addedAt: Date.now() },
       );

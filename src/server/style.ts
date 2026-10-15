@@ -238,6 +238,9 @@ dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 /* Inside a card the rule above it is the card's own edge, so the list needs none. */
 section dl { margin: .5rem 0 1rem; padding-top: 0; border-top: 0; }
+
+/* Right under the heading, the heading's own rule is the one above it. */
+h1 + dl { padding-top: 0; border-top: 0; }
 .side dl { margin: .625rem 0 0; padding-top: .625rem; }
 
 /* The links under a record, ruled off from the record and its disclaimer. */

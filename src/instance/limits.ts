@@ -51,13 +51,13 @@ export const client = (address: string | null) => `client/${hash(address ?? 'unk
 
 /**
  * Deletes every record the handoff and the limits leave behind once it has expired:
- * handoffs that never reached `/handoff/accept`, site sessions, and idle buckets. Each is written
- * with its expiry under its own prefix for exactly this.
+ * handoffs that never reached `/handoff/accept`, site and dashboard sessions, and idle
+ * buckets. Each is written with its expiry under its own prefix for exactly this.
  */
 export async function prune(storage: Store): Promise<void> {
   const now = Date.now();
 
-  for (const prefix of ['site/state/', 'site/session/', 'rate/']) {
+  for (const prefix of ['site/state/', 'site/session/', 'site/dashboard/', 'rate/']) {
     for (const [key, value] of await storage.list<{ expiresAt: number }>(prefix))
       if (!(value.expiresAt > now)) await storage.delete(key);
   }

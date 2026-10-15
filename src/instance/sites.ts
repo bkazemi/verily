@@ -25,6 +25,9 @@ const stateCookie = 'verily_handoff';
 
 export const sessionCookie = 'verily_site';
 
+/** What an operator may change about a stored site. Absent lists mean every one. */
+export type Settings = Pick<Site, 'authorizeUrl' | 'returnUrl' | 'providers' | 'visibility'>;
+
 /** A site that sends its users here instead of hosting Verily itself. */
 export interface Site {
   /** Prefixes its subjects' ids, and names it in every token. */
@@ -38,6 +41,9 @@ export interface Site {
   returnUrl: string;
   /** Shared with the site's backend. Signs handoffs one way and results the other. */
   key: string;
+  /** The key before the last rotation, still accepted until `previousUntil`. */
+  previousKey?: string;
+  previousUntil?: number;
   /** The provider ids its holders may use. Absent means every one this instance offers. */
   providers?: string[];
   /** The visibilities its holders may choose. Absent means both. */
@@ -79,6 +85,12 @@ export interface SiteSession {
   /** The flow whose result this session returned with. No other flow's result is signed. */
   returned?: string;
   operation?: Operation;
+  /**
+   * The hash of the site key that signed the token this session was opened with. Its result
+   * is signed with that same key while the key is accepted, even if it has been replaced
+   * since, because the backend that started the handoff may not have the new key yet.
+   */
+  signer?: string;
   /**
    * Opened for the dialog on the site's own page, which reads how each flow ended for
    * itself. No flow returns to the site from it, so no flow's end closes it, and the
@@ -245,6 +257,38 @@ export function open(key: string, token: string): Record<string, unknown> | unde
   return peek(token);
 }
 
+/** How long a replaced site key is still accepted, so the site has time to deploy the new one. */
+export const rotationMs = 24 * 3600000;
+
+/** The site's keys that are accepted now: its key, and its previous key while in date. */
+const accepted = (site: Site) => [
+  site.key,
+  ...(site.previousKey && (site.previousUntil ?? 0) > Date.now() ? [site.previousKey] : []),
+];
+
+/**
+ * Whether the key a session was opened with is still accepted. A key replaced at once, or
+ * whose 24 hours are over or were ended early, takes its sessions with it, so a leaked key
+ * is no use to whoever already opened a session with it. A session from before sessions
+ * named their key has none, and lasts its hour.
+ */
+const keyAccepted = (site: Site, session: SiteSession) =>
+  session.signer === undefined || accepted(site).some((key) => hash(key) === session.signer);
+
+/**
+ * The payload of a token signed by one of the site's accepted keys, and the hash of the
+ * key that signed it.
+ */
+function verified(site: Site, token: string) {
+  for (const key of accepted(site)) {
+    const payload = open(key, token);
+
+    if (payload) return { payload, signer: hash(key) };
+  }
+
+  return undefined;
+}
+
 const cookie = (request: Request, name: string) =>
   request.headers
     .get('cookie')
@@ -362,38 +406,114 @@ export class Sites {
   }
 
   /**
-   * Keeps a site in the store, as a change to one already kept, or as a new one with its
-   * first operator. Refused if the entry is malformed, or its id or origin belongs to
-   * another site. A new site is refused an id that is in use or has ever been used.
+   * Keeps a new site in the store with its first operator. Refused if the entry is
+   * malformed, or its origin belongs to another site, or its id is in use or has ever been.
    */
-  async save(site: Site, first?: Operator): Promise<void> {
-    const entry = { ...checked(site as unknown as Record<string, unknown>), key: site.key };
+  async register(site: Site, first: Operator): Promise<void> {
+    const entry: Site = { ...checked(site as unknown as Record<string, unknown>), key: site.key };
 
     if (!validKey(entry.key)) throw new Error(`Site ${entry.id} needs a base64url key`);
 
     if (this.pinned.has(entry.id)) throw new Error(`Site ${entry.id} is set by the host`);
 
     await this.storage.transaction(async (tx) => {
-      const existing = await tx.get(`${registeredPrefix}${entry.id}`);
-
-      if (first && (existing || (await tx.get(`${retiredPrefix}${entry.id}`))))
+      if (
+        (await tx.get(`${registeredPrefix}${entry.id}`)) ||
+        (await tx.get(`${retiredPrefix}${entry.id}`))
+      )
         throw new Error(`The id ${entry.id} is taken`);
-
-      if (!first && !existing) throw new Error(`Site ${entry.id} is not registered`);
 
       for (const [, other] of [
         ...this.pinned.entries(),
         ...(await tx.list<Site>(registeredPrefix)),
       ])
-        if (other.id !== entry.id && other.origin === entry.origin)
-          throw new Error(`${entry.origin} is already registered`);
+        if (other.origin === entry.origin) throw new Error(`${entry.origin} is already registered`);
 
       await tx.put<Site>(`${registeredPrefix}${entry.id}`, entry);
-
-      if (first) await tx.put<Operator[]>(`${operatorsPrefix}${entry.id}`, [first]);
+      await tx.put<Operator[]>(`${operatorsPrefix}${entry.id}`, [first]);
     });
 
     await this.refresh();
+  }
+
+  /**
+   * Changes a stored site's settings. The rest of the site, its keys above all, is read in
+   * the same transaction and kept as it is, so a change made from a page loaded before a
+   * key was replaced cannot bring the old key back. Refused if the result is malformed.
+   */
+  async update(id: string, settings: Settings): Promise<void> {
+    if (this.pinned.has(id)) throw new Error(`Site ${id} is set by the host`);
+
+    await this.storage.transaction(async (tx) => {
+      const stored = await tx.get<Site>(`${registeredPrefix}${id}`);
+
+      if (!stored) throw new Error(`Site ${id} is not registered`);
+
+      const { key, previousKey, previousUntil, providers, visibility, ...rest } = stored;
+
+      const changed = checked({
+        ...rest,
+        authorizeUrl: settings.authorizeUrl,
+        returnUrl: settings.returnUrl,
+        ...(settings.providers ? { providers: settings.providers } : {}),
+        ...(settings.visibility ? { visibility: settings.visibility } : {}),
+      });
+
+      await tx.put<Site>(`${registeredPrefix}${id}`, {
+        ...changed,
+        key,
+        ...(previousKey && previousUntil ? { previousKey, previousUntil } : {}),
+      });
+    });
+
+    await this.refresh();
+  }
+
+  /**
+   * Gives a stored site a new key and returns it. With `keep`, the old key is still
+   * accepted for `rotationMs`, for a routine change. Without it, the old key stops working
+   * at once, for a key that may have leaked. Any key before the old one stops either way.
+   */
+  async rotate(id: string, keep: boolean): Promise<string> {
+    const key = secret();
+
+    await this.storage.transaction(async (tx) => {
+      const stored = await tx.get<Site>(`${registeredPrefix}${id}`);
+
+      if (!stored) throw new Error(`Site ${id} is not registered`);
+
+      const { previousKey, previousUntil, ...site } = stored;
+
+      await tx.put<Site>(`${registeredPrefix}${id}`, {
+        ...site,
+        key,
+        ...(keep ? { previousKey: stored.key, previousUntil: Date.now() + rotationMs } : {}),
+      });
+    });
+
+    await this.refresh();
+
+    return key;
+  }
+
+  /** Stops accepting a stored site's previous key, once the new one is deployed. */
+  async retirePreviousKey(id: string): Promise<void> {
+    await this.storage.transaction(async (tx) => {
+      const stored = await tx.get<Site>(`${registeredPrefix}${id}`);
+
+      if (!stored) throw new Error(`Site ${id} is not registered`);
+
+      const { previousKey, previousUntil, ...site } = stored;
+
+      await tx.put<Site>(`${registeredPrefix}${id}`, site);
+    });
+
+    await this.refresh();
+  }
+
+  /** The operators of a stored site. */
+  async operators(id: string): Promise<Operator[]> {
+    return (await this.storage.get<Operator[]>(`${operatorsPrefix}${id}`)) ?? [];
   }
 
   /**
@@ -434,7 +554,7 @@ export class Sites {
 
     if (!site) return undefined;
 
-    const payload = open(site.key, token);
+    const { payload, signer } = verified(site, token) ?? {};
     const now = Date.now();
     const held = cookie(request, stateCookie);
 
@@ -474,6 +594,7 @@ export class Sites {
         txn,
         local,
         expiresAt: now + sessionMs,
+        signer,
       });
 
       return state.purpose;
@@ -510,7 +631,7 @@ export class Sites {
 
     if (!site || origin !== site.origin) return undefined;
 
-    const payload = open(site.key, token);
+    const { payload, signer } = verified(site, token) ?? {};
     const now = Date.now();
 
     if (
@@ -548,6 +669,7 @@ export class Sites {
         local,
         expiresAt: now + sessionMs,
         dialog: true,
+        signer,
       });
 
       return true;
@@ -567,7 +689,7 @@ export class Sites {
 
     if (!site) return undefined;
 
-    const payload = open(site.key, token);
+    const payload = verified(site, token)?.payload;
     const now = Date.now();
 
     if (
@@ -596,7 +718,10 @@ export class Sites {
     const key = `site/session/${hash(token)}`;
     const session = await this.storage.get<SiteSession>(key);
 
-    if (!session || expired(session, Date.now()) || !this.sites.has(session.site)) return undefined;
+    const site = session && this.sites.get(session.site);
+
+    if (!session || !site || expired(session, Date.now()) || !keyAccepted(site, session))
+      return undefined;
 
     return { key, session };
   }
@@ -635,24 +760,33 @@ export class Sites {
 
     if (!['connect', 'renew', 'visibility'].includes(result.kind)) return undefined;
 
+    const session = context.session?.startsWith('site/session/')
+      ? await this.storage.get<SiteSession>(context.session)
+      : undefined;
+
     // The sign-in window of a dialog shows the flow's own result page and goes nowhere.
-    if (
-      context.session?.startsWith('site/session/') &&
-      (await this.storage.get<SiteSession>(context.session))?.dialog
-    )
-      return undefined;
+    if (session?.dialog) return undefined;
+
+    // Nothing is signed for a session whose key has since been withdrawn.
+    if (session && !keyAccepted(site, session)) return undefined;
 
     // Another flow's return, or a disconnect, already speaks for this transaction. This
     // flow ended all the same, however it ended, and its holder sees the result page.
     if (!(await this.claim(context.session, flow))) return undefined;
 
-    return this.returnUrl(site, local, context.txn, {
-      operation: result.kind,
-      outcome: result.phase,
-      connection: result.connectionId,
-      visibility: result.visibility,
-      finishedAt: result.finishedAt,
-    });
+    return this.returnUrl(
+      site,
+      local,
+      context.txn,
+      {
+        operation: result.kind,
+        outcome: result.phase,
+        connection: result.connectionId,
+        visibility: result.visibility,
+        finishedAt: result.finishedAt,
+      },
+      session?.signer,
+    );
   }
 
   /**
@@ -678,7 +812,10 @@ export class Sites {
     });
   }
 
-  /** The signed result a holder carries back to their site. */
+  /**
+   * The signed result a holder carries back to their site, under the key that opened its
+   * session while that key is still accepted, and under the site's key otherwise.
+   */
   returnUrl(
     site: Site,
     local: LocalAccount,
@@ -690,12 +827,15 @@ export class Sites {
       visibility?: Visibility;
       finishedAt: number;
     },
+    signer?: string,
   ): string {
     if (!local.id.startsWith(`${site.id}:`)) throw new Error('Subject from another site');
 
     const complete = result.outcome === 'complete';
 
-    const token = sign(site.key, {
+    const key = accepted(site).find((candidate) => hash(candidate) === signer) ?? site.key;
+
+    const token = sign(key, {
       site: site.id,
       id: local.id.slice(site.id.length + 1),
       operation: result.operation,

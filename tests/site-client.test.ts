@@ -179,6 +179,32 @@ test('a site client accepts only a result the instance signed for it, still in d
     assert.equal(await client.result(bad), undefined);
 });
 
+test('a site client given its previous key accepts results signed with either key', async () => {
+  const previousKey = 'p'.repeat(43);
+
+  const result = {
+    site: 'partner',
+    id: 'u-1',
+    operation: 'connect',
+    outcome: 'cancelled',
+    txn: 't1',
+    exp: now() + 600,
+  };
+
+  const rolling = createSiteClient({ instance, site: 'partner', key, previousKey });
+  const plain = createSiteClient({ instance, site: 'partner', key });
+
+  assert.deepEqual(await rolling.result(signed(result)), result);
+  assert.deepEqual(await rolling.result(signed(result, previousKey)), result);
+  assert.equal(await plain.result(signed(result, previousKey)), undefined);
+  assert.equal(await rolling.result(signed(result, 'x'.repeat(43))), undefined);
+
+  assert.throws(
+    () => createSiteClient({ instance, site: 'partner', key, previousKey: 'short' }),
+    /previousKey/,
+  );
+});
+
 test('a pseudonym is stable, differs by secret, value and purpose, and needs a real secret', async () => {
   const secret = 's'.repeat(32);
   const id = await pseudonym(secret, 'user-1');

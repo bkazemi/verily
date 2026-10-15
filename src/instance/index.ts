@@ -20,6 +20,7 @@ import { OwnerAuth } from './auth.js';
 import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js';
 import { allow, client, limits, prune } from './limits.js';
 import { recheckSites, Registrations, type Registration } from './register.js';
+import { Dashboard } from './dashboard.js';
 import type { DnsOptions } from '../server/domain.js';
 import { own } from './routes.js';
 import { html, safeHeaders, unavailable } from './page.js';
@@ -297,6 +298,7 @@ class Server {
   private readonly auth: OwnerAuth;
   private readonly sites: Sites;
   private readonly registrations?: Registrations;
+  private readonly dashboard: Dashboard;
   private readonly local: LocalAccount;
 
   constructor(private readonly options: InstanceOptions) {
@@ -309,6 +311,8 @@ class Server {
     this.store = options.store;
     this.auth = new OwnerAuth(this.store, options.ownerKey);
     this.sites = new Sites(this.store, options.sites ?? new Map());
+
+    this.dashboard = new Dashboard(this.store, this.sites, options.providers, origin.host);
 
     if (options.registration === 'open')
       this.registrations = new Registrations(this.store, this.sites, this.origin, options.dns);
@@ -506,6 +510,17 @@ class Server {
 
       if (url.pathname === '/mark') return this.mark(request);
 
+      if (url.pathname === '/dashboard/login') return this.dashboard.login(request);
+
+      if (url.pathname === '/dashboard/logout') return this.dashboard.logout(request);
+
+      if (url.pathname === '/dashboard/settings') return this.dashboard.settings(request);
+
+      if (url.pathname === '/dashboard/rotate') return this.dashboard.rotate(request);
+
+      if (url.pathname === '/dashboard/previous-key')
+        return this.dashboard.retirePreviousKey(request);
+
       if (this.registrations) {
         if (url.pathname === '/register') return this.registrations.request(request);
 
@@ -514,6 +529,9 @@ class Server {
         if (url.pathname === '/register/cancel') return this.registrations.cancel();
       }
     }
+
+    if (request.method === 'GET' && url.pathname === '/dashboard')
+      return this.dashboard.page(request);
 
     if (request.method === 'GET' && url.pathname === '/register' && this.registrations)
       return this.registrations.page(request);
@@ -851,13 +869,19 @@ class Server {
     }
 
     return see(
-      this.sites.returnUrl(this.site(session), session.local, session.txn, {
-        operation: 'disconnect',
-        outcome: 'complete',
-        connection,
-        visibility: current.operation!.visibility,
-        finishedAt: current.operation!.finishedAt!,
-      }),
+      this.sites.returnUrl(
+        this.site(session),
+        session.local,
+        session.txn,
+        {
+          operation: 'disconnect',
+          outcome: 'complete',
+          connection,
+          visibility: current.operation!.visibility,
+          finishedAt: current.operation!.finishedAt!,
+        },
+        session.signer,
+      ),
     );
   }
 
@@ -896,13 +920,19 @@ class Server {
     }
 
     return see(
-      this.sites.returnUrl(this.site(session), session.local, session.txn, {
-        operation: 'mark',
-        outcome: 'complete',
-        connection,
-        visibility: current.operation!.visibility,
-        finishedAt: current.operation!.finishedAt!,
-      }),
+      this.sites.returnUrl(
+        this.site(session),
+        session.local,
+        session.txn,
+        {
+          operation: 'mark',
+          outcome: 'complete',
+          connection,
+          visibility: current.operation!.visibility,
+          finishedAt: current.operation!.finishedAt!,
+        },
+        session.signer,
+      ),
     );
   }
 
