@@ -112,7 +112,7 @@ const verily = createVerily({
 | `baseUrl`        | The public URL you mount Verily at. Every route it serves is under this path.             |
 | `siteName`       | Your site's name, shown on evidence.                                                      |
 | `verifierName`   | Who vouches for the record, shown on evidence. Usually the backend's domain.              |
-| `profileOrigins` | The origins a local `profileUrl` may be on.                                               |
+| `profileOrigins` | The origins a local `profileUrl` may be on, or a function returning them.                 |
 | `reportUrl`      | Where readers report a bad record (`https:` or `mailto:`).                                |
 | `authenticate`   | Returns the signed-in local account for a request, or `undefined` if nobody is signed in. |
 

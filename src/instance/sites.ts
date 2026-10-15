@@ -98,6 +98,57 @@ function secureOrigin(value: string) {
   );
 }
 
+/** Where a site registered on the instance itself is kept, under its id. */
+const registeredPrefix = 'site/registered/';
+
+/** A site's key: base64url, of at least 32 bytes. */
+const validKey = (key: unknown): key is string =>
+  typeof key === 'string' && /^[A-Za-z0-9_-]{43,}$/.test(key);
+
+/** A site entry checked field by field, without its key. Throws on the first thing wrong. */
+function checked(entry: Record<string, unknown>): Omit<Site, 'key'> {
+  const { id, name, origin, authorizeUrl, returnUrl, providers, visibility } = entry ?? {};
+
+  if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id))
+    throw new Error('Each site needs an id of lowercase letters, digits and hyphens');
+
+  if (typeof name !== 'string' || !name || name.length > 100)
+    throw new Error(`Site ${id} needs a name`);
+
+  if (typeof origin !== 'string' || !secureOrigin(origin))
+    throw new Error(`Site ${id} needs an HTTPS origin without a trailing slash`);
+
+  for (const url of [authorizeUrl, returnUrl])
+    if (typeof url !== 'string' || new URL(url).origin !== origin)
+      throw new Error(`Site ${id} must authorize and return on its own origin`);
+
+  if (
+    providers !== undefined &&
+    (!Array.isArray(providers) ||
+      !providers.length ||
+      providers.some((p) => typeof p !== 'string' || !p))
+  )
+    throw new Error(`Site ${id} must list at least one provider id, or none at all`);
+
+  if (
+    visibility !== undefined &&
+    (!Array.isArray(visibility) ||
+      !visibility.length ||
+      visibility.some((v) => v !== 'public' && v !== 'unlisted'))
+  )
+    throw new Error(`Site ${id} must list "public", "unlisted" or both, or no visibility at all`);
+
+  return {
+    id,
+    name,
+    origin,
+    authorizeUrl: authorizeUrl as string,
+    returnUrl: returnUrl as string,
+    ...(providers ? { providers: providers as string[] } : {}),
+    ...(visibility ? { visibility: visibility as Visibility[] } : {}),
+  };
+}
+
 /**
  * The registered sites, from the `SITES` variable, each with its key from the secret
  * `SITE_<ID>_KEY`. Anything wrong in the list refuses to start rather than serving a site
@@ -111,57 +162,21 @@ export function registry(config: unknown, secrets: Record<string, unknown>): Map
   const sites = new Map<string, Site>();
 
   for (const entry of list as Record<string, unknown>[]) {
-    const { id, name, origin, authorizeUrl, returnUrl, providers, visibility } = entry ?? {};
+    const site = checked(entry);
 
-    if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id) || sites.has(id))
-      throw new Error('Each site needs a unique id of lowercase letters, digits and hyphens');
+    if (sites.has(site.id)) throw new Error(`Site ${site.id} is listed twice`);
 
-    const key = secrets[`SITE_${id.toUpperCase().replace(/-/g, '_')}_KEY`];
-
-    if (typeof name !== 'string' || !name || name.length > 100)
-      throw new Error(`Site ${id} needs a name`);
-
-    if (typeof origin !== 'string' || !secureOrigin(origin))
-      throw new Error(`Site ${id} needs an HTTPS origin without a trailing slash`);
-
-    for (const url of [authorizeUrl, returnUrl])
-      if (typeof url !== 'string' || new URL(url).origin !== origin)
-        throw new Error(`Site ${id} must authorize and return on its own origin`);
-
-    if (
-      providers !== undefined &&
-      (!Array.isArray(providers) ||
-        !providers.length ||
-        providers.some((p) => typeof p !== 'string' || !p))
-    )
-      throw new Error(`Site ${id} must list at least one provider id, or none at all`);
-
-    if (
-      visibility !== undefined &&
-      (!Array.isArray(visibility) ||
-        !visibility.length ||
-        visibility.some((v) => v !== 'public' && v !== 'unlisted'))
-    )
-      throw new Error(`Site ${id} must list "public", "unlisted" or both, or no visibility at all`);
+    const key = secrets[`SITE_${site.id.toUpperCase().replace(/-/g, '_')}_KEY`];
 
     // A secret is set apart from a deployment and cannot be checked before one. A wrong
     // one leaves its own site unserved, and never takes the rest of the instance with it.
-    if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{43,}$/.test(key)) {
-      console.error(`Site ${id} is not served: it needs a base64url key of at least 32 bytes`);
+    if (!validKey(key)) {
+      console.error(`Site ${site.id} is not served: it needs a base64url key of at least 32 bytes`);
 
       continue;
     }
 
-    sites.set(id, {
-      id,
-      name,
-      origin,
-      authorizeUrl: authorizeUrl as string,
-      returnUrl: returnUrl as string,
-      key,
-      ...(providers ? { providers: providers as string[] } : {}),
-      ...(visibility ? { visibility: visibility as Visibility[] } : {}),
-    });
+    sites.set(site.id, { ...site, key });
   }
 
   return sites;
@@ -260,10 +275,65 @@ function subject(
  * bound to the browser that asked for it, the way OAuth binds a callback with `state`.
  */
 export class Sites {
+  /**
+   * Every site served: the pinned ones, then the ones kept in the store, as `refresh()`
+   * last read them.
+   */
+  sites: Map<string, Site>;
+
+  /**
+   * `pinned` are the sites the host configures, from `SITES`. They cannot be changed here,
+   * and a stored site with the same id or origin is not served.
+   */
   constructor(
     private readonly storage: Store,
-    readonly sites: Map<string, Site>,
-  ) {}
+    private readonly pinned: Map<string, Site>,
+  ) {
+    this.sites = new Map(pinned);
+  }
+
+  /**
+   * Reads the stored sites again. The instance does this on every request, so a site
+   * registered, changed or removed by another process is served as it now is.
+   */
+  async refresh(): Promise<void> {
+    const sites = new Map(this.pinned);
+    const origins = new Set([...this.pinned.values()].map((site) => site.origin));
+
+    for (const [, site] of await this.storage.list<Site>(registeredPrefix)) {
+      if (sites.has(site.id) || origins.has(site.origin)) continue;
+
+      sites.set(site.id, site);
+      origins.add(site.origin);
+    }
+
+    this.sites = sites;
+  }
+
+  /**
+   * Keeps a site in the store, as a new one or a change to one already kept. Refused if the
+   * entry is malformed, or its id or origin belongs to another site.
+   */
+  async save(site: Site): Promise<void> {
+    const entry = { ...checked(site as unknown as Record<string, unknown>), key: site.key };
+
+    if (!validKey(entry.key)) throw new Error(`Site ${entry.id} needs a base64url key`);
+
+    if (this.pinned.has(entry.id)) throw new Error(`Site ${entry.id} is set by the host`);
+
+    await this.storage.transaction(async (tx) => {
+      for (const [, other] of [
+        ...this.pinned.entries(),
+        ...(await tx.list<Site>(registeredPrefix)),
+      ])
+        if (other.id !== entry.id && other.origin === entry.origin)
+          throw new Error(`${entry.origin} is already registered`);
+
+      await tx.put<Site>(`${registeredPrefix}${entry.id}`, entry);
+    });
+
+    await this.refresh();
+  }
 
   /**
    * Starts a handoff: a state stored with the site and purpose, set in this browser, and

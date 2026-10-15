@@ -80,7 +80,8 @@ export interface ServiceOptions {
   baseUrl: string;
   siteName: string;
   verifierName: string;
-  profileOrigins: string[];
+  /** A function is asked on every check, for a list that changes while the server runs. */
+  profileOrigins: string[] | (() => string[]);
   validityMs?: number;
   flowTtlMs?: number;
   shareTtlMs?: number;
@@ -378,12 +379,18 @@ export class VerilyService {
         !['https:', 'http:'].includes(url.protocol) ||
         url.username ||
         url.password ||
-        !this.options.profileOrigins.includes(url.origin)
+        !this.profileOrigins().includes(url.origin)
       )
         throw new Error('Unregistered profile origin');
     }
 
     return structuredClone(local);
+  }
+
+  private profileOrigins(): string[] {
+    const origins = this.options.profileOrigins;
+
+    return typeof origins === 'function' ? origins() : origins;
   }
 
   /** The site a subject belongs to: its own name where it has one, else this instance's. */

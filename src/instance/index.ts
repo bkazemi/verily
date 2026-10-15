@@ -42,7 +42,10 @@ export interface InstanceOptions {
   reportUrl: string;
   /** The methods offered. A registered site may narrow these for its own holders. */
   providers: Provider[];
-  /** The sites that send their users here instead of hosting Verily, as `registry()` reads them. */
+  /**
+   * The sites the host configures, as `registry()` reads them. Sites registered on the
+   * instance itself are kept in the store and served alongside these.
+   */
   sites?: Map<string, Site>;
   /**
    * The key public records are signed by, armored. Left out, a key is made on first use and
@@ -297,7 +300,7 @@ class Server {
     this.auth = new OwnerAuth(this.store, options.ownerKey);
     this.sites = new Sites(this.store, options.sites ?? new Map());
 
-    const siteOrigins = [...this.sites.sites.values()].map((site) => site.origin);
+    const ownerOrigin = new URL(options.owner.profileUrl).origin;
 
     // A site with no user accounts must not have its subject described as one, so the
     // owner's kind is whatever the host gave, absent included.
@@ -323,8 +326,9 @@ class Server {
       // Each published proof is re-read every six hours, so one taken down is noticed soon.
       recheckMs: options.recheckMs ?? 6 * 3600000,
       // Every site's origin, since the library checks one list. That a subject's profile
-      // is on its own site's origin is checked when its handoff arrives.
-      profileOrigins: [new URL(options.owner.profileUrl).origin, ...siteOrigins],
+      // is on its own site's origin is checked when its handoff arrives. Asked each time,
+      // since sites registered here come and go while the instance runs.
+      profileOrigins: () => [ownerOrigin, ...[...this.sites.sites.values()].map((s) => s.origin)],
       reportUrl: options.reportUrl,
       // A site session is the more specific: it was opened for this holder moments ago.
       authenticate: async (request) =>
@@ -377,6 +381,8 @@ class Server {
     let response: Response;
 
     try {
+      await this.sites.refresh();
+
       const admitted = await admit(request, this.origin);
 
       response = admitted instanceof Response ? admitted : await this.route(admitted, address);
