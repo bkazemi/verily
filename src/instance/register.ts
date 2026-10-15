@@ -1,7 +1,7 @@
 import { escape } from '../server/escape.js';
 import { domainOf, namedVerifiers, published, type DnsOptions } from '../server/domain.js';
 import { hash, secret } from '../server/service.js';
-import { html, safeHeaders } from './page.js';
+import { html, readCookie, see, setCookie } from './page.js';
 import { checked, dnsPrefix, open, sign, type DnsCheck, type Site, type Sites } from './sites.js';
 import type { Store } from './store.js';
 
@@ -23,16 +23,8 @@ interface Claim {
 
 const claimPrefix = 'verily-claim=';
 
-const cookie = (request: Request) =>
-  request.headers
-    .get('cookie')
-    ?.split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${claimCookie}=`))
-    ?.slice(claimCookie.length + 1);
-
-const setCookie = (value: string, ms: number) =>
-  `${claimCookie}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/register; Max-Age=${ms / 1000}`;
+/** The claim cookie, sent only to the registration pages. */
+const claimed = (value: string, ms: number) => setCookie(claimCookie, value, ms, '/register');
 
 const field = (form: URLSearchParams, name: string) => (form.get(name) ?? '').trim();
 
@@ -84,7 +76,7 @@ export class Registrations {
   }
 
   private async claim(request: Request): Promise<Claim | undefined> {
-    const token = cookie(request);
+    const token = readCookie(request, claimCookie);
     const payload = token ? open(await this.key(), token) : undefined;
 
     return payload && typeof payload.exp === 'number' && payload.exp * 1000 > Date.now()
@@ -131,10 +123,7 @@ export class Registrations {
     const exp = Math.floor((Date.now() + claimMs) / 1000);
     const token = sign(await this.key(), { site, code: secret(), exp });
 
-    return new Response(null, {
-      status: 303,
-      headers: { ...safeHeaders, Location: '/register', 'Set-Cookie': setCookie(token, claimMs) },
-    });
+    return see('/register', [claimed(token, claimMs)]);
   }
 
   /** What to publish for a claim, and the button that checks it. */
@@ -210,17 +199,14 @@ export class Registrations {
 <p>If both keys are lost, the site cannot be recovered. Registering the domain again makes a new site, and your users have to connect their accounts again.</p>`,
     );
 
-    response.headers.append('Set-Cookie', setCookie('', 0));
+    response.headers.append('Set-Cookie', claimed('', 0));
 
     return response;
   }
 
   /** Drops this browser's claim. */
   cancel(): Response {
-    return new Response(null, {
-      status: 303,
-      headers: { ...safeHeaders, Location: '/register', 'Set-Cookie': setCookie('', 0) },
-    });
+    return see('/register', [claimed('', 0)]);
   }
 }
 

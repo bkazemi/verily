@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createInstance, registry } from '../src/instance/index.js';
-import { open, sign, Sites, type Site } from '../src/instance/sites.js';
+import { registry } from '../src/instance/index.js';
+import { open, Sites, type Site } from '../src/instance/sites.js';
 import { hash } from '../src/server/service.js';
-import { fakeProvider, MemoryStore } from './helpers.js';
+import { fakeProvider, memoryInstance, offlineDns, readStatus } from './helpers.js';
 
 const dashboardKey = 'd'.repeat(43);
 const siteKey = 's'.repeat(43);
@@ -19,17 +19,8 @@ const site: Site = {
 
 /** An instance serving one pinned site, and one stored site with a dashboard key. */
 async function managed() {
-  const store = new MemoryStore();
-
-  const instance = createInstance({
-    store,
-    origin: 'https://instance.test',
-    siteName: 'Instance Site',
-    owner: { label: 'owner', reference: 'the owner', profileUrl: 'https://owner.test/' },
-    ownerKey: 'k'.repeat(43),
-    reportUrl: 'mailto:reports@instance.test',
+  const { store, request, post } = memoryInstance({
     providers: [fakeProvider(), { ...fakeProvider(), id: 'discord', name: 'Discord' }],
-    signingKey: false,
     sites: registry(
       [
         {
@@ -42,11 +33,7 @@ async function managed() {
       ],
       { SITE_PINNED_KEY: 'p'.repeat(43) },
     ),
-    dns: {
-      fetch: async () => {
-        throw new Error('offline');
-      },
-    },
+    dns: offlineDns,
   });
 
   await new Sites(store, new Map()).register(site, {
@@ -54,29 +41,6 @@ async function managed() {
     hash: hash(dashboardKey),
     addedAt: 0,
   });
-
-  const request = (path: string, init: RequestInit = {}) =>
-    instance.handle(
-      new Request(`https://instance.test${path}`, {
-        ...init,
-        headers: {
-          origin: 'https://instance.test',
-          'content-type': 'application/x-www-form-urlencoded',
-          ...init.headers,
-        },
-      }),
-    );
-
-  const post = (path: string, fields: Record<string, string | string[]>, cookie = '') =>
-    request(path, {
-      method: 'POST',
-      headers: cookie ? { cookie } : {},
-      body: new URLSearchParams(
-        Object.entries(fields).flatMap(([name, value]) =>
-          (Array.isArray(value) ? value : [value]).map((one) => [name, one]),
-        ),
-      ).toString(),
-    });
 
   const login = async (id = 'managed', key = dashboardKey) => {
     const response = await post('/dashboard/login', { id, key });
@@ -200,19 +164,7 @@ test('a key replaced for a routine change keeps the old one working for a day', 
   const { store, request, post, login } = await managed();
   const { cookie } = await login();
 
-  const read = async (key: string) =>
-    (
-      await request('/site/connections', {
-        headers: {
-          authorization: `Bearer ${sign(key, {
-            site: 'managed',
-            op: 'read',
-            ids: ['someone'],
-            exp: Math.floor(Date.now() / 1000) + 60,
-          })}`,
-        },
-      })
-    ).status;
+  const read = (key: string) => readStatus(request, 'managed', key);
 
   const shown = await (await post('/dashboard/rotate', { keep: 'day' }, cookie)).text();
   const newKey = shown.match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
@@ -274,19 +226,7 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
   const { store, request, post, login } = await managed();
   const { cookie } = await login();
 
-  const read = async (key: string) =>
-    (
-      await request('/site/connections', {
-        headers: {
-          authorization: `Bearer ${sign(key, {
-            site: 'managed',
-            op: 'read',
-            ids: ['someone'],
-            exp: Math.floor(Date.now() / 1000) + 60,
-          })}`,
-        },
-      })
-    ).status;
+  const read = (key: string) => readStatus(request, 'managed', key);
 
   const replace = async (keep: string) =>
     (await (await post('/dashboard/rotate', { keep }, cookie)).text()).match(

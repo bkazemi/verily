@@ -1,11 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
 import { expired, type Provider, type Visibility } from '../core/index.js';
 import { escape } from '../server/escape.js';
-import { date } from '../server/render.js';
+import { date, minute } from '../server/render.js';
 import { hash, secret } from '../server/service.js';
 import { allow } from './limits.js';
-import { html, safeHeaders, unavailable } from './page.js';
-import { dnsPrefix, type DnsCheck, type Site, type Sites } from './sites.js';
+import { html, readCookie, see, setCookie, unavailable } from './page.js';
+import { dnsPrefix, validId, type DnsCheck, type Site, type Sites } from './sites.js';
 import type { Store } from './store.js';
 
 const cookieName = 'verily_dashboard';
@@ -24,26 +24,8 @@ interface DashboardSession {
   expiresAt: number;
 }
 
-const token = (request: Request) =>
-  request.headers
-    .get('cookie')
-    ?.split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${cookieName}=`))
-    ?.slice(cookieName.length + 1);
-
-const setCookie = (value: string, ms: number) =>
-  `${cookieName}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/dashboard; Max-Age=${ms / 1000}`;
-
-const see = (cookie?: string) =>
-  new Response(null, {
-    status: 303,
-    headers: {
-      ...safeHeaders,
-      Location: '/dashboard',
-      ...(cookie ? { 'Set-Cookie': cookie } : {}),
-    },
-  });
+/** The session cookie, sent only to the dashboard's pages. */
+const sessionSet = (value: string, ms: number) => setCookie(cookieName, value, ms, '/dashboard');
 
 const signIn = (message = '', status = 200) =>
   html(
@@ -56,18 +38,6 @@ const signIn = (message = '', status = 200) =>
     status,
     'single',
   );
-
-/** A time to the minute, in UTC, such as "Oct 16, 2026, 18:28 UTC". */
-const moment = (time: number) =>
-  `${new Date(time).toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: 'UTC',
-  })} UTC`;
 
 const checkbox = (name: string, value: string, label: string, checked: boolean) =>
   `<label><input type="checkbox" name="${name}" value="${escape(value)}"${checked ? ' checked' : ''}> ${escape(label)}</label>`;
@@ -87,7 +57,7 @@ export class Dashboard {
 
   /** The signed-in operator's site, if the session and the key it was opened with still hold. */
   private async session(request: Request) {
-    const value = token(request);
+    const value = readCookie(request, cookieName);
 
     if (!value) return undefined;
 
@@ -117,7 +87,7 @@ export class Dashboard {
     const id = fields.get('id')?.trim() ?? '';
     const given = fields.get('key') ?? '';
 
-    if (!/^[a-z0-9-]{1,32}$/.test(id)) return signIn('<p>Incorrect site id or key.</p>', 403);
+    if (!validId(id)) return signIn('<p>Incorrect site id or key.</p>', 403);
 
     if (!(await allow(this.store, [{ key: `dashboard/${id}`, limit: loginLimit }])))
       return signIn('<p>Too many attempts. Try again in a minute.</p>', 429);
@@ -137,15 +107,15 @@ export class Dashboard {
       expiresAt: Date.now() + sessionMs,
     });
 
-    return see(setCookie(session, sessionMs));
+    return see('/dashboard', [sessionSet(session, sessionMs)]);
   }
 
   async logout(request: Request): Promise<Response> {
-    const value = token(request);
+    const value = readCookie(request, cookieName);
 
     if (value) await this.store.delete(`${sessionPrefix}${hash(value)}`);
 
-    return see(setCookie('', 0));
+    return see('/dashboard', [sessionSet('', 0)]);
   }
 
   /** Saves the site's URLs, providers and visibility. */
@@ -185,7 +155,7 @@ export class Dashboard {
       );
     }
 
-    return see();
+    return see('/dashboard');
   }
 
   /**
@@ -215,7 +185,7 @@ export class Dashboard {
 
     await this.sites.retirePreviousKey(found.site.id);
 
-    return see();
+    return see('/dashboard');
   }
 
   /** The provider ids this instance offers, each once, with a name to show. */
@@ -275,7 +245,7 @@ ${restore}
 <p class="fine">Your backend signs handoffs and reads connections with this key. A new key is shown once. Keep the old key working for 24 hours to deploy the new one without interruption, or stop it at once if it may have leaked.</p>
 ${
   overlapping
-    ? `<section><p>The old key is accepted until ${escape(moment(site.previousUntil!))}. Stop accepting it once the new key is deployed.</p>
+    ? `<section><p>The old key is accepted until ${escape(minute(site.previousUntil!))}. Stop accepting it once the new key is deployed.</p>
 <div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
     : ''
 }

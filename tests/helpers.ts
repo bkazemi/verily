@@ -8,6 +8,9 @@ import type {
   ArtifactProvider,
 } from '../src/core/index.js';
 import type { KeyValue, Store } from '../src/instance/store.js';
+import { createInstance, type Instance, type InstanceOptions } from '../src/instance/index.js';
+import { sign, type Sites } from '../src/instance/sites.js';
+import type { DnsOptions } from '../src/server/domain.js';
 
 /** Instructions reach a page as pieces, so a test that reads them as prose joins them. */
 export const written = (parts: Instruction[]) =>
@@ -212,4 +215,131 @@ export function fakeDocumentProvider(): ArtifactProvider & {
       return Promise.resolve(this.gone);
     },
   };
+}
+
+/**
+ * DNS that answers from `records`, a name such as `_verily.example.test` to its TXT
+ * values, read at the time of each lookup. A name set to null gets no answer at all.
+ */
+export const fakeDns = (records: Map<string, string[] | null>): DnsOptions => ({
+  fetch: async (input) => {
+    const name = new URL(String(input)).searchParams.get('name')!;
+
+    if (records.get(name) === null) throw new Error('unanswered');
+
+    return Response.json({
+      Status: 0,
+      Answer: (records.get(name) ?? []).map((value) => ({
+        name: `${name}.`,
+        type: 16,
+        data: `"${value}"`,
+      })),
+    });
+  },
+});
+
+/** DNS that never answers, so a test makes no lookup over the network. */
+export const offlineDns: DnsOptions = {
+  fetch: async () => {
+    throw new Error('offline');
+  },
+};
+
+/**
+ * An instance at https://instance.test on a store in memory, with `request` and `post`
+ * sending what a form on the instance's own pages would.
+ */
+export function memoryInstance(
+  options: Partial<InstanceOptions> = {},
+  store = new MemoryStore(),
+): {
+  store: MemoryStore;
+  instance: Pick<Instance, 'handle' | 'upkeep'>;
+  request: (path: string, init?: RequestInit) => Promise<Response>;
+  post: (
+    path: string,
+    fields: Record<string, string | string[]>,
+    cookie?: string,
+  ) => Promise<Response>;
+} {
+  const instance = createInstance({
+    store,
+    origin: 'https://instance.test',
+    siteName: 'Instance Site',
+    owner: { label: 'owner', reference: 'the owner', profileUrl: 'https://owner.test/' },
+    ownerKey: 'k'.repeat(43),
+    reportUrl: 'mailto:reports@instance.test',
+    providers: [fakeProvider()],
+    signingKey: false,
+    ...options,
+  });
+
+  const request = (path: string, init: RequestInit = {}) =>
+    instance.handle(
+      new Request(`https://instance.test${path}`, {
+        ...init,
+        headers: {
+          origin: 'https://instance.test',
+          'content-type': 'application/x-www-form-urlencoded',
+          ...init.headers,
+        },
+      }),
+    );
+
+  /** A form post. A field given as a list is sent once for each value. */
+  const post = (path: string, fields: Record<string, string | string[]>, cookie = '') =>
+    request(path, {
+      method: 'POST',
+      headers: cookie ? { cookie } : {},
+      body: new URLSearchParams(
+        Object.entries(fields).flatMap(([name, value]) =>
+          (Array.isArray(value) ? value : [value]).map((one) => [name, one]),
+        ),
+      ).toString(),
+    });
+
+  return { store, instance, request, post };
+}
+
+/** The status a site backend's read of its connections gets, signed with `key`. */
+export async function readStatus(
+  request: (path: string, init?: RequestInit) => Promise<Response>,
+  site: string,
+  key: string,
+): Promise<number> {
+  const token = sign(key, {
+    site,
+    op: 'read',
+    ids: ['someone'],
+    exp: Math.floor(Date.now() / 1000) + 60,
+  });
+
+  return (await request('/site/connections', { headers: { authorization: `Bearer ${token}` } }))
+    .status;
+}
+
+/**
+ * Opens a session for the user `someone` of site `id`, through a handoff signed with
+ * `key`, and returns the session's cookie as a browser would send it.
+ */
+export async function openSession(sites: Sites, id: string, key: string): Promise<string> {
+  const begun = (await sites.begin(id, 'connect'))!;
+
+  const started = await sites.start(
+    new Request('https://instance.test/handoff/accept', {
+      headers: { cookie: begun.cookie.split(';')[0]! },
+    }),
+    sign(key, {
+      site: id,
+      state: new URL(begun.location).searchParams.get('state')!,
+      id: 'someone',
+      label: 'someone',
+      reference: 'someone',
+      txn: 'txn',
+      exp: Math.floor(Date.now() / 1000) + 60,
+    }),
+    (local) => local,
+  );
+
+  return started!.cookies[0]!.split(';')[0]!;
 }

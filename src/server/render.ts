@@ -142,6 +142,18 @@ export function distance(time: number, now: number) {
 }
 
 /** Seconds are the finest thing a record measured in days can mean; milliseconds are noise. */
+/** A time to the minute, in UTC, such as "Oct 16, 2026, 18:28 UTC". */
+export const minute = (time: number) =>
+  `${new Date(time).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: 'UTC',
+  })} UTC`;
+
 export const moment = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 /**

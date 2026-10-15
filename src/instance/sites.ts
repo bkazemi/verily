@@ -7,6 +7,7 @@ import {
   type Visibility,
 } from '../core/index.js';
 import type { Store } from './store.js';
+import { readCookie, setCookie } from './page.js';
 import { hash, secret } from '../server/service.js';
 
 /** How long a handoff may take, from `/handoff/request` to `/handoff/accept`, and how far ahead a token may run. */
@@ -139,15 +140,19 @@ export interface Operator {
   addedAt: number;
 }
 
-/** A site's key: base64url, of at least 32 bytes. */
-const validKey = (key: unknown): key is string =>
+/** A site's id: what prefixes its subjects and names it in every token. */
+export const validId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[a-z0-9-]{1,32}$/.test(id);
+
+/** A key: base64url, of at least 32 bytes. */
+export const validKey = (key: unknown): key is string =>
   typeof key === 'string' && /^[A-Za-z0-9_-]{43,}$/.test(key);
 
 /** A site entry checked field by field, without its key. Throws on the first thing wrong. */
 export function checked(entry: Record<string, unknown>): Omit<Site, 'key'> {
   const { id, name, origin, authorizeUrl, returnUrl, providers, visibility } = entry ?? {};
 
-  if (typeof id !== 'string' || !/^[a-z0-9-]{1,32}$/.test(id))
+  if (!validId(id))
     throw new Error('Each site needs an id of lowercase letters, digits and hyphens');
 
   if (typeof name !== 'string' || !name || name.length > 100)
@@ -288,17 +293,6 @@ function verified(site: Site, token: string) {
 
   return undefined;
 }
-
-const cookie = (request: Request, name: string) =>
-  request.headers
-    .get('cookie')
-    ?.split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-
-const setCookie = (name: string, value: string, ms: number) =>
-  `${name}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${ms / 1000}`;
 
 const string = (value: unknown, max = 500): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max;
@@ -556,7 +550,7 @@ export class Sites {
 
     const { payload, signer } = verified(site, token) ?? {};
     const now = Date.now();
-    const held = cookie(request, stateCookie);
+    const held = readCookie(request, stateCookie);
 
     if (
       !payload ||
@@ -711,7 +705,7 @@ export class Sites {
 
   /** This browser's site session, whether or not it has returned yet. */
   async session(request: Request): Promise<{ key: string; session: SiteSession } | undefined> {
-    const token = cookie(request, sessionCookie);
+    const token = readCookie(request, sessionCookie);
 
     if (!token) return undefined;
 

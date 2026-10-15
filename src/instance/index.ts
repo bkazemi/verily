@@ -23,7 +23,7 @@ import { recheckSites, Registrations, type Registration } from './register.js';
 import { Dashboard } from './dashboard.js';
 import type { DnsOptions } from '../server/domain.js';
 import { own } from './routes.js';
-import { html, safeHeaders, unavailable } from './page.js';
+import { html, safeHeaders, see, unavailable } from './page.js';
 
 export { fromEnv, type InstanceEnv } from './env.js';
 
@@ -84,14 +84,6 @@ const signIn = (message = '', status = 200) =>
   );
 
 const redirect = (cookie: string) => see('/', [cookie]);
-
-function see(location: string, cookies: string[] = []) {
-  const headers = new Headers({ ...safeHeaders, Location: location });
-
-  for (const cookie of cookies) headers.append('Set-Cookie', cookie);
-
-  return new Response(null, { status: 303, headers });
-}
 
 /** Every refused handoff looks the same, so nobody can learn which check it failed. */
 const refused = () =>

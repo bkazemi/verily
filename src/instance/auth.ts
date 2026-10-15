@@ -2,6 +2,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { expired } from '../core/index.js';
 import type { Store } from './store.js';
 import { hash, secret } from '../server/service.js';
+import { readCookie, setCookie } from './page.js';
+import { validKey } from './sites.js';
 
 const sessionMs = 8 * 3600000;
 // Use a normal host-only cookie name. Secure, HttpOnly, SameSite and Path=/
@@ -19,19 +21,14 @@ export class OwnerAuth {
     private readonly storage: Store,
     private readonly ownerKey: string,
   ) {
-    if (!/^[A-Za-z0-9_-]{43,}$/.test(ownerKey))
+    if (!validKey(ownerKey))
       throw new Error(
         'OWNER_KEY must be a randomly generated base64url secret of at least 32 bytes',
       );
   }
 
   private token(request: Request) {
-    return request.headers
-      .get('cookie')
-      ?.split(';')
-      .map((part) => part.trim())
-      .find((part) => part.startsWith(`${cookieName}=`))
-      ?.slice(cookieName.length + 1);
+    return readCookie(request, cookieName);
   }
 
   async authenticated(request: Request): Promise<boolean> {
@@ -63,7 +60,7 @@ export class OwnerAuth {
       keyHash: hash(this.ownerKey),
     });
 
-    return `${cookieName}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${sessionMs / 1000}`;
+    return setCookie(cookieName, token, sessionMs);
   }
 
   async logout(request: Request): Promise<string> {
@@ -71,7 +68,7 @@ export class OwnerAuth {
 
     if (token) await this.storage.delete(`owner/session/${hash(token)}`);
 
-    return `${cookieName}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+    return setCookie(cookieName, '', 0);
   }
 
   async allow(bucket: 'login', limit: number, windowMs: number): Promise<boolean> {

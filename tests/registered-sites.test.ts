@@ -1,9 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createInstance, registry } from '../src/instance/index.js';
-import { open, sign, Sites, type DnsCheck, type Site } from '../src/instance/sites.js';
+import { registry } from '../src/instance/index.js';
+import { open, Sites, type DnsCheck, type Site } from '../src/instance/sites.js';
 import { hash } from '../src/server/service.js';
-import { fakeProvider, MemoryStore } from './helpers.js';
+import {
+  fakeDns,
+  memoryInstance,
+  MemoryStore,
+  offlineDns,
+  openSession,
+  readStatus,
+} from './helpers.js';
 
 const site = (id: string, origin = `https://${id}.test`): Site => ({
   id,
@@ -78,21 +85,7 @@ test('stored sites are served beside the pinned ones, which win on a clash', asy
   assert.deepEqual([...sites.sites.keys()], ['pinned', 'stored']);
 
   // Pruning leaves registered sites alone.
-  const instance = createInstance({
-    store,
-    origin: 'https://instance.test',
-    siteName: 'Instance Site',
-    owner: { label: 'owner', reference: 'the owner', profileUrl: 'https://owner.test/' },
-    ownerKey: 'k'.repeat(43),
-    reportUrl: 'mailto:reports@instance.test',
-    providers: [fakeProvider()],
-    signingKey: false,
-    dns: {
-      fetch: async () => {
-        throw new Error('offline');
-      },
-    },
-  });
+  const { instance } = memoryInstance({ dns: offlineDns }, store);
 
   // A DNS lookup that fails suspends nothing.
   await instance.upkeep();
@@ -105,24 +98,9 @@ test('stored sites are served beside the pinned ones, which win on a clash', asy
 });
 
 test('a site written to the store is served on the next request, without a restart', async () => {
-  const store = new MemoryStore();
+  const { store, request } = memoryInstance({ sites: pinned() });
 
-  const instance = createInstance({
-    store,
-    origin: 'https://instance.test',
-    siteName: 'Instance Site',
-    owner: { label: 'owner', reference: 'the owner', profileUrl: 'https://owner.test/' },
-    ownerKey: 'k'.repeat(43),
-    reportUrl: 'mailto:reports@instance.test',
-    providers: [fakeProvider()],
-    signingKey: false,
-    sites: pinned(),
-  });
-
-  const handoff = (id: string) =>
-    instance.handle(
-      new Request(`https://instance.test/handoff/request?site=${id}&purpose=connect`),
-    );
+  const handoff = (id: string) => request(`/handoff/request?site=${id}&purpose=connect`);
 
   assert.match((await handoff('pinned')).headers.get('location')!, /^https:\/\/pinned\.test\//);
   assert.equal((await handoff('later')).status, 404);
@@ -137,56 +115,11 @@ test('a site written to the store is served on the next request, without a resta
   assert.equal((await handoff('later')).status, 404);
 });
 
-/**
- * An instance open to registration, whose DNS is whatever `records` holds at the time. A
- * name set to null gets no answer.
- */
-function registering(records: Map<string, string[] | null>, registration: 'open' | 'off' = 'open') {
-  const store = new MemoryStore();
-
-  const instance = createInstance({
-    store,
-    origin: 'https://instance.test',
-    siteName: 'Instance Site',
-    owner: { label: 'owner', reference: 'the owner', profileUrl: 'https://owner.test/' },
-    ownerKey: 'k'.repeat(43),
-    reportUrl: 'mailto:reports@instance.test',
-    providers: [fakeProvider()],
-    signingKey: false,
-    sites: pinned(),
-    registration,
-    dns: {
-      fetch: async (input) => {
-        const name = new URL(String(input)).searchParams.get('name')!;
-
-        if (records.get(name) === null) throw new Error('unanswered');
-
-        return Response.json({
-          Status: 0,
-          Answer: (records.get(name) ?? []).map((value) => ({
-            name: `${name}.`,
-            type: 16,
-            data: `"${value}"`,
-          })),
-        });
-      },
-    },
-  });
-
-  const request = (path: string, init: RequestInit = {}) =>
-    instance.handle(
-      new Request(`https://instance.test${path}`, {
-        ...init,
-        headers: {
-          origin: 'https://instance.test',
-          'content-type': 'application/x-www-form-urlencoded',
-          ...init.headers,
-        },
-      }),
-    );
-
-  return { store, request, instance };
-}
+/** An instance open to registration, whose DNS is whatever `records` holds at the time. */
+const registering = (
+  records: Map<string, string[] | null>,
+  registration: 'open' | 'off' = 'open',
+) => memoryInstance({ sites: pinned(), registration, dns: fakeDns(records) });
 
 const asked = {
   domain: 'newcomer.test',
@@ -295,19 +228,7 @@ test('a stored site whose DNS stops naming the instance is suspended until it do
 
   const handoff = async () => (await request('/handoff/request?site=moved&purpose=connect')).status;
 
-  const read = async () =>
-    (
-      await request('/site/connections', {
-        headers: {
-          authorization: `Bearer ${sign(site('moved').key, {
-            site: 'moved',
-            op: 'read',
-            ids: ['someone'],
-            exp: Math.floor(Date.now() / 1000) + 60,
-          })}`,
-        },
-      })
-    ).status;
+  const read = () => readStatus(request, 'moved', site('moved').key);
 
   // Due when a check is this long past.
   const age = async (ms: number) => {
@@ -436,28 +357,7 @@ test('a session opened just before a key change gets its result under the key it
 
   await sites.register(site('handed'), first);
 
-  const begun = (await sites.begin('handed', 'connect'))!;
-  const state = new URL(begun.location).searchParams.get('state')!;
-
-  const token = sign(oldKey, {
-    site: 'handed',
-    state,
-    id: 'someone',
-    label: 'someone',
-    reference: 'someone',
-    txn: 'txn',
-    exp: Math.floor(Date.now() / 1000) + 60,
-  });
-
-  const started = await sites.start(
-    new Request('https://instance.test/handoff/accept', {
-      headers: { cookie: begun.cookie.split(';')[0]! },
-    }),
-    token,
-    (local) => local,
-  );
-
-  assert.ok(started);
+  await openSession(sites, 'handed', oldKey);
 
   const [, session] = (await store.list<{ signer?: string }>('site/session/'))[0]!;
 
@@ -484,28 +384,7 @@ test('replacing a key ends the sessions opened with the key it replaces', async 
 
   await sites.register(site('leaked'), first);
 
-  /** Opens a session with a handoff signed by `key`, and returns its cookie. */
-  const opened = async (key: string) => {
-    const begun = (await sites.begin('leaked', 'connect'))!;
-
-    const started = await sites.start(
-      new Request('https://instance.test/handoff/accept', {
-        headers: { cookie: begun.cookie.split(';')[0]! },
-      }),
-      sign(key, {
-        site: 'leaked',
-        state: new URL(begun.location).searchParams.get('state')!,
-        id: 'someone',
-        label: 'someone',
-        reference: 'someone',
-        txn: 'txn',
-        exp: Math.floor(Date.now() / 1000) + 60,
-      }),
-      (local) => local,
-    );
-
-    return started!.cookies[0]!.split(';')[0]!;
-  };
+  const opened = (key: string) => openSession(sites, 'leaked', key);
 
   const live = async (cookie: string) =>
     !!(await sites.open(new Request('https://instance.test/', { headers: { cookie } })));
