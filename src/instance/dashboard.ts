@@ -94,6 +94,7 @@ export class Dashboard {
     private readonly sites: Sites,
     private readonly providers: Provider[],
     private readonly host: string,
+    private readonly reportUrl: string,
   ) {}
 
   /** The signed-in operator's site, if the session and the key it was opened with still hold. */
@@ -361,6 +362,16 @@ export class Dashboard {
         </p>
       `;
 
+    const appeal =
+      controls.suspendedAt !== undefined &&
+      html`
+        <p>
+          The instance owner suspended this site. Your site cannot send users here, but your
+          backend can still read their connections. To ask why or appeal,
+          <a href="${this.reportUrl}">contact the instance owner</a>.
+        </p>
+      `;
+
     const overlapping = !!site.previousKey && (site.previousUntil ?? 0) > Date.now();
 
     // A provider the owner has not approved this site for stays chosen, and is offered once
@@ -399,6 +410,7 @@ export class Dashboard {
           <dt>Request limit</dt>
           <dd>${this.sites.limit(site.id)} a minute</dd>
         </dl>
+        ${appeal}
         ${restore}
         <h2>Settings</h2>
         <form action="/dashboard/settings" method="post">
@@ -455,7 +467,7 @@ export class Dashboard {
           <h2>Delete the site</h2>
           <p class="fine">
             The site stops being served here at once, and its id can never be registered again.
-            To come back, register the domain as a new site; your users then connect their
+            To come back, register the domain as a new site. Your users then connect their
             accounts again.
           </p>
           <form action="/dashboard/delete" method="post">

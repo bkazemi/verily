@@ -417,4 +417,13 @@ test('only a provider the owner has not approved is marked as awaiting approval'
   await sites.control('managed', (controls) => ({ ...controls, youtubeApprovedAt: Date.now() }));
 
   assert.doesNotMatch(await page(), /awaiting/);
+
+  // Suspended by the owner, the operator is told how to reach them.
+  assert.doesNotMatch(await page(), /contact the instance owner/);
+  await sites.control('managed', (controls) => ({ ...controls, suspendedAt: Date.now() }));
+
+  assert.match(
+    await page(),
+    /<a href="mailto:reports@instance\.test">contact the instance owner<\/a>/,
+  );
 });

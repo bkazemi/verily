@@ -321,7 +321,14 @@ class Server {
     this.auth = new OwnerAuth(this.store, options.ownerKey);
     this.sites = new Sites(this.store, options.sites ?? new Map());
 
-    this.dashboard = new Dashboard(this.store, this.sites, options.providers, origin.host);
+    this.dashboard = new Dashboard(
+      this.store,
+      this.sites,
+      options.providers,
+      origin.host,
+      options.reportUrl,
+    );
+
     this.ownerSites = new OwnerSites(this.store, this.sites);
 
     if (options.registration === 'open')
