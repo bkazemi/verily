@@ -17,6 +17,9 @@ export const stylesheet = `:root {
   --accent: #245f43;
   --warn: #a4442b;
   --caution: #b07a12;
+  --syntax-tag: #245f43;
+  --syntax-attr: #8a5a0b;
+  --syntax-string: #2b5f8a;
   color-scheme: light dark;
   accent-color: var(--accent);
 }
@@ -31,6 +34,9 @@ export const stylesheet = `:root {
     --accent: #7fc4a2;
     --warn: #e59a82;
     --caution: #d9a843;
+    --syntax-tag: #7fc4a2;
+    --syntax-attr: #d9a843;
+    --syntax-string: #8fbbe0;
   }
 }
 
@@ -115,6 +121,12 @@ pre {
 }
 
 code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* Highlighted HTML, marked up by highlight.js. Brackets stay muted so the names read first. */
+.hljs-tag { color: var(--muted); }
+.hljs-name { color: var(--syntax-tag); }
+.hljs-attr { color: var(--syntax-attr); }
+.hljs-string { color: var(--syntax-string); }
 
 /* Made by a script, so it exists only where it works. Quiet: the block is the point. */
 .copy {

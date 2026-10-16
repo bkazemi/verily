@@ -11,6 +11,7 @@ import {
   type Provider,
 } from '../core/index.js';
 import { html, raw, type Html } from '../server/html.js';
+import { highlightHtml } from '../server/highlight.js';
 import { card, date, distance, externalCard, marked, page, verdict } from '../server/render.js';
 import { toneOf } from '../marks.js';
 import { version } from '../version.js';
@@ -1286,7 +1287,7 @@ class Server {
             e.visibility === 'public' &&
             html`
               <p class="fine">Embed on your site</p>
-              <pre><code>${embed}</code></pre>
+              <pre><code>${highlightHtml(embed)}</code></pre>
             `,
           html`
             ${(goes.length > 0 || listing) && html`<div class="actions">${goes}${listing}</div>`}

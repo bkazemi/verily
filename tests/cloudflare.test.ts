@@ -177,7 +177,10 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.match(publicBody, /"status":"verified"/);
     assert.ok(!publicBody.includes('provider-secret'));
     assert.ok(!publicBody.includes('site-owner'));
-    assert.match(await (await request('/', { headers: { cookie } })).text(), /&lt;verily-badge/);
+    assert.match(
+      await (await request('/', { headers: { cookie } })).text(),
+      /hljs-name">verily-badge/,
+    );
 
     // Signed with a key the installation made itself, published under the domain's name.
     const published = await request('/.well-known/verily-keys.json');
