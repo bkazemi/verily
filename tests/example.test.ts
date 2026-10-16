@@ -119,7 +119,7 @@ test(
       const start = await fetch(`${origin}/api/verily/sessions`, {
         method: 'POST',
         headers: { origin, cookie },
-        body: 'kind=connect',
+        body: 'kind=connect&provider=github',
         redirect: 'manual',
       });
 
