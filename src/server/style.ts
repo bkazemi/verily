@@ -40,14 +40,20 @@ export const stylesheet = `:root {
   }
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
   padding: 0 1rem 4rem;
   background: var(--surface);
   color: var(--ink);
-  font: 16px/1.65 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font:
+    16px/1.65 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   text-rendering: optimizeLegibility;
 }
 
@@ -74,7 +80,7 @@ h1 {
   border-bottom: 1px solid var(--line);
   font-size: 1.5rem;
   font-weight: 620;
-  letter-spacing: -.02em;
+  letter-spacing: -0.02em;
   line-height: 1.25;
 }
 
@@ -82,24 +88,55 @@ h1 {
  * A page holding one thing needs no rule under its heading. The rule divides a heading
  * from the record beneath it, and a page that only asks for a key has no record to divide.
  */
-main.single h1 { margin-bottom: 1.25rem; padding-bottom: 0; border-bottom: none; }
+main.single h1 {
+  margin-bottom: 1.25rem;
+  padding-bottom: 0;
+  border-bottom: none;
+}
 
 /*
  * A page holding one thing sits in the middle of the window rather than at its top,
  * where it would leave most of the window empty below it.
  */
-body:has(main.single) { display: flex; min-height: 100vh; min-height: 100dvh; }
-main.single { width: 100%; max-width: 24rem; margin: auto; padding-bottom: 3rem; }
+body:has(main.single) {
+  display: flex;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+main.single {
+  width: 100%;
+  max-width: 24rem;
+  margin: auto;
+  padding-bottom: 3rem;
+}
 
-h2 { margin: 2rem 0 .75rem; font-size: 1.125rem; font-weight: 620; letter-spacing: -.01em; }
+h2 {
+  margin: 2rem 0 0.75rem;
+  font-size: 1.125rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
 
-h3 { margin: 0 0 .5rem; font-size: 1rem; font-weight: 620; }
+h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 620;
+}
 
-p { margin: 0 0 1rem; overflow-wrap: break-word; }
+p {
+  margin: 0 0 1rem;
+  overflow-wrap: break-word;
+}
 
-a { color: var(--accent); text-underline-offset: 3px; overflow-wrap: anywhere; }
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
 
-a:hover { text-decoration-thickness: 2px; }
+a:hover {
+  text-decoration-thickness: 2px;
+}
 
 /*
  * Something to be run or published exactly as written. Its own line breaks are kept and a
@@ -111,7 +148,7 @@ pre {
   position: relative;
   margin: 0 0 1rem;
   /* Room along the top line for the copy button, which sits over the block rather than in it. */
-  padding: .75rem 5.25rem .75rem .875rem;
+  padding: 0.75rem 5.25rem 0.75rem 0.875rem;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--raised);
@@ -120,29 +157,48 @@ pre {
   user-select: all;
 }
 
-code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+code {
+  font:
+    0.8125rem/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
 
 /* Highlighted HTML, marked up by highlight.js. Brackets stay muted so the names read first. */
-.hljs-tag { color: var(--muted); }
-.hljs-name { color: var(--syntax-tag); }
-.hljs-attr { color: var(--syntax-attr); }
-.hljs-string { color: var(--syntax-string); }
+.hljs-tag {
+  color: var(--muted);
+}
+.hljs-name {
+  color: var(--syntax-tag);
+}
+.hljs-attr {
+  color: var(--syntax-attr);
+}
+.hljs-string {
+  color: var(--syntax-string);
+}
 
 /* Made by a script, so it exists only where it works. Quiet: the block is the point. */
 .copy {
   position: absolute;
-  top: .5rem;
-  right: .5rem;
-  padding: .1875rem .5rem;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.1875rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--surface);
   color: var(--muted);
-  font: 500 .75rem/1.5 system-ui, sans-serif;
+  font:
+    500 0.75rem/1.5 system-ui,
+    sans-serif;
   user-select: none;
 }
 
-.copy:hover { color: var(--ink); border-color: var(--muted); }
+.copy:hover {
+  color: var(--ink);
+  border-color: var(--muted);
+}
 
 /*
  * The two sides of the link, which is what a reader came to read. Each fact about a side
@@ -150,8 +206,8 @@ code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
  * was shown. Everything else on the page qualifies the pair, so it is set quieter.
  */
 .side {
-  margin-bottom: .75rem;
-  padding: .875rem 1rem;
+  margin-bottom: 0.75rem;
+  padding: 0.875rem 1rem;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--raised);
@@ -161,119 +217,250 @@ code { font: .8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
  * A subject's accounts are peers, so where there is room they sit two across. The page
  * that lists them is wider for it, and a narrow one keeps them in a single column.
  */
-main:has(.accounts) { max-width: 54rem; }
+main:has(.accounts) {
+  max-width: 54rem;
+}
 
 .accounts {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: .75rem;
-  margin-bottom: .75rem;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
-.accounts .side { position: relative; display: flex; flex-direction: column; margin-bottom: 0; }
+.accounts .side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
 
 /* How the holder lists the account, in the card's corner and out of the lines below. */
 .listing {
   position: absolute;
-  top: .75rem;
-  right: .875rem;
-  padding: .0625rem .5rem;
+  top: 0.75rem;
+  right: 0.875rem;
+  padding: 0.0625rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
-  font-size: .6875rem;
+  font-size: 0.6875rem;
   font-weight: 550;
 }
 
-.listing.preferred { border-color: var(--accent); color: var(--accent); }
+.listing.preferred {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* The times sit at the foot of the card, so they line up along a row of uneven cards. */
-.accounts .side dl { margin-top: auto; }
-.accounts .rest { display: flex; flex-direction: column; }
-.accounts .rest > p:last-of-type { margin-bottom: .625rem; }
+.accounts .side dl {
+  margin-top: auto;
+}
+.accounts .rest {
+  display: flex;
+  flex-direction: column;
+}
+.accounts .rest > p:last-of-type {
+  margin-bottom: 0.625rem;
+}
 
 /*
  * Two across, with the subject one card wide and centred above them. Every card on the
  * page is then the same width.
  */
 @media (min-width: 48rem) {
-  .accounts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .accounts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   /* Each card is three rows of the grid: who, its verdict, and the rest. A row is as tall
      as the taller card's part, so the verdicts and times of neighbouring cards line up. */
-  .accounts > .side { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; }
-  .subject { width: calc(50% - .375rem); margin-inline: auto; text-align: center; }
-  .subject .name { justify-content: center; }
+  .accounts > .side {
+    display: grid;
+    grid-row: span 3;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+  }
+  .subject {
+    width: calc(50% - 0.375rem);
+    margin-inline: auto;
+    text-align: center;
+  }
+  .subject .name {
+    justify-content: center;
+  }
 }
 
 /* Between a subject and its accounts on the page that lists them. */
-.joiner { display: block; width: 1.25rem; height: 1.25rem; margin: 0 auto .75rem; color: var(--muted); }
+.joiner {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0 auto 0.75rem;
+  color: var(--muted);
+}
 
 .who {
-  margin: 0 0 .125rem;
+  margin: 0 0 0.125rem;
   color: var(--muted);
-  font-size: .75rem;
+  font-size: 0.75rem;
   font-weight: 550;
-  letter-spacing: .02em;
+  letter-spacing: 0.02em;
 }
 
 /* A provider's mark before its name, at the height of the letters. */
-.who .provider { display: inline-block; width: .875rem; height: .875rem; margin-right: .375rem; vertical-align: -.125rem; }
+.who .provider {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 0.375rem;
+  vertical-align: -0.125rem;
+}
 
 /* Clipped 4px left of the text, which hides the date's dot when the date wraps to a new line. */
-.name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1rem; margin: 0 0 0 -4px; padding-left: 4px; overflow-x: clip; font-size: 1.0625rem; font-weight: 620; letter-spacing: -.01em; }
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 1rem;
+  margin: 0 0 0 -4px;
+  padding-left: 4px;
+  overflow-x: clip;
+  font-size: 1.0625rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
 
 /* The account's creation date, after the name and a dot. It wraps under a long name. */
-.name .since { position: relative; color: var(--muted); font-size: .8125rem; font-weight: 400; letter-spacing: 0; white-space: nowrap; }
+.name .since {
+  position: relative;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
 
 /* The dot sits in the gap before the date. */
-.name .since::before { content: "·"; position: absolute; left: -.5rem; transform: translateX(-50%); }
+.name .since::before {
+  content: '·';
+  position: absolute;
+  left: -0.5rem;
+  transform: translateX(-50%);
+}
 
 /* The name is the card's subject before it is a link, so the rule is drawn on hover. */
-.name a { text-decoration: none; }
+.name a {
+  text-decoration: none;
+}
 
-.name a:hover { text-decoration: underline; }
+.name a:hover {
+  text-decoration: underline;
+}
 
-.reference, .how { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.5; }
+.reference,
+.how {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
 
-.identity + .how { margin-top: .5rem; }
-.fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
-.fingerprint span { display: inline-block; margin-right: .5ch; }
-.how.additional { padding-left: .75rem; }
+.identity + .how {
+  margin-top: 0.5rem;
+}
+.fingerprint {
+  font-family: ui-monospace, monospace;
+  text-wrap: balance;
+}
+.fingerprint span {
+  display: inline-block;
+  margin-right: 0.5ch;
+}
+.how.additional {
+  padding-left: 0.75rem;
+}
 /* The "signed" pill after the verifier's name, one size smaller than the line it sits on. */
-.how .signed-mark { display: inline-block; margin-left: .3125rem; padding: 0 .375rem; border: 1px solid var(--line); border-radius: 999px; font-size: .625rem; font-weight: 550; line-height: 1.3; text-decoration: none; vertical-align: .0625rem; }
+.how .signed-mark {
+  display: inline-block;
+  margin-left: 0.3125rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 550;
+  line-height: 1.3;
+  text-decoration: none;
+  vertical-align: 0.0625rem;
+}
 
-.fine { color: var(--muted); font-size: .8125rem; line-height: 1.55; margin-bottom: .625rem; }
+.fine {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  margin-bottom: 0.625rem;
+}
 
 /* That the record is signed is a fact about it, so it is set as one and not as fine print. */
-.signed { font-size: .875rem; line-height: 1.55; margin-bottom: .875rem; }
+.signed {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  margin-bottom: 0.875rem;
+}
 /* Arrived at from a badge's "signed" link, so the reader is shown where they landed. */
-.signed:target { margin-inline: -.75rem; padding: .625rem .75rem; border-radius: 8px; background: var(--raised); }
+.signed:target {
+  margin-inline: -0.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: var(--raised);
+}
 
 /* Every time on the record in one column, so they can be compared rather than hunted for. */
 dl {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: .3rem 1.5rem;
+  gap: 0.3rem 1.5rem;
   margin: 1.25rem 0;
   padding-top: 1rem;
   border-top: 1px solid var(--line);
-  font-size: .8125rem;
+  font-size: 0.8125rem;
 }
 
-dt { color: var(--muted); }
+dt {
+  color: var(--muted);
+}
 
-dd { margin: 0; font-variant-numeric: tabular-nums; }
+dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Inside a card the rule above it is the card's own edge, so the list needs none. */
-section dl { margin: .5rem 0 1rem; padding-top: 0; border-top: 0; }
+section dl {
+  margin: 0.5rem 0 1rem;
+  padding-top: 0;
+  border-top: 0;
+}
 
 /* Right under the heading, the heading's own rule is the one above it. */
-h1 + dl { padding-top: 0; border-top: 0; }
-.side dl { margin: .625rem 0 0; padding-top: .625rem; }
+h1 + dl {
+  padding-top: 0;
+  border-top: 0;
+}
+.side dl {
+  margin: 0.625rem 0 0;
+  padding-top: 0.625rem;
+}
 
 /* The links under a record, ruled off from the record and its disclaimer. */
-footer { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
-footer > :last-child { margin-bottom: 0; }
+footer {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+footer > :last-child {
+  margin-bottom: 0;
+}
 
 section {
   margin: 0 0 1.25rem;
@@ -282,73 +469,128 @@ section {
   border-radius: 10px;
 }
 
-section > :last-child { margin-bottom: 0; }
+section > :last-child {
+  margin-bottom: 0;
+}
 
 /* What holds a control that cannot be undone. */
-section.danger, section.caution { margin-top: 2rem; }
-section.danger { border-color: var(--warn); }
+section.danger,
+section.caution {
+  margin-top: 2rem;
+}
+section.danger {
+  border-color: var(--warn);
+}
 
 /* What holds a control that breaks something for a while, but can be recovered from. */
-section.caution { border-color: var(--caution); }
-section > h2:first-child { margin-top: 0; }
+section.caution {
+  border-color: var(--caution);
+}
+section > h2:first-child {
+  margin-top: 0;
+}
 
-form { margin: 0 0 1.5rem; }
+form {
+  margin: 0 0 1.5rem;
+}
 
-label { display: block; margin: 0 0 .75rem; color: var(--muted); font-size: .8125rem; }
+label {
+  display: block;
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
 
-input, textarea {
+input,
+textarea {
   display: block;
   width: 100%;
-  margin-top: .375rem;
-  padding: .5rem .625rem;
+  margin-top: 0.375rem;
+  padding: 0.5rem 0.625rem;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--ink);
-  font: .875rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    0.875rem/1.5 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
 }
 
 /* Height comes from the rows attribute, which differs per box. */
-textarea { resize: vertical; }
+textarea {
+  resize: vertical;
+}
 
-input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 button {
-  padding: .5rem 1rem;
+  padding: 0.5rem 1rem;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
   color: var(--surface);
-  font: 500 .9375rem/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font:
+    500 0.9375rem/1.4 system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
   cursor: pointer;
 }
 
 /* A link that starts something, drawn as a button. */
 a.button {
   display: inline-block;
-  padding: .5rem 1rem;
+  padding: 0.5rem 1rem;
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
   color: var(--surface);
   font-weight: 500;
-  font-size: .9375rem;
+  font-size: 0.9375rem;
   line-height: 1.4;
   text-decoration: none;
 }
 
-button + button { margin-left: .5rem; border-color: var(--line); background: none; color: var(--ink); }
+button + button {
+  margin-left: 0.5rem;
+  border-color: var(--line);
+  background: none;
+  color: var(--ink);
+}
 
 /* The other choice beside a page's one action, such as Cancel. */
-a.button.secondary { border-color: var(--line); background: none; color: var(--ink); }
+a.button.secondary {
+  border-color: var(--line);
+  background: none;
+  color: var(--ink);
+}
 
 /* A page's action and its alternative, side by side. */
-.choice { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.5rem; }
-.choice form { margin: 0; }
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.choice form {
+  margin: 0;
+}
 
 /* Ways to verify: one full-width button per method, none filled over the others. */
-.choices { display: grid; gap: .5rem; margin-bottom: 1.5rem; }
-.choices form { margin: 0; }
+.choices {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+.choices form {
+  margin: 0;
+}
 
 .choices button {
   width: 100%;
@@ -358,34 +600,47 @@ a.button.secondary { border-color: var(--line); background: none; color: var(--i
   color: var(--ink);
 }
 
-.choices button:hover { border-color: var(--muted); }
+.choices button:hover {
+  border-color: var(--muted);
+}
 
 /* A provider's mark before a button's label, at the height of the letters. */
-button .provider { width: 1rem; height: 1rem; margin-right: .5rem; vertical-align: -.1875rem; }
+button .provider {
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.5rem;
+  vertical-align: -0.1875rem;
+}
 
 /* A control that ends something. Filled where it is the page's one action. */
-button.danger { border-color: var(--warn); background: var(--warn); }
+button.danger {
+  border-color: var(--warn);
+  background: var(--warn);
+}
 
 /*
  * A connection on the settings page: the account's card, then what can be done with it.
  * Its state sits in the card's corner, on the line that names the method.
  */
-.connection { position: relative; margin-bottom: 1rem; }
+.connection {
+  position: relative;
+  margin-bottom: 1rem;
+}
 
 .state {
   position: absolute;
-  top: .75rem;
-  right: .875rem;
+  top: 0.75rem;
+  right: 0.875rem;
   display: flex;
   align-items: center;
-  gap: .375rem;
+  gap: 0.375rem;
   height: 1.625rem;
-  padding: 0 .75rem 0 .5rem;
+  padding: 0 0.75rem 0 0.5rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface);
   color: var(--ink);
-  font-size: .8125rem;
+  font-size: 0.8125rem;
   font-weight: 550;
 }
 
@@ -393,18 +648,39 @@ button.danger { border-color: var(--warn); background: var(--warn); }
  * The V the badge draws, in the tone that says how the record stands. A record that claims
  * nothing is drawn faint in the text colour, as the badge draws it.
  */
-.verdict { flex-shrink: 0; width: 1rem; height: 1rem; }
-.verdict.pending { opacity: .45; }
-.how .verdict { width: .875rem; height: .875rem; margin-right: .3125rem; vertical-align: -.125rem; }
+.verdict {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+}
+.verdict.pending {
+  opacity: 0.45;
+}
+.how .verdict {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 0.3125rem;
+  vertical-align: -0.125rem;
+}
 /* Cropped to its strokes and taller than the heading's letters, centred beside them. */
-h1:has(.verdict) { display: flex; align-items: center; gap: .75rem; }
-h1 .verdict { width: auto; height: 2.25rem; }
+h1:has(.verdict) {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+h1 .verdict {
+  width: auto;
+  height: 2.25rem;
+}
 
 /*
  * In a state pill the V is cropped to its strokes and fills the pill's height, so its arms
  * and its foot meet the border. The pill's left padding keeps the arms clear of its curve.
  */
-.state .verdict { width: auto; height: 100%; }
+.state .verdict {
+  width: auto;
+  height: 100%;
+}
 
 /*
  * A pill's line includes room for descenders below the letters, which leaves its text
@@ -412,56 +688,121 @@ h1 .verdict { width: auto; height: 2.25rem; }
  * In a state pill the word alone is trimmed, so it centres on the V by its letters.
  */
 @supports (text-box: trim-both cap alphabetic) {
-  .listing { padding: .3125rem .5rem; text-box: trim-both cap alphabetic; }
-  .state > span { text-box: trim-both cap alphabetic; }
+  .listing {
+    padding: 0.3125rem 0.5rem;
+    text-box: trim-both cap alphabetic;
+  }
+  .state > span {
+    text-box: trim-both cap alphabetic;
+  }
 }
 
 /* Links that sit together on one line, wrapping where there is no room. */
-.links { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.25rem; font-size: .875rem; }
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.875rem;
+}
 
 /* Under the account's id, with the facts about it rather than the controls. */
-.evidence { margin: .375rem 0 0; font-size: .8125rem; }
+.evidence {
+  margin: 0.375rem 0 0;
+  font-size: 0.8125rem;
+}
 
-.connection dl { margin-bottom: .75rem; }
-.connection .side > :last-child { margin-bottom: 0; }
-.connection pre { margin: .75rem 0; background: var(--surface); }
-.connection .actions { margin-top: .875rem; }
+.connection dl {
+  margin-bottom: 0.75rem;
+}
+.connection .side > :last-child {
+  margin-bottom: 0;
+}
+.connection pre {
+  margin: 0.75rem 0;
+  background: var(--surface);
+}
+.connection .actions {
+  margin-top: 0.875rem;
+}
 
 /* The buttons for one connection in a row, wrapping where there is no room. */
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.actions form { display: contents; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.actions form {
+  display: contents;
+}
 
-.actions button, .actions a.button {
+.actions button,
+.actions a.button {
   margin: 0;
-  padding: .3125rem .75rem;
+  padding: 0.3125rem 0.75rem;
   border-color: var(--line);
   background: var(--surface);
   color: var(--ink);
-  font-size: .8125rem;
+  font-size: 0.8125rem;
 }
 
-.actions button:hover, .actions a.button:hover { border-color: var(--muted); }
+.actions button:hover,
+.actions a.button:hover {
+  border-color: var(--muted);
+}
 
 /* The controls that cannot be undone, together at the foot of the card. */
-.ending { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: .75rem; padding-top: .75rem; border-top: 1px solid var(--line); }
-.ending form { margin: 0; }
-
-.ending button.danger {
-  padding: .3125rem .75rem;
-  background: var(--surface);
-  color: var(--warn);
-  font-size: .8125rem;
+.ending {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+.ending form {
+  margin: 0;
 }
 
-fieldset { margin: 0 0 1.25rem; padding: 1rem 1.125rem .25rem; border: 1px solid var(--line); border-radius: 8px; }
+.ending button.danger {
+  padding: 0.3125rem 0.75rem;
+  background: var(--surface);
+  color: var(--warn);
+  font-size: 0.8125rem;
+}
 
-legend { padding: 0 .375rem; color: var(--muted); font-size: .8125rem; }
+fieldset {
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.125rem 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
 
-fieldset label { display: flex; align-items: baseline; gap: .5rem; color: var(--ink); font-size: .9375rem; }
+legend {
+  padding: 0 0.375rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
 
-fieldset input { width: auto; margin: 0; }
+fieldset label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
 
-fieldset p { margin: .25rem 0 .875rem 1.5rem; color: var(--muted); font-size: .8125rem; }
+fieldset input {
+  width: auto;
+  margin: 0;
+}
+
+fieldset p {
+  margin: 0.25rem 0 0.875rem 1.5rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
 `;
 
 /**
