@@ -414,7 +414,7 @@ test('a session opened just before a key change gets its result under the key it
   const [, session] = (await store.list<{ signer?: string }>('site/session/'))[0]!;
 
   // The routine change comes after the handoff, while the backend still has the old key.
-  const newKey = await sites.rotate('handed', true);
+  const newKey = (await sites.rotate('handed', true))!;
 
   const result = new URL(
     sites.returnUrl(
@@ -446,7 +446,7 @@ test('replacing a key ends the sessions opened with the key it replaces', async 
   assert.ok(await live(leaked));
 
   // Replaced at once, the leaked key's session is over.
-  const second = await sites.rotate('leaked', false);
+  const second = (await sites.rotate('leaked', false))!;
 
   assert.ok(!(await live(leaked)));
 
