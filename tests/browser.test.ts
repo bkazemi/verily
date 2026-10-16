@@ -666,6 +666,7 @@ test('the evidence dialog presents both sides of a link as parallel cards', asyn
     external.children.map((child) => child.className),
     ['identity', 'summary', 'rest'],
   );
+
   assert.deepEqual(
     external.children
       .flatMap((child) => (child.className === 'summary' ? [child] : child.children))

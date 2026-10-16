@@ -1061,6 +1061,7 @@ function render(
       history.open = true;
     }),
   );
+
   history.append(count, gone);
 
   // Shut to keep history out of the way of the accounts in use. With none of those there
