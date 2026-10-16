@@ -8,6 +8,7 @@ import {
   emailProvider,
   youtubeProvider,
   githubProvider,
+  linkProvider,
   nodeHandler,
   Pool,
   PostgresStorage,
@@ -22,8 +23,10 @@ if (!password || password.length < 12)
 
 if (!process.env.DATABASE_URL) throw new Error('Set DATABASE_URL');
 
-// Each sign-in is offered when its credentials are set.
+// Each sign-in is offered when its credentials are set. A rel="me" link from a website
+// needs none, so it is always offered.
 const providers = [
+  linkProvider({ name: 'Website' }),
   ...(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET
     ? [
         githubProvider({
@@ -60,11 +63,6 @@ const providers = [
       ]
     : []),
 ];
-
-if (!providers.length)
-  throw new Error(
-    'Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, the DISCORD_ or GOOGLE_ pair, or EMAIL_TO_TERMINAL=1',
-  );
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const storage = new PostgresStorage(pool, process.env.VERILY_NAMESPACE ?? 'verily');
