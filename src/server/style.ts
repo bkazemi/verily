@@ -16,6 +16,7 @@ export const stylesheet = `:root {
   --raised: #f7f9f7;
   --accent: #245f43;
   --warn: #a4442b;
+  --caution: #b07a12;
   color-scheme: light dark;
   accent-color: var(--accent);
 }
@@ -29,6 +30,7 @@ export const stylesheet = `:root {
     --raised: #1d2220;
     --accent: #7fc4a2;
     --warn: #e59a82;
+    --caution: #d9a843;
   }
 }
 
@@ -257,7 +259,11 @@ section {
 section > :last-child { margin-bottom: 0; }
 
 /* What holds a control that cannot be undone. */
-section.danger { margin-top: 2rem; border-color: var(--warn); }
+section.danger, section.caution { margin-top: 2rem; }
+section.danger { border-color: var(--warn); }
+
+/* What holds a control that breaks something for a while, but can be recovered from. */
+section.caution { border-color: var(--caution); }
 section > h2:first-child { margin-top: 0; }
 
 form { margin: 0 0 1.5rem; }

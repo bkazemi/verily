@@ -39,6 +39,28 @@ const signIn = (message?: Html, status = 200) =>
     'single',
   );
 
+const back = html`<p><a href="/dashboard">Back to the dashboard</a></p>`;
+
+/**
+ * Asks before a key change goes ahead, on a page of its own. Its button sends `fields` to
+ * `action` again, with `confirm=yes`.
+ */
+const ask = (
+  heading: string,
+  text: string,
+  action: string,
+  fields: Record<string, string>,
+  button: string,
+  danger: boolean,
+) =>
+  respond(
+    heading,
+    html`<p>${text}</p>
+<form action="${action}" method="post">${Object.entries(fields).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}<input type="hidden" name="confirm" value="yes"><button${danger && raw(' class="danger"')}>${button}</button></form>${back}`,
+    200,
+    'single',
+  );
+
 const checkbox = (name: string, value: string, label: string, checked: boolean) =>
   html`<label><input type="checkbox" name="${name}" value="${value}"${checked && raw(' checked')}> ${label}</label>`;
 
@@ -171,16 +193,42 @@ export class Dashboard {
 
     const fields = new URLSearchParams(await request.text());
     const keep = fields.get('keep') === 'day';
-    const key = await this.sites.rotate(found.site.id, keep, fields.get('from') ?? '');
-    const back = html`<p><a href="/dashboard">Back to the dashboard</a></p>`;
+    const from = fields.get('from') ?? '';
 
-    if (!key)
-      return respond(
+    const replaced = () =>
+      respond(
         'Key already replaced',
         html`<p>The site key was already replaced since this form was loaded, so nothing changed. The new key was shown when it was made.</p>${back}`,
         409,
         'single',
       );
+
+    if (from !== hash(found.site.key)) return replaced();
+
+    const overlapping = !!found.site.previousKey && (found.site.previousUntil ?? 0) > Date.now();
+
+    if (fields.get('confirm') !== 'yes')
+      return keep
+        ? ask(
+            'Replace the key?',
+            `Deploy the new key to your backend within 24 hours. After that the old key stops working, and so does your site until it has the new one.${overlapping ? ' The older key still accepted from the last replacement stops working now.' : ''}`,
+            '/dashboard/rotate',
+            { keep: 'day', from },
+            'Replace, keep the old key for 24 hours',
+            false,
+          )
+        : ask(
+            'Replace the key now?',
+            'Your site stops sending users here and reading their connections until you deploy the new key. To change keys without interruption, keep the old key for 24 hours instead.',
+            '/dashboard/rotate',
+            { keep: 'none', from },
+            'Replace now',
+            true,
+          );
+
+    const key = await this.sites.rotate(found.site.id, keep, from);
+
+    if (!key) return replaced();
 
     const until = this.sites.sites.get(found.site.id)?.previousUntil;
 
@@ -196,11 +244,21 @@ export class Dashboard {
     );
   }
 
-  /** Stops accepting the previous site key before its 24 hours are up. */
+  /** Stops accepting the previous site key before its 24 hours are up, once confirmed. */
   async retirePreviousKey(request: Request): Promise<Response> {
     const found = await this.session(request);
 
     if (!found) return unavailable(403);
+
+    if (new URLSearchParams(await request.text()).get('confirm') !== 'yes')
+      return ask(
+        'Stop accepting the old key?',
+        'Any backend still using the old key stops working at once: it cannot send users here or read their connections. Do this only once the new key is deployed everywhere.',
+        '/dashboard/previous-key',
+        {},
+        'Stop accepting the old key',
+        true,
+      );
 
     await this.sites.retirePreviousKey(found.site.id);
 
@@ -285,14 +343,14 @@ ${restore}
 <fieldset><legend>Visibility your users may choose</legend>${visibility}</fieldset>
 <button>Save</button>
 </form>
-<h2>Site key</h2>
+<section class="caution"><h2>Site key</h2>
 <p class="fine">Your backend signs handoffs and reads connections with this key. A new key is shown once. Keep the old key working for 24 hours to deploy the new one without interruption, or stop it at once if it may have leaked.</p>
 ${
   overlapping &&
   html`<section><p>The old key is accepted until ${minute(site.previousUntil!)}. Stop accepting it once the new key is deployed.</p>
 <div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
 }
-<div class="actions"><form action="/dashboard/rotate" method="post"><input type="hidden" name="from" value="${hash(site.key)}"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div>
+<div class="actions"><form action="/dashboard/rotate" method="post"><input type="hidden" name="from" value="${hash(site.key)}"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div></section>
 <section class="danger"><h2>Delete the site</h2>
 <p class="fine">The site stops being served here at once, and its id can never be registered again. To come back, register the domain as a new site; your users then connect their accounts again.</p>
 <form action="/dashboard/delete" method="post">

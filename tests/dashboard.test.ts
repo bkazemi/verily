@@ -48,12 +48,15 @@ async function managed() {
     return { response, cookie: response.headers.get('set-cookie')?.split(';')[0] ?? '' };
   };
 
-  /** Sends the rotate form as the dashboard page has it, with the key it replaces. */
+  /**
+   * Sends the rotate form as the dashboard page has it, with the key it replaces, and
+   * confirms it.
+   */
   const rotate = async (cookie: string, keep: string) => {
     const page = await (await request('/dashboard', { headers: { cookie } })).text();
     const from = page.match(/name="from" value="([^"]+)"/)![1]!;
 
-    return post('/dashboard/rotate', { keep, from }, cookie);
+    return post('/dashboard/rotate', { keep, from, confirm: 'yes' }, cookie);
   };
 
   return { store, request, post, login, rotate };
@@ -187,6 +190,17 @@ test('a key replaced for a routine change keeps the old one working for a day', 
 
   assert.equal(stored.key, newKey);
   assert.equal(stored.previousKey, siteKey);
+
+  // Replacing it again during the overlap asks first, and says the older key stops now.
+  const from = (await (await request('/dashboard', { headers: { cookie } })).text()).match(
+    /name="from" value="([^"]+)"/,
+  )![1]!;
+
+  const asked = await (await post('/dashboard/rotate', { keep: 'day', from }, cookie)).text();
+
+  assert.match(asked, /<h1>Replace the key\?<\/h1>/);
+  assert.match(asked, /The older key still accepted from the last replacement stops working now\./);
+  assert.equal((await store.get<Site>('site/registered/managed'))!.key, newKey);
   assert.equal(await read(newKey), 200);
   assert.equal(await read(siteKey), 200);
 
@@ -263,7 +277,15 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
     /Stop accepting the old key/,
   );
 
-  assert.equal((await post('/dashboard/previous-key', {}, cookie)).status, 303);
+  // Stopping it asks first, and changes nothing until it is confirmed.
+  assert.match(
+    await (await post('/dashboard/previous-key', {}, cookie)).text(),
+    /<h1>Stop accepting the old key\?<\/h1>/,
+  );
+
+  assert.equal(await read(second), 200);
+
+  assert.equal((await post('/dashboard/previous-key', { confirm: 'yes' }, cookie)).status, 303);
   assert.equal(await read(second), 404);
   assert.equal(await read(third), 200);
 
@@ -273,7 +295,11 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
   );
 
   // Without a session, the key is left alone.
-  assert.equal((await post('/dashboard/rotate', { keep: 'none', from: hash(third) })).status, 403);
+  assert.equal(
+    (await post('/dashboard/rotate', { keep: 'none', from: hash(third), confirm: 'yes' })).status,
+    403,
+  );
+
   assert.equal((await post('/dashboard/previous-key', {})).status, 403);
   assert.equal(await read(third), 200);
 });
@@ -285,18 +311,31 @@ test('a rotate form sent twice replaces the key once', async () => {
   const page = await (await request('/dashboard', { headers: { cookie } })).text();
   const from = page.match(/name="from" value="([^"]+)"/)![1]!;
 
-  const first = await post('/dashboard/rotate', { keep: 'none', from }, cookie);
+  // Replacing the key at once asks first, and changes nothing until it is confirmed.
+  const asked = await (await post('/dashboard/rotate', { keep: 'none', from }, cookie)).text();
+
+  assert.match(asked, /<h1>Replace the key now\?<\/h1>/);
+  assert.match(asked, /<input type="hidden" name="confirm" value="yes">/);
+  assert.doesNotMatch(asked, /<pre>/);
+  assert.equal((await store.get<Site>('site/registered/managed'))!.key, siteKey);
+
+  const confirmed = { keep: 'none', from, confirm: 'yes' };
+  const first = await post('/dashboard/rotate', confirmed, cookie);
   const newKey = (await first.text()).match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
 
   // A reload of that response, or the same form in another tab, changes nothing.
-  const again = await post('/dashboard/rotate', { keep: 'none', from }, cookie);
+  const again = await post('/dashboard/rotate', confirmed, cookie);
 
   assert.equal(again.status, 409);
   assert.doesNotMatch(await again.text(), /<pre>/);
   assert.equal((await store.get<Site>('site/registered/managed'))!.key, newKey);
 
   // A form without the key it replaces changes nothing either.
-  assert.equal((await post('/dashboard/rotate', { keep: 'none' }, cookie)).status, 409);
+  assert.equal(
+    (await post('/dashboard/rotate', { keep: 'none', confirm: 'yes' }, cookie)).status,
+    409,
+  );
+
   assert.equal((await store.get<Site>('site/registered/managed'))!.key, newKey);
 });
 
