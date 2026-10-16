@@ -660,8 +660,15 @@ test('the evidence dialog presents both sides of a link as parallel cards', asyn
   assert.ok(!external.textContent.includes('Stated by'));
 
   // The proof explains the verified state, so it is read after that state, not before it.
+  // The card is in three parts, which a grid lines up across neighbouring cards.
   assert.deepEqual(
-    external.children.map((child) => child.className || child.tagName),
+    external.children.map((child) => child.className),
+    ['identity', 'summary', 'rest'],
+  );
+  assert.deepEqual(
+    external.children
+      .flatMap((child) => (child.className === 'summary' ? [child] : child.children))
+      .map((child) => child.className || child.tagName),
     ['h3', 'a', 'muted reference', 'summary', 'muted method', 'dl'],
   );
 
@@ -3390,7 +3397,9 @@ test('the preferred account leads, unused ones follow the rest, and retired ones
 
   // Its state and its verifier are read without opening anything.
   assert.deepEqual(
-    carol.children.map((child) => child.className || child.tagName),
+    carol.children
+      .flatMap((child) => (child.className === 'summary' ? [child] : child.children))
+      .map((child) => child.className || child.tagName),
     ['h3', 'a', 'muted reference', 'summary', 'bar', 'muted method', 'dl'],
   );
 

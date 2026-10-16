@@ -83,7 +83,7 @@ export const styles = `
   .listing.preferred { border-color: #245f43; color: #245f43; }
   /* Quiet, as its pill is: the surface and the name step back, and the controls do not. */
   .account.retired { background: #f6f8f5; }
-  .account.retired > a, .account.retired > strong, .account.retired > .named > a, .account.retired > .named > strong { color: #6b786f; }
+  .account.retired .identity > a, .account.retired .identity > strong, .account.retired .named > a, .account.retired .named > strong { color: #6b786f; }
   /* The name, then a dot and the account's creation date. The date wraps under a long name. */
   /* Clipped 4px left of the text, which hides the dot when the date wraps to a new line. */
   .named { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 14px; margin-left: -4px; padding-left: 4px; overflow-x: clip; }
@@ -126,6 +126,24 @@ export const styles = `
   footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin: 20px 0 -8px; color: #9aa9a0; font-size: 11px; }
   footer a { display: flex; color: inherit; }
   .logo { display: block; height: 13px; }
+  /* Three or more accounts on a wide screen: two equal cards to a row. */
+  @media (min-width: 960px) {
+    dialog.many { width: min(900px, calc(100vw - 32px)); }
+    dialog.many .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+    /* Each card is three rows of the grid: who, its verdict, and the rest. A row is as tall as
+       the taller card's part, so the verdicts and details of neighbouring cards line up. */
+    dialog.many .tiles > .account { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; margin-top: 0; }
+    /* The dates sit at the foot of the third part, so they line up too. */
+    dialog.many .tiles .rest { display: flex; flex-direction: column; }
+    dialog.many .tiles .rest > dl { margin-top: auto; }
+    dialog.many .tiles .rest > :has(+ dl) { margin-bottom: 16px; }
+    /* A lone last tile is centred under the pair above it rather than left to one side. */
+    dialog.many .tiles > .account:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - 6px); margin-inline: auto; }
+    /* The site's card is one tile wide, centred over the two columns. */
+    dialog.many .local { width: calc(50% - 6px); margin-inline: auto; text-align: center; }
+    dialog.many .local h3, dialog.many .local .named { justify-content: center; }
+    dialog.many .local .additional { padding-left: 0; }
+  }
   ${markStyles}
 `;
 
@@ -340,6 +358,8 @@ function side(
   extra: HTMLElement[],
 ) {
   const card = node('section', '', 'account');
+  // The heading, name and reference together, so a grid can line them up as one part.
+  const identity = node('div', '', 'identity');
   const title = node('h3');
   const value = node(url ? 'a' : 'strong', name);
 
@@ -352,18 +372,18 @@ function side(
     const named = node('div', '', 'named');
 
     named.append(value, node('span', since, 'muted since'));
-    card.append(title, named);
-  } else card.append(title, value);
+    identity.append(title, named);
+  } else identity.append(title, value);
 
-  if (typeof reference === 'string') card.append(node('div', reference, 'muted reference'));
+  if (typeof reference === 'string') identity.append(node('div', reference, 'muted reference'));
   else if (reference) {
     const groups = node('div', '', 'muted reference fingerprint');
 
     groups.append(...reference.map((group) => node('span', group)));
-    card.append(groups);
+    identity.append(groups);
   }
 
-  card.append(...extra);
+  card.append(identity, ...extra);
 
   return card;
 }
@@ -871,6 +891,10 @@ function externalCard(
   if (fold) bar.append(foldToggle([...methods, dates], fold), ...row);
 
   const logo = providerMark(evidence.provider, evidence.attestations.external[0].method);
+  // Everything under the verdict in one part, the third of the card's rows in a grid.
+  const rest = node('div', '', 'rest');
+
+  rest.append(...(fold ? [bar, ...methods, dates] : [...methods, dates, ...row]));
 
   const card = namedCard(
     // The mark and the name, or just the name. A mark that falls back to writing the name
@@ -880,9 +904,8 @@ function externalCard(
     // Status first, then how it was shown, then when. The proof explains the state
     // above it, so it cannot sit before that state has been given.
     summary,
-    ...(fold ? [] : methods),
     // How the holder lists the account, in their words and apart from how it was shown:
-    // nothing checked it, so it is never among the methods above it.
+    // nothing checked it, so it is never among the methods below it.
     ...(evidence.status === 'revoked' || retired
       ? []
       : evidence.mark === 'preferred'
@@ -890,7 +913,7 @@ function externalCard(
         : evidence.mark === 'unused'
           ? [node('div', 'No longer used', 'listing')]
           : []),
-    ...(fold ? [bar, ...methods, dates] : [dates, ...row]),
+    rest,
   );
 
   const surface = retired ? 'account retired' : 'account';
@@ -953,7 +976,9 @@ interface Folds {
  * The subject once, then each account linked to it on its own card, in the order given.
  * Retired accounts sit in a group of their own at the foot, under what says they are,
  * shut until it is opened unless no other account is left to read. Every record given is
- * of the one subject, which the caller has checked.
+ * of the one subject, which the caller has checked. Returns whether the cards a reader
+ * sees on opening are three or more: the accounts in use, or the retired ones when
+ * nothing else is left and their group starts open.
  */
 function render(
   content: HTMLElement,
@@ -961,7 +986,7 @@ function render(
   manage?: Manage,
   later?: Later,
   folds: Folds = { open: false, cards: new Set() },
-) {
+): boolean {
   const [first] = records as [Account, ...Account[]];
 
   // Each card says what it is. Without that the pair is two unlabelled boxes.
@@ -980,6 +1005,8 @@ function render(
       provider: first.providerName,
     }),
   );
+
+  localCard.className += ' local';
 
   const retired = records.filter((record) => record.status === 'retired');
   const listed = records.filter((record) => record.status !== 'retired');
@@ -1010,12 +1037,14 @@ function render(
   count.append(foldMark(), document.createTextNode(`Retired accounts (${retired.length})`));
 
   // A signature that fails is a warning, and a warning is not left behind a fold.
-  history.append(
-    count,
+  const gone = node('div', '', 'tiles');
+
+  gone.append(
     ...cards(retired, () => {
       history.open = true;
     }),
   );
+  history.append(count, gone);
 
   // Shut to keep history out of the way of the accounts in use. With none of those there
   // is nothing else to read, so it starts open.
@@ -1027,10 +1056,14 @@ function render(
     folds.retired = !history.open;
   });
 
+  const accounts = node('div', '', 'tiles');
+
+  accounts.append(...cards(listed));
+
   content.replaceChildren(
     localCard,
     linkMark(),
-    ...cards(listed),
+    accounts,
     ...(manage ? [addRow(manage)] : []),
     ...(retired.length ? [history] : []),
     // Nothing below the cards may name a provider. Approval, method and dates belong to
@@ -1041,6 +1074,8 @@ function render(
       'muted explanation',
     ),
   );
+
+  return (listed.length || retired.length) >= 3;
 }
 
 /**
@@ -1259,7 +1294,9 @@ export function openEvidenceDialog(
     drawn = key;
     // The cards are new, and what the old ones were waiting to try again went with them.
     retries.clear();
-    render(content, records, actions, (retry) => retries.add(retry), folds);
+    const many = render(content, records, actions, (retry) => retries.add(retry), folds);
+
+    dialog.className = many ? 'many' : '';
   };
 
   /**
