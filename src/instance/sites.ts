@@ -433,6 +433,11 @@ export class Sites {
     this.controls = controls;
   }
 
+  /** The sites the host configures in `SITES`. */
+  configured(): Site[] {
+    return [...this.pinned.values()];
+  }
+
   /** The sites kept in the store and served, which are the ones whose DNS is checked. */
   stored(): Site[] {
     return [...this.sites.values()].filter((site) => !this.pinned.has(site.id));

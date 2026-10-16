@@ -1,3 +1,4 @@
+import type { Provider } from '../core/index.js';
 import { html } from '../server/html.js';
 import { date } from '../server/render.js';
 import { limits } from './limits.js';
@@ -10,16 +11,20 @@ const maxLimit = 100000;
 
 /**
  * Where the instance owner oversees the sites registered here: suspends one by hand, sets
- * its request limit, and approves it for YouTube. Sites in `SITES` are the host's, and are
- * not listed.
+ * its request limit, and approves it for YouTube. Sites in `SITES` are listed apart, read
+ * only, since they are changed in the configuration.
  */
 export class OwnerSites {
   constructor(
     private readonly store: Store,
     private readonly sites: Sites,
+    private readonly providers: Provider[],
   ) {}
 
-  /** Every stored site, with how it stands and the owner's controls over it. */
+  /**
+   * Every stored site, with how it stands and the owner's controls over it, then every site
+   * in `SITES`.
+   */
   async page(): Promise<Response> {
     const stored = this.sites.stored();
 
@@ -32,9 +37,12 @@ export class OwnerSites {
       }),
     );
 
+    const configured = this.sites.configured();
+
     return respond(
-      'Registered sites',
+      'Sites',
       html`
+        <h2>Registered here</h2>
         ${
           stored.length
             ? html`
@@ -46,6 +54,18 @@ export class OwnerSites {
                 ${rows}
               `
             : html`<p>No sites are registered here.</p>`
+        }
+        ${
+          configured.length > 0 &&
+          html`
+            <h2>Set by the host</h2>
+            <p class="fine">
+              These sites are set in the instance's <code>SITES</code> setting and change only
+              with it. Their DNS is not checked, and they cannot be suspended, limited or held
+              back from YouTube here.
+            </p>
+            ${configured.map((site) => this.configuredRow(site))}
+          `
         }
         <p><a href="/">Back to owner settings</a></p>
       `,
@@ -81,7 +101,7 @@ export class OwnerSites {
           'Limit not changed',
           html`
             <p>A limit is a whole number of requests a minute, from 1 to ${maxLimit}.</p>
-            <p><a href="/sites">Back to registered sites</a></p>
+            <p><a href="/sites">Back to sites</a></p>
           `,
           400,
           'single',
@@ -91,6 +111,37 @@ export class OwnerSites {
     } else return unavailable();
 
     return see('/sites');
+  }
+
+  /** A site in `SITES`, as it is configured. */
+  private configuredRow(site: Site) {
+    const names = new Map(this.providers.map((provider) => [provider.id, provider.name]));
+
+    const providers = site.providers
+      ? site.providers.map((id) => names.get(id) ?? id).join(', ')
+      : 'Every one offered';
+
+    const visibility = site.visibility
+      ? site.visibility.map((v) => v[0]!.toUpperCase() + v.slice(1)).join(', ')
+      : 'Public, Unlisted';
+
+    return html`
+      <section>
+        <h3>${site.name}</h3>
+        <dl>
+          <dt>Site id</dt>
+          <dd>${site.id}</dd>
+          <dt>Origin</dt>
+          <dd><a href="${site.origin}">${site.origin}</a></dd>
+          <dt>Providers</dt>
+          <dd>${providers}</dd>
+          <dt>Visibility</dt>
+          <dd>${visibility}</dd>
+          <dt>Request limit</dt>
+          <dd>${limits.site} a minute</dd>
+        </dl>
+      </section>
+    `;
   }
 
   private row(site: Site, check: DnsCheck | undefined, registered: number | undefined) {
@@ -109,7 +160,7 @@ export class OwnerSites {
 
     return html`
       <section>
-        <h2>${site.name}</h2>
+        <h3>${site.name}</h3>
         <dl>
           <dt>Site id</dt>
           <dd>${site.id}</dd>

@@ -329,7 +329,7 @@ class Server {
       options.reportUrl,
     );
 
-    this.ownerSites = new OwnerSites(this.store, this.sites);
+    this.ownerSites = new OwnerSites(this.store, this.sites, options.providers);
 
     if (options.registration === 'open')
       this.registrations = new Registrations(this.store, this.sites, this.origin, options.dns);
@@ -1017,7 +1017,7 @@ class Server {
             !site &&
             html`
               <a href="/records">Every connection on this instance</a>
-              <a href="/sites">Registered sites</a>
+              <a href="/sites">Sites</a>
             `
           }
         </p>

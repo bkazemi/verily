@@ -62,8 +62,13 @@ test('only the owner sees and changes registered sites', async () => {
   assert.match(page, /stored\.test/);
   assert.match(page, /DNS record not checked yet/);
 
-  // Only stored sites are listed, and only they can be changed.
-  assert.ok(!page.includes('pinned.test'));
+  // A site in SITES is listed apart, with nothing to change.
+  const [registered, host] = page.split('<h2>Set by the host</h2>');
+
+  assert.match(registered!, /stored\.test/);
+  assert.match(host!, /pinned\.test/);
+  assert.match(host!, /<dt>Request limit<\/dt><dd>600 a minute<\/dd>/);
+  assert.doesNotMatch(host!, /<form/);
 
   assert.equal((await post('/sites/suspend', { id: 'pinned', suspend: 'yes' }, owner)).status, 404);
 
