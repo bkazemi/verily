@@ -176,6 +176,18 @@
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
+      .code .tag {
+        color: #98b6a0;
+      }
+      .code .name {
+        color: #a8e0c2;
+      }
+      .code .attr {
+        color: #e3c27a;
+      }
+      .code .string {
+        color: #a9cdec;
+      }
       .code small {
         color: #98b6a0;
         font-size: 10px;
@@ -283,10 +295,10 @@
             Styling is included in Verily and isolated from JoeSite’s page CSS. No separate
             stylesheet is needed.
           </p>
-          <pre class="code"><code>&lt;verily-badge
-  backend-url="/api/verily"
-  connection-id="…"&gt;
-&lt;/verily-badge&gt;</code></pre>
+          <pre class="code"><code><span class="tag">&lt;<span class="name">verily-badge</span>
+  <span class="attr">backend-url</span>=<span class="string">"/api/verily"</span>
+  <span class="attr">connection-id</span>=<span class="string">"…"</span>&gt;</span>
+<span class="tag">&lt;/<span class="name">verily-badge</span>&gt;</span></code></pre>
         </aside>
       </div>
       <section class="states">

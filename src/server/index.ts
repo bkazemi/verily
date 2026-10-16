@@ -40,6 +40,7 @@ import {
 } from './service.js';
 import { copyScript, waitScript } from './copy.js';
 import { html, type Content } from './html.js';
+import { highlightHtml } from './highlight.js';
 import { card, externalCard, marked, moment, page, safeUrl, times, verdict } from './render.js';
 import { logo } from '../logo.js';
 import { toneOf } from '../marks.js';
@@ -413,7 +414,7 @@ function instructions(parts: Instruction[]) {
       ? html`<p>${part}</p>`
       : Array.isArray(part)
         ? html`<p>${part.map(inline)}</p>`
-        : html`<pre><code>${part.code}</code></pre>`,
+        : html`<pre><code>${part.language === 'html' ? highlightHtml(part.code) : part.code}</code></pre>`,
   )}`;
 }
 

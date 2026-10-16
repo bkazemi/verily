@@ -114,7 +114,7 @@ export function linkProvider(options: LinkProviderOptions): ArtifactProvider {
       'Add a link to this address on a page you control, marked rel="me", then paste that page’s address below.',
       { code: expect },
       'Writing the page yourself, that is one element:',
-      { code: `<a rel="me" href="${expect}">${expect}</a>` },
+      { code: `<a rel="me" href="${expect}">${expect}</a>`, language: 'html' },
     ],
 
     async verify({ artifact, expect }): Promise<ExternalAccount> {

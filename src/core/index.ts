@@ -537,9 +537,10 @@ export class Absent extends Refused {}
 
 /**
  * A piece of what the holder is told: a paragraph, a paragraph with links in it, or
- * something they run or publish as is.
+ * something they run or publish as is. A code block marked `language: 'html'` is
+ * syntax highlighted on the flow page.
  */
-export type Instruction = string | { code: string } | Inline[];
+export type Instruction = string | { code: string; language?: 'html' } | Inline[];
 
 /**
  * A piece of a paragraph: text, or text that links somewhere the holder goes to do what
