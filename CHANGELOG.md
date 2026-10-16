@@ -3,6 +3,21 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.4] - 2026-10-16
+
+### Changed
+
+- **The verification dialog shows four or more accounts two to a row** on
+  screens at least 960px wide. Cards side by side line up their verdicts and
+  dates, and the site's card sits centred above them.
+- **The `/published` page lines up its account cards the same way,** two to a
+  row from 768px wide, with the subject's card centred above them.
+
+### Fixed
+
+- **Opening the retired accounts or a card's details scrolls them into view,**
+  instead of leaving them partly below the dialog's edge.
+
 ## [0.9.3] - 2026-10-16
 
 ### Fixed
