@@ -1,11 +1,12 @@
 # A release, in the order it has to happen: the work is already committed, the version is
-# bumped and committed, and only then is the worker deployed and the package published. The
-# version is built into the bundle and named in the README's CDN URLs, so a deploy or a
-# publish ahead of the bump ships the old number.
+# bumped and committed, and only then is the worker deployed. The version is built into the
+# bundle and named in the README's CDN URLs, so a deploy ahead of the bump ships the old
+# number.
 #
 # CHANGELOG.md needs a section for the new version before a release starts. The release
 # tags the bump commit as v<version> and pushes the commit and the tag last, once the
-# deploy and the publish have worked.
+# deploy has worked. The pushed tag runs .github/workflows/release.yml, which publishes
+# the package to npm.
 #
 #   make release                 the next patch version
 #   make release minor           the next minor version, or major for the next major
@@ -31,12 +32,12 @@ VERSION ?= $(shell node -p "const [a, b, c] = '$(CURRENT)'.split('.').map(Number
 
 # The steps depend on running in the order they are listed.
 .NOTPARALLEL:
-.PHONY: release clean-tree changelog bump verify commit tag deploy publish push major minor patch
+.PHONY: release clean-tree changelog bump verify commit tag deploy push major minor patch
 
 major minor patch:
 	@:
 
-release: clean-tree changelog bump verify commit tag deploy publish push
+release: clean-tree changelog bump verify commit tag deploy push
 
 # A bump commit holds the version and nothing else, so everything else is committed first.
 clean-tree:
@@ -69,9 +70,6 @@ tag:
 
 deploy:
 	npm run release:deploy
-
-publish:
-	npm publish
 
 push:
 	git push origin HEAD "v$$(node -p "require('./package.json').version")"

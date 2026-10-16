@@ -1,0 +1,33 @@
+name: Release
+
+# Publishes to npm when make release pushes a version tag. npm trusts this workflow by its
+# file name, so publishing needs no token: the OIDC credential GitHub issues is the login.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  # Lets the job ask GitHub for the OIDC credential npm accepts.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Trusted publishing needs npm 11.5.1 or later, which Node 24 ships with.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      # A tag that does not match package.json would publish the wrong number.
+      - run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
+      - run: npm ci
+
+      # prepack builds dist, and provenance is added without a flag.
+      - run: npm publish
