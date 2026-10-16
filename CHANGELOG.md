@@ -3,6 +3,13 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.1] - 2026-10-15
+
+### Changed
+
+- **The owner's `/sites` page also lists the sites set by the host** in `SITES`, read
+  only, apart from the sites registered on the instance.
+
 ## [0.9.0] - 2026-10-15
 
 ### Added
