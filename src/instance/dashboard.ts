@@ -30,11 +30,17 @@ const sessionSet = (value: string, ms: number) => setCookie(cookieName, value, m
 const signIn = (message?: Html, status = 200) =>
   respond(
     'Site dashboard',
-    html`${message}<form action="/dashboard/login" method="post">
-<label>Site id <input name="id" autocomplete="username" required></label>
-<label>Dashboard key <input name="key" type="password" autocomplete="current-password" required></label>
-<button>Sign in</button>
-</form>`,
+    html`
+      ${message}
+      <form action="/dashboard/login" method="post">
+        <label>Site id <input name="id" autocomplete="username" required></label>
+        <label>
+          Dashboard key
+          <input name="key" type="password" autocomplete="current-password" required>
+        </label>
+        <button>Sign in</button>
+      </form>
+    `,
     status,
     'single',
   );
@@ -55,14 +61,27 @@ const ask = (
 ) =>
   respond(
     heading,
-    html`<p>${text}</p>
-<form action="${action}" method="post">${Object.entries(fields).map(([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`)}<input type="hidden" name="confirm" value="yes"><button${danger && raw(' class="danger"')}>${button}</button></form>${back}`,
+    html`
+      <p>${text}</p>
+      <form action="${action}" method="post">
+        ${Object.entries(fields).map(
+          ([name, value]) => html`<input type="hidden" name="${name}" value="${value}">`,
+        )}
+        <input type="hidden" name="confirm" value="yes">
+        <button${danger && raw(' class="danger"')}>${button}</button>
+      </form>
+      ${back}
+    `,
     200,
     'single',
   );
 
 const checkbox = (name: string, value: string, label: string, checked: boolean) =>
-  html`<label><input type="checkbox" name="${name}" value="${value}"${checked && raw(' checked')}> ${label}</label>`;
+  html`
+    <label>
+      <input type="checkbox" name="${name}" value="${value}"${checked && raw(' checked')}> ${label}
+    </label>
+  `;
 
 /**
  * Where the operators of a site registered here change its settings and replace its key.
@@ -198,7 +217,13 @@ export class Dashboard {
     const replaced = () =>
       respond(
         'Key already replaced',
-        html`<p>The site key was already replaced since this form was loaded, so nothing changed. The new key was shown when it was made.</p>${back}`,
+        html`
+          <p>
+            The site key was already replaced since this form was loaded, so nothing changed.
+            The new key was shown when it was made.
+          </p>
+          ${back}
+        `,
         409,
         'single',
       );
@@ -234,13 +259,18 @@ export class Dashboard {
 
     return respond(
       'New site key',
-      html`<p>This key is shown once. Copy it now.</p>
-<pre><code>${key}</code></pre>
-<p>${
-        keep && until
-          ? `The old key keeps working until ${minute(until)}. Deploy the new key to your backend, then stop accepting the old one from the dashboard.`
-          : 'The old key no longer works. Deploy the new key to your backend now: until you do, your site cannot send users here or read their connections.'
-      }</p>${back}`,
+      html`
+        <p>This key is shown once. Copy it now.</p>
+        <pre><code>${key}</code></pre>
+        <p>
+          ${
+            keep && until
+              ? `The old key keeps working until ${minute(until)}. Deploy the new key to your backend, then stop accepting the old one from the dashboard.`
+              : 'The old key no longer works. Deploy the new key to your backend now: until you do, your site cannot send users here or read their connections.'
+          }
+        </p>
+        ${back}
+      `,
     );
   }
 
@@ -284,7 +314,12 @@ export class Dashboard {
 
     const response = respond(
       'Site deleted',
-      html`<p>${found.site.name} is deleted and no longer served here. Its id, <code>${found.site.id}</code>, cannot be registered again.</p>`,
+      html`
+        <p>
+          ${found.site.name} is deleted and no longer served here.
+          Its id, <code>${found.site.id}</code>, cannot be registered again.
+        </p>
+      `,
       200,
       'single',
     );
@@ -314,7 +349,13 @@ export class Dashboard {
     // The one thing on the page the operator has to act on, so the one sentence.
     const restore =
       suspended &&
-      html`<p><code>${record}</code> no longer has <code>verily-verifier=${this.host}</code>. Add it back and the site is served again within an hour. Otherwise the site is deleted on ${date(check.absentSince! + lapseMs)}.</p>`;
+      html`
+        <p>
+          <code>${record}</code> no longer has <code>verily-verifier=${this.host}</code>.
+          Add it back and the site is served again within an hour.
+          Otherwise the site is deleted on ${date(check.absentSince! + lapseMs)}.
+        </p>
+      `;
 
     const overlapping = !!site.previousKey && (site.previousUntil ?? 0) > Date.now();
 
@@ -333,31 +374,89 @@ export class Dashboard {
 
     return respond(
       'Site dashboard',
-      html`${message}<dl><dt>Site</dt><dd>${site.name}</dd><dt>Site id</dt><dd>${site.id}</dd><dt>Status</dt><dd>${standing}</dd></dl>
-${restore}
-<h2>Settings</h2>
-<form action="/dashboard/settings" method="post">
-<label>Authorize URL <input name="authorizeUrl" type="url" value="${site.authorizeUrl}" required></label>
-<label>Return URL <input name="returnUrl" type="url" value="${site.returnUrl}" required></label>
-<fieldset><legend>Providers your users may verify with</legend>${providers}</fieldset>
-<fieldset><legend>Visibility your users may choose</legend>${visibility}</fieldset>
-<button>Save</button>
-</form>
-<section class="caution"><h2>Site key</h2>
-<p class="fine">Your backend signs handoffs and reads connections with this key. A new key is shown once. Keep the old key working for 24 hours to deploy the new one without interruption, or stop it at once if it may have leaked.</p>
-${
-  overlapping &&
-  html`<section><p>The old key is accepted until ${minute(site.previousUntil!)}. Stop accepting it once the new key is deployed.</p>
-<div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
-}
-<div class="actions"><form action="/dashboard/rotate" method="post"><input type="hidden" name="from" value="${hash(site.key)}"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div></section>
-<section class="danger"><h2>Delete the site</h2>
-<p class="fine">The site stops being served here at once, and its id can never be registered again. To come back, register the domain as a new site; your users then connect their accounts again.</p>
-<form action="/dashboard/delete" method="post">
-<label>Type <code>${site.id}</code> to confirm <input name="confirm" autocomplete="off" required></label>
-<button class="danger">Delete the site</button>
-</form></section>
-<footer><div class="actions"><form action="/dashboard/logout" method="post"><button>Sign out</button></form></div></footer>`,
+      html`
+        ${message}
+        <dl>
+          <dt>Site</dt>
+          <dd>${site.name}</dd>
+          <dt>Site id</dt>
+          <dd>${site.id}</dd>
+          <dt>Status</dt>
+          <dd>${standing}</dd>
+        </dl>
+        ${restore}
+        <h2>Settings</h2>
+        <form action="/dashboard/settings" method="post">
+          <label>
+            Authorize URL
+            <input name="authorizeUrl" type="url" value="${site.authorizeUrl}" required>
+          </label>
+          <label>
+            Return URL
+            <input name="returnUrl" type="url" value="${site.returnUrl}" required>
+          </label>
+          <fieldset>
+            <legend>Providers your users may verify with</legend>
+            ${providers}
+          </fieldset>
+          <fieldset>
+            <legend>Visibility your users may choose</legend>
+            ${visibility}
+          </fieldset>
+          <button>Save</button>
+        </form>
+        <section class="caution">
+          <h2>Site key</h2>
+          <p class="fine">
+            Your backend signs handoffs and reads connections with this key. A new key is shown
+            once. Keep the old key working for 24 hours to deploy the new one without
+            interruption, or stop it at once if it may have leaked.
+          </p>
+          ${
+            overlapping &&
+            html`
+              <section>
+                <p>
+                  The old key is accepted until ${minute(site.previousUntil!)}.
+                  Stop accepting it once the new key is deployed.
+                </p>
+                <div class="actions">
+                  <form action="/dashboard/previous-key" method="post">
+                    <button>Stop accepting the old key</button>
+                  </form>
+                </div>
+              </section>
+            `
+          }
+          <div class="actions">
+            <form action="/dashboard/rotate" method="post">
+              <input type="hidden" name="from" value="${hash(site.key)}">
+              <button name="keep" value="day">Replace, keep the old key for 24 hours</button>
+              <button name="keep" value="none">Replace now</button>
+            </form>
+          </div>
+        </section>
+        <section class="danger">
+          <h2>Delete the site</h2>
+          <p class="fine">
+            The site stops being served here at once, and its id can never be registered again.
+            To come back, register the domain as a new site; your users then connect their
+            accounts again.
+          </p>
+          <form action="/dashboard/delete" method="post">
+            <label>
+              Type <code>${site.id}</code> to confirm
+              <input name="confirm" autocomplete="off" required>
+            </label>
+            <button class="danger">Delete the site</button>
+          </form>
+        </section>
+        <footer>
+          <div class="actions">
+            <form action="/dashboard/logout" method="post"><button>Sign out</button></form>
+          </div>
+        </footer>
+      `,
       status,
     );
   }

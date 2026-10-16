@@ -40,14 +40,47 @@ const field = (form: URLSearchParams, name: string) => (form.get(name) ?? '').tr
 const form = (message?: Html, values: Record<string, string> = {}) =>
   respond(
     'Register a site',
-    html`${message}<p>Register your site to send its users here to verify their accounts. You will need to add two DNS records to your domain.</p>
-<form action="/register" method="post">
-<label>Domain <input name="domain" value="${values.domain ?? ''}" placeholder="example.com" required></label>
-<label>Site id <input name="id" value="${values.id ?? ''}" pattern="[a-z0-9-]{1,32}" placeholder="example" required></label>
-<label>Authorize URL <input name="authorizeUrl" type="url" value="${values.authorizeUrl ?? ''}" placeholder="https://example.com/api/verily/authorize" required></label>
-<label>Return URL <input name="returnUrl" type="url" value="${values.returnUrl ?? ''}" placeholder="https://example.com/api/verily/return" required></label>
-<button>Continue</button>
-</form>`,
+    html`
+      ${message}
+      <p>
+        Register your site to send its users here to verify their accounts. You will need to add
+        two DNS records to your domain.
+      </p>
+      <form action="/register" method="post">
+        <label>
+          Domain
+          <input name="domain" value="${values.domain ?? ''}" placeholder="example.com" required>
+        </label>
+        <label>
+          Site id
+          <input
+            name="id"
+            value="${values.id ?? ''}"
+            pattern="[a-z0-9-]{1,32}"
+            placeholder="example"
+            required>
+        </label>
+        <label>
+          Authorize URL
+          <input
+            name="authorizeUrl"
+            type="url"
+            value="${values.authorizeUrl ?? ''}"
+            placeholder="https://example.com/api/verily/authorize"
+            required>
+        </label>
+        <label>
+          Return URL
+          <input
+            name="returnUrl"
+            type="url"
+            value="${values.returnUrl ?? ''}"
+            placeholder="https://example.com/api/verily/return"
+            required>
+        </label>
+        <button>Continue</button>
+      </form>
+    `,
     message ? 400 : 200,
   );
 
@@ -141,13 +174,20 @@ export class Registrations {
 
     return respond(
       'Add the DNS records',
-      html`${message}<p>Add two TXT records named <code>${name}</code>:</p>
-<pre><code>${`${claimPrefix}${claim.code}`}</code></pre>
-<pre><code>${`verily-verifier=${this.host}`}</code></pre>
-<p>The first proves you control ${claim.site.name}, and can be removed once the site is registered. The second says this instance verifies for your site. Keep it: if it is removed, the site stops being served within a day, and is deleted 30 days later.</p>
-<p>DNS changes can take up to 72 hours to appear.</p>
-<form action="/register/check" method="post"><button>Check the records</button></form>
-<form action="/register/cancel" method="post"><button>Start over</button></form>`,
+      html`
+        ${message}
+        <p>Add two TXT records named <code>${name}</code>:</p>
+        <pre><code>${`${claimPrefix}${claim.code}`}</code></pre>
+        <pre><code>${`verily-verifier=${this.host}`}</code></pre>
+        <p>
+          The first proves you control ${claim.site.name}, and can be removed once the site is
+          registered. The second says this instance verifies for your site. Keep it: if it is
+          removed, the site stops being served within a day, and is deleted 30 days later.
+        </p>
+        <p>DNS changes can take up to 72 hours to appear.</p>
+        <form action="/register/check" method="post"><button>Check the records</button></form>
+        <form action="/register/cancel" method="post"><button>Start over</button></form>
+      `,
       status,
     );
   }
@@ -178,7 +218,17 @@ export class Registrations {
     if (!proved || !named)
       return this.records(
         claim,
-        html`<p>${!proved && !named ? 'Neither record was' : !proved ? 'The verily-claim record was not' : 'The verily-verifier record was not'} found yet.</p>`,
+        html`
+          <p>
+            ${
+              !proved && !named
+                ? 'Neither record was'
+                : !proved
+                  ? 'The verily-claim record was not'
+                  : 'The verily-verifier record was not'
+            } found yet.
+          </p>
+        `,
         409,
       );
 
@@ -193,19 +243,30 @@ export class Registrations {
     } catch {
       return respond(
         'Not registered',
-        html`<p>That id or domain was registered by someone else first.</p><form action="/register/cancel" method="post"><button>Start over</button></form>`,
+        html`
+          <p>That id or domain was registered by someone else first.</p>
+          <form action="/register/cancel" method="post"><button>Start over</button></form>
+        `,
         409,
       );
     }
 
     const response = respond(
       'Site registered',
-      html`<p>${claim.site.name} is registered as <code>${claim.site.id}</code>. These keys are shown once and cannot be shown again.</p>
-<p>Site key, for your backend only. It signs handoffs and reads your users' connections.</p>
-<pre><code>${siteKey}</code></pre>
-<p>Dashboard key, for whoever manages the site here. Keep it in a password manager.</p>
-<pre><code>${dashboardKey}</code></pre>
-<p>If both keys are lost, the site cannot be recovered. Registering the domain again makes a new site, and your users have to connect their accounts again.</p>`,
+      html`
+        <p>
+          ${claim.site.name} is registered as <code>${claim.site.id}</code>. These keys are shown
+          once and cannot be shown again.
+        </p>
+        <p>Site key, for your backend only. It signs handoffs and reads your users' connections.</p>
+        <pre><code>${siteKey}</code></pre>
+        <p>Dashboard key, for whoever manages the site here. Keep it in a password manager.</p>
+        <pre><code>${dashboardKey}</code></pre>
+        <p>
+          If both keys are lost, the site cannot be recovered. Registering the domain again makes a
+          new site, and your users have to connect their accounts again.
+        </p>
+      `,
     );
 
     response.headers.append('Set-Cookie', claimed('', 0));

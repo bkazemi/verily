@@ -128,49 +128,136 @@ function letter(parts: {
   const sans = raw("system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif");
   const mono = raw("ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace");
 
-  return html`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<meta name="supported-color-schemes" content="light dark">
-<title>Verily</title>
-<style>
-@media (prefers-color-scheme: dark) {
-  .page { background: #161a18 !important; }
-  .ink { color: #dde5e0 !important; }
-  .muted { color: #96a39b !important; }
-  .button { background: #7fc4a2 !important; }
-  .button a { color: #10231a !important; }
-  .code { background: #1d2220 !important; border-color: #2f3b35 !important; color: #dde5e0 !important; }
-  .rule { border-color: #2f3b35 !important; }
-}
-</style>
-</head>
-<body class="page" style="margin:0;padding:0;background:#ffffff;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${parts.ask} ${parts.lasts}</div>
-<table role="presentation" class="page" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
-<tr><td align="center" style="padding:40px 16px 48px;">
-<table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:440px;margin:0 auto;">
-<tr><td align="center" style="padding:0 0 28px;">
-<img src="cid:${logo.contentId}" width="94" height="40" alt="Verily" style="display:block;margin:0 auto;border:0;outline:none;font:700 20px/40px ${sans};color:#23312b;">
-</td></tr>
-<tr><td class="ink" align="center" style="padding:0 0 10px;font:650 22px/1.3 ${sans};color:#23312b;text-align:center;">Confirm your address</td></tr>
-<tr><td class="ink" align="center" style="padding:0 0 24px;font:16px/1.6 ${sans};color:#23312b;text-align:center;">${parts.ask}</td></tr>
-<tr><td align="center" style="padding:0 0 28px;">
-<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;"><tr><td class="button" align="center" style="background:#245f43;border-radius:10px;"><a href="${parts.link}" style="display:inline-block;padding:13px 26px;font:600 16px/1.2 ${sans};color:#ffffff;text-decoration:none;">${parts.button}</a></td></tr></table>
-</td></tr>
-<tr><td class="muted" align="center" style="padding:0 0 10px;font:14px/1.5 ${sans};color:#6b786f;text-align:center;">${parts.enter}</td></tr>
-<tr><td class="code" align="center" style="padding:14px 12px 14px 15px;background:#f7f9f7;border:1px solid #dce2de;border-radius:10px;font:600 22px/1.2 ${mono};letter-spacing:.14em;color:#23312b;text-align:center;">${parts.code}</td></tr>
-<tr><td class="muted" align="center" style="padding:12px 0 28px;font:14px/1.5 ${sans};color:#6b786f;text-align:center;">${parts.lasts}</td></tr>
-<tr><td class="rule" style="border-top:1px solid #dce2de;font-size:0;line-height:0;">&nbsp;</td></tr>
-<tr><td class="muted" align="center" style="padding:18px 0 0;font:13px/1.6 ${sans};color:#6b786f;text-align:center;">${parts.ignore}</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`.markup;
+  return html`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="color-scheme" content="light dark">
+        <meta name="supported-color-schemes" content="light dark">
+        <title>Verily</title>
+        <style>
+          @media (prefers-color-scheme: dark) {
+            .page { background: #161a18 !important; }
+            .ink { color: #dde5e0 !important; }
+            .muted { color: #96a39b !important; }
+            .button { background: #7fc4a2 !important; }
+            .button a { color: #10231a !important; }
+            .code { background: #1d2220 !important; border-color: #2f3b35 !important; color: #dde5e0 !important; }
+            .rule { border-color: #2f3b35 !important; }
+          }
+        </style>
+      </head>
+      <body class="page" style="margin:0;padding:0;background:#ffffff;">
+        <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${parts.ask} ${parts.lasts}</div>
+        <table
+          role="presentation"
+          class="page"
+          width="100%"
+          cellpadding="0"
+          cellspacing="0"
+          border="0"
+          style="background:#ffffff;">
+          <tr>
+            <td align="center" style="padding:40px 16px 48px;">
+              <table
+                role="presentation"
+                align="center"
+                width="100%"
+                cellpadding="0"
+                cellspacing="0"
+                border="0"
+                style="max-width:440px;margin:0 auto;">
+                <tr>
+                  <td align="center" style="padding:0 0 28px;">
+                    <img
+                      src="cid:${logo.contentId}"
+                      width="94"
+                      height="40"
+                      alt="Verily"
+                      style="display:block;margin:0 auto;border:0;outline:none;font:700 20px/40px ${sans};color:#23312b;">
+                  </td>
+                </tr>
+                <tr>
+                  <td
+                    class="ink"
+                    align="center"
+                    style="padding:0 0 10px;font:650 22px/1.3 ${sans};color:#23312b;text-align:center;">
+                    Confirm your address
+                  </td>
+                </tr>
+                <tr>
+                  <td
+                    class="ink"
+                    align="center"
+                    style="padding:0 0 24px;font:16px/1.6 ${sans};color:#23312b;text-align:center;">
+                    ${parts.ask}
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding:0 0 28px;">
+                    <table
+                      role="presentation"
+                      align="center"
+                      cellpadding="0"
+                      cellspacing="0"
+                      border="0"
+                      style="margin:0 auto;">
+                      <tr>
+                        <td class="button" align="center" style="background:#245f43;border-radius:10px;">
+                          <a
+                            href="${parts.link}"
+                            style="display:inline-block;padding:13px 26px;font:600 16px/1.2 ${sans};color:#ffffff;text-decoration:none;">
+                            ${parts.button}
+                          </a>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+                <tr>
+                  <td
+                    class="muted"
+                    align="center"
+                    style="padding:0 0 10px;font:14px/1.5 ${sans};color:#6b786f;text-align:center;">
+                    ${parts.enter}
+                  </td>
+                </tr>
+                <tr>
+                  <td
+                    class="code"
+                    align="center"
+                    style="padding:14px 12px 14px 15px;background:#f7f9f7;border:1px solid #dce2de;border-radius:10px;font:600 22px/1.2 ${mono};letter-spacing:.14em;color:#23312b;text-align:center;">
+                    ${parts.code}
+                  </td>
+                </tr>
+                <tr>
+                  <td
+                    class="muted"
+                    align="center"
+                    style="padding:12px 0 28px;font:14px/1.5 ${sans};color:#6b786f;text-align:center;">
+                    ${parts.lasts}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="rule" style="border-top:1px solid #dce2de;font-size:0;line-height:0;">&nbsp;</td>
+                </tr>
+                <tr>
+                  <td
+                    class="muted"
+                    align="center"
+                    style="padding:18px 0 0;font:13px/1.6 ${sans};color:#6b786f;text-align:center;">
+                    ${parts.ignore}
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `.markup;
 }
 
 /**

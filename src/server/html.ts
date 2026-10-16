@@ -35,11 +35,46 @@ const write = (content: Content): string =>
         : escape(content);
 
 /**
+ * One piece of a template's own text, without the line breaks and indentation it was
+ * written with. Whitespace that holds a line break is dropped where it touches a tag or
+ * either end of the template, or lies between two values. Anywhere else, between words or
+ * between a word and a value, it becomes one space.
+ *
+ * `first` and `last` say whether the piece starts or ends the template; otherwise a value
+ * comes before or after it.
+ */
+function unindent(text: string, first: boolean, last: boolean) {
+  return text.replace(/\s*\n\s*/g, (run: string, at: number) => {
+    const before = at === 0 ? (first ? '' : 'value') : text[at - 1];
+    const after = at + run.length === text.length ? (last ? '' : 'value') : text[at + run.length];
+
+    return before === '>' || after === '<' || !before || !after
+      ? ''
+      : before === 'value' && after === 'value'
+        ? ''
+        : ' ';
+  });
+}
+
+/** Each template's text, unindented once. The same template is the same array every call. */
+const unindented = new WeakMap<TemplateStringsArray, string[]>();
+
+/**
  * Builds markup from a template, escaping every value put into it that is not markup
  * already. This covers element text and quoted attributes. It does not make a URL safe to
  * follow: pass an address through `safeUrl()` before it goes into `href`.
+ *
+ * The template can be written indented across lines: see `unindent` for how its line
+ * breaks are taken out. Values are never changed.
  */
-export function html(strings: TemplateStringsArray, ...values: Content[]): Html {
+export function html(template: TemplateStringsArray, ...values: Content[]): Html {
+  let strings = unindented.get(template);
+
+  if (!strings) {
+    strings = template.map((text, i) => unindent(text, i === 0, i === template.length - 1));
+    unindented.set(template, strings);
+  }
+
   let markup = strings[0]!;
 
   for (const [index, value] of values.entries()) markup += write(value) + strings[index + 1]!;

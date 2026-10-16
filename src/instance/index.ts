@@ -78,7 +78,16 @@ export interface InstanceOptions {
 const signIn = (message?: Html, status = 200) =>
   respond(
     'Sign in',
-    html`${message}<form action="/login" method="post"><label>Owner key <input name="key" type="password" autocomplete="current-password" required></label><button>Sign in</button></form>`,
+    html`
+      ${message}
+      <form action="/login" method="post">
+        <label>
+          Owner key
+          <input name="key" type="password" autocomplete="current-password" required>
+        </label>
+        <button>Sign in</button>
+      </form>
+    `,
     status,
     'single',
   );
@@ -628,13 +637,26 @@ class Server {
       return mark
         ? respond(
             'Change not finished',
-            html`<p>Changing how this account is listed did not finish.</p><form action="/mark" method="post"><input type="hidden" name="connection" value="${connection}"><input type="hidden" name="as" value="${mark}"><button>Try again</button></form>`,
+            html`
+              <p>Changing how this account is listed did not finish.</p>
+              <form action="/mark" method="post">
+                <input type="hidden" name="connection" value="${connection}">
+                <input type="hidden" name="as" value="${mark}">
+                <button>Try again</button>
+              </form>
+            `,
             200,
             'single',
           )
         : respond(
             'Disconnect not finished',
-            html`<p>Removing this link did not finish.</p><form action="/disconnect" method="post"><input type="hidden" name="connection" value="${connection}"><button>Try again</button></form>`,
+            html`
+              <p>Removing this link did not finish.</p>
+              <form action="/disconnect" method="post">
+                <input type="hidden" name="connection" value="${connection}">
+                <button>Try again</button>
+              </form>
+            `,
             200,
             'single',
           );
@@ -961,15 +983,30 @@ class Server {
 
     return respond(
       site ? 'Your connections' : 'Owner settings',
-      html`${card(local.heading, local.value, undefined, subject.reference)}
-      <p class="links"><a class="button" href="/verify">Verify an account</a>${!site && html`<a href="/records">Every connection on this instance</a>`}</p>
-      ${
-        connections.length
-          ? html`<p class="fine">Renewing a connection extends it and keeps its ID, so anything that shows it goes on working.${site ? '' : ' Only a public connection can be embedded.'}</p>`
-          : html`<p>No connections yet. Verify an account to make the first one.</p>`
-      }
-      ${connections.map((e) => this.connection(e, now, site))}
-      ${site ? html`<p><a href="${site.origin}">Back to ${site.name}</a></p>` : html`<form action="/logout" method="post"><button>Sign out</button></form>`}`,
+      html`
+        ${card(local.heading, local.value, undefined, subject.reference)}
+        <p class="links">
+          <a class="button" href="/verify">Verify an account</a>${
+            !site && html`<a href="/records">Every connection on this instance</a>`
+          }
+        </p>
+        ${
+          connections.length
+            ? html`
+                <p class="fine">
+                  Renewing a connection extends it and keeps its ID, so anything that shows it
+                  goes on working.${site ? '' : ' Only a public connection can be embedded.'}
+                </p>
+              `
+            : html`<p>No connections yet. Verify an account to make the first one.</p>`
+        }
+        ${connections.map((e) => this.connection(e, now, site))}
+        ${
+          site
+            ? html`<p><a href="${site.origin}">Back to ${site.name}</a></p>`
+            : html`<form action="/logout" method="post"><button>Sign out</button></form>`
+        }
+      `,
       200,
       '',
       embeds ? '/copy.js' : '',
@@ -990,33 +1027,55 @@ class Server {
 
     return respond(
       'All connections',
-      html`<p class="fine">${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.</p>
-      ${sites.map((name) => {
-        // Live records first. The sort is stable, so each half keeps the stored order.
-        const records = all
-          .filter((e) => e.siteName === name)
-          .sort((a, b) => Number(live(b)) - Number(live(a)));
+      html`
+        <p class="fine">
+          ${all.length} on this instance: ${count('public')} public, ${count('unlisted')} unlisted.
+        </p>
+        ${sites.map((name) => {
+          // Live records first. The sort is stable, so each half keeps the stored order.
+          const records = all
+            .filter((e) => e.siteName === name)
+            .sort((a, b) => Number(live(b)) - Number(live(a)));
 
-        return html`<h2>${name} · ${records.length}</h2>${records.map((e) => {
-          const state = statusLabel(e, now);
+          return html`
+            <h2>${name} · ${records.length}</h2>
+            ${records.map((e) => {
+              const state = statusLabel(e, now);
 
-          const local =
-            e.local.reference && e.local.reference !== e.local.label
-              ? `${e.local.label} · ${e.local.reference}`
-              : e.local.label;
+              const local =
+                e.local.reference && e.local.reference !== e.local.label
+                  ? `${e.local.label} · ${e.local.reference}`
+                  : e.local.label;
 
-          // The card the settings page draws, without its controls: this page only reads.
-          return html`<div class="connection">${externalCard(
-            cardHeading(e, ` · ${e.visibility}`),
-            e.external,
-            html`<span class="state">${verdict(toneOf(e, now), true)}<span>${state}</span></span>`,
-            e.visibility === 'public' &&
-              html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
-            html`<dl><dt>Linked to</dt><dd>${local}</dd><dt>Connected</dt><dd>${date(e.connectedAt)}</dd></dl>`,
-          )}</div>`;
-        })}`;
-      })}
-      <p><a href="/">Back to owner settings</a></p>`,
+              // The card the settings page draws, without its controls: this page only reads.
+              return html`
+                <div class="connection">
+                  ${externalCard(
+                    cardHeading(e, ` · ${e.visibility}`),
+                    e.external,
+                    html`
+                      <span class="state">
+                        ${verdict(toneOf(e, now), true)}<span>${state}</span>
+                      </span>
+                    `,
+                    e.visibility === 'public' &&
+                      html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
+                    html`
+                      <dl>
+                        <dt>Linked to</dt>
+                        <dd>${local}</dd>
+                        <dt>Connected</dt>
+                        <dd>${date(e.connectedAt)}</dd>
+                      </dl>
+                    `,
+                  )}
+                </div>
+              `;
+            })}
+          `;
+        })}
+        <p><a href="/">Back to owner settings</a></p>
+      `,
     );
   }
 
@@ -1055,25 +1114,42 @@ class Server {
         ? [
             'Retire this account?',
             retiringNote,
-            html`<form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">${held}<input type="hidden" name="as" value="retired"><button class="danger">Retire</button></form>`,
+            html`
+              <form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">
+                ${held}
+                <input type="hidden" name="as" value="retired">
+                <button class="danger">Retire</button>
+              </form>
+            `,
           ]
         : site
           ? [
               'Disconnect this account?',
               `This removes the link between your ${site.name} account and this one. It cannot be undone. To link them again you would verify the account again.`,
-              html`<form action="/disconnect" method="post">${held}<button class="danger">Disconnect</button></form>`,
+              html`
+                <form action="/disconnect" method="post">
+                  ${held}
+                  <button class="danger">Disconnect</button>
+                </form>
+              `,
             ]
           : [
               'Revoke this connection?',
               'This ends the connection, and it will read as revoked wherever it is shown. It cannot be undone. Verifying the account again makes a new connection with a new ID.',
-              html`<form action="/connections/${e.id}/disconnect" method="post"><button class="danger">Revoke connection</button></form>`,
+              html`
+                <form action="/connections/${e.id}/disconnect" method="post">
+                  <button class="danger">Revoke connection</button>
+                </form>
+              `,
             ];
 
     return respond(
       heading,
-      html`${externalCard(cardHeading(e), e.external)}
-      <p>${note}</p>
-      <div class="choice">${form}<a class="button secondary" href="/">Cancel</a></div>`,
+      html`
+        ${externalCard(cardHeading(e), e.external)}
+        <p>${note}</p>
+        <div class="choice">${form}<a class="button secondary" href="/">Cancel</a></div>
+      `,
       200,
       'single',
     );
@@ -1129,33 +1205,64 @@ class Server {
     // site's holder is sent back to the site with the change, as with a disconnect.
     const listing =
       open &&
-      html`<form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">${site && html`<input type="hidden" name="connection" value="${e.id}">`}
-      ${e.mark !== 'preferred' && html`<button name="as" value="preferred">Mark as preferred</button>`}
-      ${e.mark !== 'unused' && html`<button name="as" value="unused">Mark as unused</button>`}
-      ${e.mark !== undefined && html`<button name="as" value="current">Mark as current</button>`}</form>`;
+      html`
+        <form action="${site ? '/mark' : `/connections/${e.id}/mark`}" method="post">
+          ${site && html`<input type="hidden" name="connection" value="${e.id}">`}
+          ${
+            e.mark !== 'preferred' &&
+            html`<button name="as" value="preferred">Mark as preferred</button>`
+          }
+          ${e.mark !== 'unused' && html`<button name="as" value="unused">Mark as unused</button>`}
+          ${
+            e.mark !== undefined && html`<button name="as" value="current">Mark as current</button>`
+          }
+        </form>
+      `;
 
     // Retiring and removing go by a page that asks first, since neither can be undone.
     const asks = (action: string, label: string, danger = false) =>
-      html`<form action="/confirm" method="get"><input type="hidden" name="connection" value="${e.id}"><button${danger && raw(' class="danger"')} name="do" value="${action}">${label}</button></form>`;
+      html`
+        <form action="/confirm" method="get">
+          <input type="hidden" name="connection" value="${e.id}">
+          <button${danger && raw(' class="danger"')} name="do" value="${action}">${label}</button>
+        </form>
+      `;
 
     // Retiring and removing cannot be undone, so they sit together on a line of their own
     // below the rest, where nothing else lines up with them.
     const ending =
       e.status !== 'revoked' &&
-      html`<div class="ending">${open && asks('retire', 'Retire', true)}${asks('remove', site ? 'Disconnect' : 'Revoke', true)}</div>`;
+      html`
+        <div class="ending">
+          ${open && asks('retire', 'Retire', true)}
+          ${asks('remove', site ? 'Disconnect' : 'Revoke', true)}
+        </div>
+      `;
 
-    return html`<div class="connection">${externalCard(
-      cardHeading(e),
-      e.external,
-      html`<span class="state">${verdict(toneOf(e, now), true)}<span>${state}</span></span>`,
-      e.visibility === 'public' &&
-        html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
-      html`<dl>${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${value}</dd>`)}</dl>`,
-      shown && html`<p class="fine">${shown}</p>`,
-      !site &&
-        e.visibility === 'public' &&
-        html`<p class="fine">Embed on your site</p><pre><code>${embed}</code></pre>`,
-      html`${(goes.length > 0 || listing) && html`<div class="actions">${goes}${listing}</div>`}${ending}`,
-    )}</div>`;
+    return html`
+      <div class="connection">
+        ${externalCard(
+          cardHeading(e),
+          e.external,
+          html`
+            <span class="state">${verdict(toneOf(e, now), true)}<span>${state}</span></span>
+          `,
+          e.visibility === 'public' &&
+            html`<p class="evidence"><a href="${e.evidenceUrl}">Inspect evidence</a></p>`,
+          html`<dl>${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${value}</dd>`)}</dl>`,
+          shown && html`<p class="fine">${shown}</p>`,
+          !site &&
+            e.visibility === 'public' &&
+            html`
+              <p class="fine">Embed on your site</p>
+              <pre><code>${embed}</code></pre>
+            `,
+          html`
+            ${(goes.length > 0 || listing) && html`<div class="actions">${goes}${listing}</div>`}
+            ${ending}
+          `,
+        )}
+      </div>
+    `;
   }
 }

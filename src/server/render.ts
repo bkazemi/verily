@@ -24,8 +24,23 @@ export const page = (
   script = '',
   mark?: OptionalHtml,
 ) =>
-  html`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Verily</title><link rel="stylesheet" href="${prefix}/style.css?v=${styleVersion}"><body><main${variant && html` class="${variant}"`}>${raw(logo)}<h1>${mark}${title}</h1>${body}</main>${script && html`<script src="${script}" defer></script>`}</body></html>`
-    .markup;
+  html`
+    <!doctype html>
+    <html lang="en">
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>${title} · Verily</title>
+      <link rel="stylesheet" href="${prefix}/style.css?v=${styleVersion}">
+      <body>
+        <main${variant && html` class="${variant}"`}>
+          ${raw(logo)}
+          <h1>${mark}${title}</h1>
+          ${body}
+        </main>
+        ${script && html`<script src="${script}" defer></script>`}
+      </body>
+    </html>
+  `.markup;
 
 /**
  * The V the badge draws for a record, in the tone that says how the record stands.
@@ -39,7 +54,17 @@ export function verdict(tone: MarkTone, cropped = false): Html {
     ([name, value]) => html` ${raw(name)}="${value}"`,
   );
 
-  return html`<svg class="verdict ${tone}" viewBox="${cropped ? verification.strokes : verification.viewBox}" fill="none" aria-hidden="true" focusable="false"><path d="${verification.path}" ${stroke} stroke="${first}"/><path d="${verification.path}" ${stroke}${check} stroke="${second}"/></svg>`;
+  return html`
+    <svg
+      class="verdict ${tone}"
+      viewBox="${cropped ? verification.strokes : verification.viewBox}"
+      fill="none"
+      aria-hidden="true"
+      focusable="false">
+      <path d="${verification.path}" ${stroke} stroke="${first}"/>
+      <path d="${verification.path}" ${stroke}${check} stroke="${second}"/>
+    </svg>
+  `;
 }
 
 /** A card's heading: its text, and the provider's mark before it where there is one. */
@@ -55,9 +80,16 @@ export function marked(text: string, provider: string, method?: string): Heading
 
   return {
     text,
-    mark: html`<svg class="provider" viewBox="${mark.viewBox}" fill="${mark.stroke ? 'none' : 'currentColor'}" aria-hidden="true" focusable="false">${mark.paths.map(
-      (d) => html`<path d="${d}"${attributes}/>`,
-    )}</svg>`,
+    mark: html`
+      <svg
+        class="provider"
+        viewBox="${mark.viewBox}"
+        fill="${mark.stroke ? 'none' : 'currentColor'}"
+        aria-hidden="true"
+        focusable="false">
+        ${mark.paths.map((d) => html`<path d="${d}"${attributes}/>`)}
+      </svg>
+    `,
   };
 }
 
@@ -108,16 +140,27 @@ export function side(
 ): Html {
   const profile = url && safeUrl(url);
 
-  return html`<div class="side"><p class="who">${
-    typeof heading === 'string' ? heading : [heading.mark, heading.text]
-  }</p><p class="name">${
-    profile ? html`<a href="${profile}" rel="noreferrer">${name}</a>` : name
-  }${since && html`<span class="since">${since}</span>`}</p>${
-    typeof reference === 'string'
-      ? html`<p class="reference">${reference}</p>`
-      : reference &&
-        html`<p class="reference fingerprint">${reference.map((group) => html`<span>${group}</span>`)}</p>`
-  }${extra}</div>`;
+  return html`
+    <div class="side">
+      <p class="who">${typeof heading === 'string' ? heading : [heading.mark, heading.text]}</p>
+      <p class="name">
+        ${profile ? html`<a href="${profile}" rel="noreferrer">${name}</a>` : name}${
+          since && html`<span class="since">${since}</span>`
+        }
+      </p>
+      ${
+        typeof reference === 'string'
+          ? html`<p class="reference">${reference}</p>`
+          : reference &&
+            html`
+              <p class="reference fingerprint">
+                ${reference.map((group) => html`<span>${group}</span>`)}
+              </p>
+            `
+      }
+      ${extra}
+    </div>
+  `;
 }
 
 /** A day, as the date alone. */
