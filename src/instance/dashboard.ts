@@ -25,14 +25,15 @@ interface DashboardSession {
 }
 
 /** The session cookie, sent only to the dashboard's pages. */
-const sessionSet = (value: string, ms: number) => setCookie(cookieName, value, ms, '/dashboard');
+const sessionSet = (value: string, ms: number) =>
+  setCookie(cookieName, value, ms, '/site/dashboard');
 
 const signIn = (message?: Html, status = 200) =>
   respond(
     'Site dashboard',
     html`
       ${message}
-      <form action="/dashboard/login" method="post">
+      <form action="/site/dashboard/login" method="post">
         <label>Site id <input name="id" autocomplete="username" required></label>
         <label>
           Dashboard key
@@ -45,7 +46,7 @@ const signIn = (message?: Html, status = 200) =>
     'single',
   );
 
-const back = html`<p><a href="/dashboard">Back to the dashboard</a></p>`;
+const back = html`<p><a href="/site/dashboard">Back to the dashboard</a></p>`;
 
 /**
  * Asks before a key change goes ahead, on a page of its own. Its button sends `fields` to
@@ -149,7 +150,7 @@ export class Dashboard {
       expiresAt: Date.now() + sessionMs,
     });
 
-    return see('/dashboard', [sessionSet(session, sessionMs)]);
+    return see('/site/dashboard', [sessionSet(session, sessionMs)]);
   }
 
   async logout(request: Request): Promise<Response> {
@@ -157,7 +158,7 @@ export class Dashboard {
 
     if (value) await this.store.delete(`${sessionPrefix}${hash(value)}`);
 
-    return see('/dashboard', [sessionSet('', 0)]);
+    return see('/site/dashboard', [sessionSet('', 0)]);
   }
 
   /** Saves the site's URLs, providers and visibility. */
@@ -197,7 +198,7 @@ export class Dashboard {
       );
     }
 
-    return see('/dashboard');
+    return see('/site/dashboard');
   }
 
   /**
@@ -238,7 +239,7 @@ export class Dashboard {
         ? ask(
             'Replace the key?',
             `Deploy the new key to your backend within 24 hours. After that the old key stops working, and so does your site until it has the new one.${overlapping ? ' The older key still accepted from the last replacement stops working now.' : ''}`,
-            '/dashboard/rotate',
+            '/site/dashboard/rotate',
             { keep: 'day', from },
             'Replace, keep the old key for 24 hours',
             false,
@@ -246,7 +247,7 @@ export class Dashboard {
         : ask(
             'Replace the key now?',
             'Your site stops sending users here and reading their connections until you deploy the new key. To change keys without interruption, keep the old key for 24 hours instead.',
-            '/dashboard/rotate',
+            '/site/dashboard/rotate',
             { keep: 'none', from },
             'Replace now',
             true,
@@ -285,7 +286,7 @@ export class Dashboard {
       return ask(
         'Stop accepting the old key?',
         'Any backend still using the old key stops working at once: it cannot send users here or read their connections. Do this only once the new key is deployed everywhere.',
-        '/dashboard/previous-key',
+        '/site/dashboard/previous-key',
         {},
         'Stop accepting the old key',
         true,
@@ -293,7 +294,7 @@ export class Dashboard {
 
     await this.sites.retirePreviousKey(found.site.id);
 
-    return see('/dashboard');
+    return see('/site/dashboard');
   }
 
   /**
@@ -413,7 +414,7 @@ export class Dashboard {
         ${appeal}
         ${restore}
         <h2>Settings</h2>
-        <form action="/dashboard/settings" method="post">
+        <form action="/site/dashboard/settings" method="post">
           <label>
             Authorize URL
             <input name="authorizeUrl" type="url" value="${site.authorizeUrl}" required>
@@ -448,7 +449,7 @@ export class Dashboard {
                   Stop accepting it once the new key is deployed.
                 </p>
                 <div class="actions">
-                  <form action="/dashboard/previous-key" method="post">
+                  <form action="/site/dashboard/previous-key" method="post">
                     <button>Stop accepting the old key</button>
                   </form>
                 </div>
@@ -456,7 +457,7 @@ export class Dashboard {
             `
           }
           <div class="actions">
-            <form action="/dashboard/rotate" method="post">
+            <form action="/site/dashboard/rotate" method="post">
               <input type="hidden" name="from" value="${hash(site.key)}">
               <button name="keep" value="day">Replace, keep the old key for 24 hours</button>
               <button name="keep" value="none">Replace now</button>
@@ -470,7 +471,7 @@ export class Dashboard {
             To come back, register the domain as a new site. Your users then connect their
             accounts again.
           </p>
-          <form action="/dashboard/delete" method="post">
+          <form action="/site/dashboard/delete" method="post">
             <label>
               Type <code>${site.id}</code> to confirm
               <input name="confirm" autocomplete="off" required>
@@ -480,7 +481,7 @@ export class Dashboard {
         </section>
         <footer>
           <div class="actions">
-            <form action="/dashboard/logout" method="post"><button>Sign out</button></form>
+            <form action="/site/dashboard/logout" method="post"><button>Sign out</button></form>
           </div>
         </footer>
       `,

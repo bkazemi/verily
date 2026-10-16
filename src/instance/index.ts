@@ -551,18 +551,18 @@ class Server {
           ? this.ownerSites.change(url.pathname, request)
           : unavailable(403);
 
-      if (url.pathname === '/dashboard/login') return this.dashboard.login(request);
+      if (url.pathname === '/site/dashboard/login') return this.dashboard.login(request);
 
-      if (url.pathname === '/dashboard/logout') return this.dashboard.logout(request);
+      if (url.pathname === '/site/dashboard/logout') return this.dashboard.logout(request);
 
-      if (url.pathname === '/dashboard/settings') return this.dashboard.settings(request);
+      if (url.pathname === '/site/dashboard/settings') return this.dashboard.settings(request);
 
-      if (url.pathname === '/dashboard/rotate') return this.dashboard.rotate(request);
+      if (url.pathname === '/site/dashboard/rotate') return this.dashboard.rotate(request);
 
-      if (url.pathname === '/dashboard/previous-key')
+      if (url.pathname === '/site/dashboard/previous-key')
         return this.dashboard.retirePreviousKey(request);
 
-      if (url.pathname === '/dashboard/delete') return this.dashboard.delete(request);
+      if (url.pathname === '/site/dashboard/delete') return this.dashboard.delete(request);
 
       if (this.registrations) {
         if (url.pathname === '/register') return this.registrations.request(request);
@@ -573,7 +573,7 @@ class Server {
       }
     }
 
-    if (request.method === 'GET' && url.pathname === '/dashboard')
+    if (request.method === 'GET' && url.pathname === '/site/dashboard')
       return this.dashboard.page(request);
 
     if (request.method === 'GET' && url.pathname === '/sites')

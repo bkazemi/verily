@@ -43,7 +43,7 @@ async function managed() {
   });
 
   const login = async (id = 'managed', key = dashboardKey) => {
-    const response = await post('/dashboard/login', { id, key });
+    const response = await post('/site/dashboard/login', { id, key });
 
     return { response, cookie: response.headers.get('set-cookie')?.split(';')[0] ?? '' };
   };
@@ -53,10 +53,10 @@ async function managed() {
    * confirms it.
    */
   const rotate = async (cookie: string, keep: string) => {
-    const page = await (await request('/dashboard', { headers: { cookie } })).text();
+    const page = await (await request('/site/dashboard', { headers: { cookie } })).text();
     const from = page.match(/name="from" value="([^"]+)"/)![1]!;
 
-    return post('/dashboard/rotate', { keep, from, confirm: 'yes' }, cookie);
+    return post('/site/dashboard/rotate', { keep, from, confirm: 'yes' }, cookie);
   };
 
   return { store, request, post, login, rotate };
@@ -75,13 +75,13 @@ test('an operator signs in with the site id and dashboard key, and changes the s
   assert.equal(response.status, 303);
   assert.match(cookie, /^verily_dashboard=/);
 
-  const page = await (await request('/dashboard', { headers: { cookie } })).text();
+  const page = await (await request('/site/dashboard', { headers: { cookie } })).text();
 
   assert.match(page, /managed\.test/);
   assert.match(page, /<dt>Status<\/dt><dd>Served · DNS record not checked yet<\/dd>/);
 
   const saved = await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     {
       authorizeUrl: 'https://managed.test/v2/authorize',
       returnUrl: 'https://managed.test/v2/return',
@@ -102,7 +102,7 @@ test('an operator signs in with the site id and dashboard key, and changes the s
 
   // Every provider and both visibilities are kept as no list at all.
   await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     {
       authorizeUrl: stored.authorizeUrl,
       returnUrl: stored.returnUrl,
@@ -119,7 +119,7 @@ test('an operator signs in with the site id and dashboard key, and changes the s
 
   // URLs off the site's origin, or nothing chosen, are refused and change nothing.
   const elsewhere = await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     {
       authorizeUrl: 'https://elsewhere.test/authorize',
       returnUrl: stored.returnUrl,
@@ -132,7 +132,7 @@ test('an operator signs in with the site id and dashboard key, and changes the s
   assert.equal(elsewhere.status, 400);
 
   const empty = await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     { authorizeUrl: stored.authorizeUrl, returnUrl: stored.returnUrl },
     cookie,
   );
@@ -142,13 +142,13 @@ test('an operator signs in with the site id and dashboard key, and changes the s
 
   // Without a session, nothing is changed.
   assert.equal(
-    (await post('/dashboard/settings', { authorizeUrl: 'https://managed.test/x' })).status,
+    (await post('/site/dashboard/settings', { authorizeUrl: 'https://managed.test/x' })).status,
     403,
   );
 
   // Signing out ends the session.
-  await post('/dashboard/logout', {}, cookie);
-  assert.match(await (await request('/dashboard', { headers: { cookie } })).text(), /Sign in/);
+  await post('/site/dashboard/logout', {}, cookie);
+  assert.match(await (await request('/site/dashboard', { headers: { cookie } })).text(), /Sign in/);
 });
 
 test('a session ends once its dashboard key is removed, and sign-ins are limited', async () => {
@@ -158,14 +158,14 @@ test('a session ends once its dashboard key is removed, and sign-ins are limited
   // A suspended site says so, and what to publish to be served again.
   await store.put('site/dns/managed', { attemptedAt: 0, checkedAt: 0, absentSince: 0 });
 
-  const suspended = await (await request('/dashboard', { headers: { cookie } })).text();
+  const suspended = await (await request('/site/dashboard', { headers: { cookie } })).text();
 
   assert.match(suspended, /<dd>Suspended since Jan 1, 1970<\/dd>/);
   assert.match(suspended, /no longer has <code>verily-verifier=instance\.test<\/code>/);
   assert.match(suspended, /Otherwise the site is deleted on Jan 31, 1970\./);
 
   await store.put('site/operators/managed', []);
-  assert.match(await (await request('/dashboard', { headers: { cookie } })).text(), /Sign in/);
+  assert.match(await (await request('/site/dashboard', { headers: { cookie } })).text(), /Sign in/);
 
   for (let i = 0; i < 9; i++) await login('managed', 'x'.repeat(43));
 
@@ -192,11 +192,11 @@ test('a key replaced for a routine change keeps the old one working for a day', 
   assert.equal(stored.previousKey, siteKey);
 
   // Replacing it again during the overlap asks first, and says the older key stops now.
-  const from = (await (await request('/dashboard', { headers: { cookie } })).text()).match(
+  const from = (await (await request('/site/dashboard', { headers: { cookie } })).text()).match(
     /name="from" value="([^"]+)"/,
   )![1]!;
 
-  const asked = await (await post('/dashboard/rotate', { keep: 'day', from }, cookie)).text();
+  const asked = await (await post('/site/dashboard/rotate', { keep: 'day', from }, cookie)).text();
 
   assert.match(asked, /<h1>Replace the key\?<\/h1>/);
   assert.match(asked, /The older key still accepted from the last replacement stops working now\./);
@@ -206,7 +206,7 @@ test('a key replaced for a routine change keeps the old one working for a day', 
 
   // Settings saved during the overlap keep the old key accepted.
   await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     {
       authorizeUrl: stored.authorizeUrl,
       returnUrl: stored.returnUrl,
@@ -273,34 +273,39 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
   assert.equal(await read(second), 200);
 
   assert.match(
-    await (await request('/dashboard', { headers: { cookie } })).text(),
+    await (await request('/site/dashboard', { headers: { cookie } })).text(),
     /Stop accepting the old key/,
   );
 
   // Stopping it asks first, and changes nothing until it is confirmed.
   assert.match(
-    await (await post('/dashboard/previous-key', {}, cookie)).text(),
+    await (await post('/site/dashboard/previous-key', {}, cookie)).text(),
     /<h1>Stop accepting the old key\?<\/h1>/,
   );
 
   assert.equal(await read(second), 200);
 
-  assert.equal((await post('/dashboard/previous-key', { confirm: 'yes' }, cookie)).status, 303);
+  assert.equal(
+    (await post('/site/dashboard/previous-key', { confirm: 'yes' }, cookie)).status,
+    303,
+  );
+
   assert.equal(await read(second), 404);
   assert.equal(await read(third), 200);
 
   assert.doesNotMatch(
-    await (await request('/dashboard', { headers: { cookie } })).text(),
+    await (await request('/site/dashboard', { headers: { cookie } })).text(),
     /Stop accepting the old key/,
   );
 
   // Without a session, the key is left alone.
   assert.equal(
-    (await post('/dashboard/rotate', { keep: 'none', from: hash(third), confirm: 'yes' })).status,
+    (await post('/site/dashboard/rotate', { keep: 'none', from: hash(third), confirm: 'yes' }))
+      .status,
     403,
   );
 
-  assert.equal((await post('/dashboard/previous-key', {})).status, 403);
+  assert.equal((await post('/site/dashboard/previous-key', {})).status, 403);
   assert.equal(await read(third), 200);
 });
 
@@ -308,11 +313,11 @@ test('a rotate form sent twice replaces the key once', async () => {
   const { store, request, post, login } = await managed();
   const { cookie } = await login();
 
-  const page = await (await request('/dashboard', { headers: { cookie } })).text();
+  const page = await (await request('/site/dashboard', { headers: { cookie } })).text();
   const from = page.match(/name="from" value="([^"]+)"/)![1]!;
 
   // Replacing the key at once asks first, and changes nothing until it is confirmed.
-  const asked = await (await post('/dashboard/rotate', { keep: 'none', from }, cookie)).text();
+  const asked = await (await post('/site/dashboard/rotate', { keep: 'none', from }, cookie)).text();
 
   assert.match(asked, /<h1>Replace the key now\?<\/h1>/);
   assert.match(asked, /<input type="hidden" name="confirm" value="yes">/);
@@ -320,11 +325,11 @@ test('a rotate form sent twice replaces the key once', async () => {
   assert.equal((await store.get<Site>('site/registered/managed'))!.key, siteKey);
 
   const confirmed = { keep: 'none', from, confirm: 'yes' };
-  const first = await post('/dashboard/rotate', confirmed, cookie);
+  const first = await post('/site/dashboard/rotate', confirmed, cookie);
   const newKey = (await first.text()).match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
 
   // A reload of that response, or the same form in another tab, changes nothing.
-  const again = await post('/dashboard/rotate', confirmed, cookie);
+  const again = await post('/site/dashboard/rotate', confirmed, cookie);
 
   assert.equal(again.status, 409);
   assert.doesNotMatch(await again.text(), /<pre>/);
@@ -332,7 +337,7 @@ test('a rotate form sent twice replaces the key once', async () => {
 
   // A form without the key it replaces changes nothing either.
   assert.equal(
-    (await post('/dashboard/rotate', { keep: 'none', confirm: 'yes' }, cookie)).status,
+    (await post('/site/dashboard/rotate', { keep: 'none', confirm: 'yes' }, cookie)).status,
     409,
   );
 
@@ -343,20 +348,20 @@ test('an operator deletes the site once they type its id, and the id is never re
   const { store, request, post, login } = await managed();
   const { cookie } = await login();
 
-  const page = await (await request('/dashboard', { headers: { cookie } })).text();
+  const page = await (await request('/site/dashboard', { headers: { cookie } })).text();
 
-  assert.match(page, /<form action="\/dashboard\/delete" method="post">/);
+  assert.match(page, /<form action="\/site\/dashboard\/delete" method="post">/);
 
   // Anything but the id itself deletes nothing.
-  assert.equal((await post('/dashboard/delete', { confirm: 'pinned' }, cookie)).status, 400);
+  assert.equal((await post('/site/dashboard/delete', { confirm: 'pinned' }, cookie)).status, 400);
   assert.ok(await store.get('site/registered/managed'));
 
   // Without a session, nothing is deleted.
-  assert.equal((await post('/dashboard/delete', { confirm: 'managed' })).status, 403);
+  assert.equal((await post('/site/dashboard/delete', { confirm: 'managed' })).status, 403);
 
   await store.put('site/dns/managed', { attemptedAt: 0, checkedAt: 0 });
 
-  const deleted = await post('/dashboard/delete', { confirm: 'managed' }, cookie);
+  const deleted = await post('/site/dashboard/delete', { confirm: 'managed' }, cookie);
 
   assert.equal(deleted.status, 200);
   assert.match(deleted.headers.get('set-cookie')!, /^verily_dashboard=;.*Max-Age=0/);
@@ -368,7 +373,7 @@ test('an operator deletes the site once they type its id, and the id is never re
   assert.equal((await store.get<{ reason: string }>('site/retired/managed'))!.reason, 'deleted');
   assert.equal((await request('/handoff/request?site=managed&purpose=connect')).status, 404);
   assert.equal((await login()).response.status, 403);
-  assert.match(await (await request('/dashboard', { headers: { cookie } })).text(), /Sign in/);
+  assert.match(await (await request('/site/dashboard', { headers: { cookie } })).text(), /Sign in/);
 
   await assert.rejects(
     new Sites(store, new Map()).register(site, { kind: 'key', hash: 'h', addedAt: 0 }),
@@ -390,12 +395,12 @@ test('only a provider the owner has not approved is marked as awaiting approval'
 
   await sites.register(site, { kind: 'key', hash: hash(dashboardKey), addedAt: 0 });
 
-  const login = await post('/dashboard/login', { id: 'managed', key: dashboardKey });
+  const login = await post('/site/dashboard/login', { id: 'managed', key: dashboardKey });
   const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
 
   // A subset leaves GitHub and YouTube unchecked.
   await post(
-    '/dashboard/settings',
+    '/site/dashboard/settings',
     {
       authorizeUrl: site.authorizeUrl,
       returnUrl: site.returnUrl,
@@ -405,7 +410,7 @@ test('only a provider the owner has not approved is marked as awaiting approval'
     cookie,
   );
 
-  const page = async () => (await request('/dashboard', { headers: { cookie } })).text();
+  const page = async () => (await request('/site/dashboard', { headers: { cookie } })).text();
 
   const before = await page();
 
