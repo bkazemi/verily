@@ -168,7 +168,7 @@ import { init } from '@bkazemi/verily';
 const client = init({ backendUrl: '/api/verily' });
 ```
 
-Without one, serve `node_modules/@bkazemi/verily/dist/verily.js` yourself, or load it from a CDN such as `https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.9.3/dist/verily.js`. The script defines a global `Verily`.
+Without one, serve `node_modules/@bkazemi/verily/dist/verily.js` yourself, or load it from a CDN such as `https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.9.4/dist/verily.js`. The script defines a global `Verily`.
 
 Then place the badge wherever the account appears:
 
@@ -370,7 +370,7 @@ A static site only needs the script and the badge markup; the backend runs somew
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.9.3/dist/verily.js"
+  src="https://cdn.jsdelivr.net/npm/@bkazemi/verily@0.9.4/dist/verily.js"
   defer
 ></script>
 <verily-badge
