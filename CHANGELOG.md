@@ -3,6 +3,13 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.3] - 2026-10-16
+
+### Fixed
+
+- **The verification and connect dialogs scroll inside their rounded corners,** so the
+  scrollbar no longer sticks out past them.
+
 ## [0.9.2] - 2026-10-16
 
 ### Added
