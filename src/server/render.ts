@@ -142,22 +142,24 @@ export function side(
 
   return html`
     <div class="side">
-      <p class="who">${typeof heading === 'string' ? heading : [heading.mark, heading.text]}</p>
-      <p class="name">
-        ${profile ? html`<a href="${profile}" rel="noreferrer">${name}</a>` : name}${
-          since && html`<span class="since">${since}</span>`
+      <div class="identity">
+        <p class="who">${typeof heading === 'string' ? heading : [heading.mark, heading.text]}</p>
+        <p class="name">
+          ${profile ? html`<a href="${profile}" rel="noreferrer">${name}</a>` : name}${
+            since && html`<span class="since">${since}</span>`
+          }
+        </p>
+        ${
+          typeof reference === 'string'
+            ? html`<p class="reference">${reference}</p>`
+            : reference &&
+              html`
+                <p class="reference fingerprint">
+                  ${reference.map((group) => html`<span>${group}</span>`)}
+                </p>
+              `
         }
-      </p>
-      ${
-        typeof reference === 'string'
-          ? html`<p class="reference">${reference}</p>`
-          : reference &&
-            html`
-              <p class="reference fingerprint">
-                ${reference.map((group) => html`<span>${group}</span>`)}
-              </p>
-            `
-      }
+      </div>
       ${extra}
     </div>
   `;

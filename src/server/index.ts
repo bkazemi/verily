@@ -613,20 +613,28 @@ function accountCard(e: Evidence, external: Attestations['external'], now: numbe
         }
       </p>
     `,
-    externalNotes({ ...e.attestations, external }, { site: e.siteName, provider: e.providerName }),
-    times(
-      retired
-        ? [
-            ['Approved', e.approvedAt],
-            ['Last verified', lastProved(e)],
-            ['Retired', e.retiredAt],
-          ]
-        : [
-            ['Approved', e.approvedAt],
-            [e.expiresAt > now ? 'Valid until' : 'Expired on', e.expiresAt],
-            ['Last checked', external[0].artifactUrl ? external[0].confirmedAt : undefined],
-          ],
-    ),
+    // Everything under the verdict in one part, the third of the card's rows in a grid.
+    html`
+      <div class="rest">
+        ${externalNotes(
+          { ...e.attestations, external },
+          { site: e.siteName, provider: e.providerName },
+        )}
+        ${times(
+          retired
+            ? [
+                ['Approved', e.approvedAt],
+                ['Last verified', lastProved(e)],
+                ['Retired', e.retiredAt],
+              ]
+            : [
+                ['Approved', e.approvedAt],
+                [e.expiresAt > now ? 'Valid until' : 'Expired on', e.expiresAt],
+                ['Last checked', external[0].artifactUrl ? external[0].confirmedAt : undefined],
+              ],
+        )}
+      </div>
+    `,
     // The holder's own word on the account, which nothing checked, so it sits apart from
     // the methods, in the card's corner as the dialog has it.
     !retired &&
@@ -660,7 +668,9 @@ function publishedPage(records: Evidence[], base: string) {
             const local = localSide(held[0]!.local, held[0]!.siteName);
 
             return html`
-              ${card(local.heading, local.value, held[0]!.local.profileUrl)}
+              <div class="subject">
+                ${card(local.heading, local.value, held[0]!.local.profileUrl)}
+              </div>
               ${joiner}
               <div class="accounts">
                 ${accountsOf(held, now).map(({ lead, external }) => accountCard(lead, external, now))}

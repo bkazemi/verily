@@ -165,7 +165,7 @@ main:has(.accounts) { max-width: 54rem; }
 
 .accounts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: .75rem;
   margin-bottom: .75rem;
 }
@@ -189,7 +189,22 @@ main:has(.accounts) { max-width: 54rem; }
 
 /* The times sit at the foot of the card, so they line up along a row of uneven cards. */
 .accounts .side dl { margin-top: auto; }
-.accounts .side p:last-of-type { margin-bottom: .625rem; }
+.accounts .rest { display: flex; flex-direction: column; }
+.accounts .rest > p:last-of-type { margin-bottom: .625rem; }
+
+/*
+ * Two across, with the subject one card wide and centred above them, and a lone last
+ * account centred below. Every card on the page is then the same width.
+ */
+@media (min-width: 48rem) {
+  .accounts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Each card is three rows of the grid: who, its verdict, and the rest. A row is as tall
+     as the taller card's part, so the verdicts and times of neighbouring cards line up. */
+  .accounts > .side { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; }
+  .accounts > .side:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - .375rem); margin-inline: auto; }
+  .subject { width: calc(50% - .375rem); margin-inline: auto; text-align: center; }
+  .subject .name { justify-content: center; }
+}
 
 /* Between a subject and its accounts on the page that lists them. */
 .joiner { display: block; width: 1.25rem; height: 1.25rem; margin: 0 auto .75rem; color: var(--muted); }
@@ -221,7 +236,7 @@ main:has(.accounts) { max-width: 54rem; }
 
 .reference, .how { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.5; }
 
-.name + .how, .reference + .how { margin-top: .5rem; }
+.identity + .how { margin-top: .5rem; }
 .fingerprint { font-family: ui-monospace, monospace; text-wrap: balance; }
 .fingerprint span { display: inline-block; margin-right: .5ch; }
 .how.additional { padding-left: .75rem; }
