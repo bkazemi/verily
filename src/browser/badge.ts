@@ -3,69 +3,207 @@ import { boxMark, clockMark, dashMark, markStyles, paintMark, verificationMark }
 import { providerMark } from './provider-mark.js';
 
 const styles = `
-  :host { display: inline-block; max-width: 100%; vertical-align: middle; }
-  * { box-sizing: border-box; }
-  .badge, .peek {
-    border: 1px solid var(--verily-border, #dce2e0); border-radius: 6px;
-    background: var(--verily-surface, #fff); color: var(--verily-text, #202c29);
+  :host {
+    display: inline-block;
+    max-width: 100%;
+    vertical-align: middle;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  .badge,
+  .peek {
+    border: 1px solid var(--verily-border, #dce2e0);
+    border-radius: 6px;
+    background: var(--verily-surface, #fff);
+    color: var(--verily-text, #202c29);
     font: var(--verily-font-size, 13px)/1.35
       var(--verily-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
   }
   .badge {
-    display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 3px 5px;
     text-decoration: none;
   }
-  button.badge { margin: 0; cursor: pointer; }
-  a[href]:hover, button.badge:hover { background: var(--verily-hover, #f3f6f4); border-color: var(--verily-border, #dce2e0); }
-  .badge:focus-visible { outline: 2px solid #357ce5; outline-offset: 2px; }
-  .name { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-  .more { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--verily-muted, #65726c); }
-  .label { display: none; font-size: 11px; color: var(--verily-muted, #65726c); }
-  .badge:hover .label, .badge:focus-within .label { display: inline; }
-  .icon { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font-size: 12px; font-weight: 750; }
-  .icon .glyph { display: block; width: 12px; height: 12px; }
-  .mark { display: block; flex-shrink: 0; width: 20px; height: 20px; }
-  .mark.pending { opacity: .45; }
+  button.badge {
+    margin: 0;
+    cursor: pointer;
+  }
+  a[href]:hover,
+  button.badge:hover {
+    background: var(--verily-hover, #f3f6f4);
+    border-color: var(--verily-border, #dce2e0);
+  }
+  .badge:focus-visible {
+    outline: 2px solid #357ce5;
+    outline-offset: 2px;
+  }
+  .name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+  .more {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--verily-muted, #65726c);
+  }
+  .label {
+    display: none;
+    font-size: 11px;
+    color: var(--verily-muted, #65726c);
+  }
+  .badge:hover .label,
+  .badge:focus-within .label {
+    display: inline;
+  }
+  .icon {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 750;
+  }
+  .icon .glyph {
+    display: block;
+    width: 12px;
+    height: 12px;
+  }
+  .mark {
+    display: block;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+  }
+  .mark.pending {
+    opacity: 0.45;
+  }
   /* A dim ring where the account will go; it only spins where motion is welcome. */
   .spinner {
-    flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
-    border: 2px solid currentColor; opacity: .3;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.3;
   }
-  .divider { flex-shrink: 0; width: 1px; height: 12px; background: var(--verily-border, #dce2e0); }
+  .divider {
+    flex-shrink: 0;
+    width: 1px;
+    height: 12px;
+    background: var(--verily-border, #dce2e0);
+  }
   /* Several accounts, one to a row. The mark stays beside them and the rule runs their height. */
-  .badge.stacked { align-items: stretch; padding: 5px 8px 5px 6px; text-align: left; }
-  .stacked .mark { align-self: center; }
-  .stacked .divider { height: auto; }
-  .rows { display: grid; gap: 4px; min-width: 0; }
-  .row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .badge.stacked {
+    align-items: stretch;
+    padding: 5px 8px 5px 6px;
+    text-align: left;
+  }
+  .stacked .mark {
+    align-self: center;
+  }
+  .stacked .divider {
+    height: auto;
+  }
+  .rows {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
   /*
    * The accounts behind a short pill's count, opened beside it. Shut unless the browser
    * has it open as a popover, so one without popovers never shows it at all.
    */
   .peek {
-    display: none; position: fixed; inset: auto; margin: 0; padding: 8px 10px;
-    width: max-content; max-width: min(320px, calc(100vw - 16px));
-    border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .14); pointer-events: none;
+    display: none;
+    position: fixed;
+    inset: auto;
+    margin: 0;
+    padding: 8px 10px;
+    width: max-content;
+    max-width: min(320px, calc(100vw - 16px));
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+    pointer-events: none;
     overflow: hidden;
   }
   /* A row taken out to fit the window: its own display would otherwise keep it showing. */
-  .row[hidden] { display: none; }
-  .peek:popover-open { display: block; }
-  .peek .via { display: block; margin-top: 6px; font-size: 11px; color: var(--verily-muted, #65726c); }
-  .provider { display: block; flex-shrink: 0; width: 14px; height: 14px; }
-  .expired .icon { color: #815a12; background: #fbefce; }
-  .revoked .icon, .retired .icon, .message .icon { color: #626d69; background: #edf0ee; }
-  /* Nothing ran out and nothing wants attention: the holder chose this, so it is only quiet. */
-  .retired .name { color: var(--verily-muted, #65726c); }
-  .message { color: var(--verily-muted, #65726c); }
-  .add { font-weight: 600; }
-  @media (prefers-reduced-motion: no-preference) {
-    a, button { transition: background .12s, border-color .12s; }
-    /* The mark is drawn before the answer arrives, so it resolves rather than swaps. */
-    .mark, .mark path { transition: opacity .18s ease, stroke .18s ease; }
-    .spinner { border-top-color: transparent; opacity: .4; animation: verily-spin .7s linear infinite; }
+  .row[hidden] {
+    display: none;
   }
-  @keyframes verily-spin { to { transform: rotate(360deg); } }
+  .peek:popover-open {
+    display: block;
+  }
+  .peek .via {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--verily-muted, #65726c);
+  }
+  .provider {
+    display: block;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+  }
+  .expired .icon {
+    color: #815a12;
+    background: #fbefce;
+  }
+  .revoked .icon,
+  .retired .icon,
+  .message .icon {
+    color: #626d69;
+    background: #edf0ee;
+  }
+  /* Nothing ran out and nothing wants attention: the holder chose this, so it is only quiet. */
+  .retired .name {
+    color: var(--verily-muted, #65726c);
+  }
+  .message {
+    color: var(--verily-muted, #65726c);
+  }
+  .add {
+    font-weight: 600;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    a,
+    button {
+      transition:
+        background 0.12s,
+        border-color 0.12s;
+    }
+    /* The mark is drawn before the answer arrives, so it resolves rather than swaps. */
+    .mark,
+    .mark path {
+      transition:
+        opacity 0.18s ease,
+        stroke 0.18s ease;
+    }
+    .spinner {
+      border-top-color: transparent;
+      opacity: 0.4;
+      animation: verily-spin 0.7s linear infinite;
+    }
+  }
+  @keyframes verily-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
   ${markStyles}
 `;
 
