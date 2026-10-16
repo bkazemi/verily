@@ -3,6 +3,33 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.0] - 2026-10-15
+
+### Added
+
+- **Sites can register themselves on an instance.** With `REGISTRATION=open`, a site
+  registers at `/register` by publishing two DNS TXT records: a one-time claim, and
+  `verily-verifier=<instance host>`, which stays up for as long as the site is served.
+  The site gets a site key for its backend and a dashboard key for whoever manages it.
+- **A dashboard for registered sites,** at `/site/dashboard`. An operator signs in with
+  the site id and dashboard key to change the authorize and return URLs, providers and
+  visibility, replace the site key, or delete the site.
+- **A site key can be replaced without downtime.** The old key can be kept for 24 hours
+  while the new one is deployed, or stopped at once if it may have leaked.
+- **The site client takes `previousKey`,** so results signed with the old key are still
+  accepted while a replaced key is kept.
+- **The instance owner oversees registered sites** at `/sites`: suspends or unsuspends
+  one by hand, sets its request limit, and approves it for YouTube.
+- **A registered site whose DNS record goes is suspended, and deleted a month later.**
+  It starts nothing new while suspended, but its backend can still read its connections.
+  A deleted site's id is never given out again.
+- **A self-registered site gets 60 requests a minute** instead of 600, until the owner
+  raises it, and no YouTube until the owner approves it.
+
+### Changed
+
+- **`profileOrigins` may be a function** returning the origins, asked each time.
+
 ## [0.8.1] - 2026-10-14
 
 ### Changed
@@ -12,11 +39,7 @@ Changes that matter to people using Verily, newest first. Versions before 0.7.0 
 - **Each `/verify` page says what proving control is for:** linking, renewing, changing
   visibility, removing a connection or revoking a sharing link. Changing visibility and
   revoking a sharing link have headings of their own.
-- **The evidence, signed-record and approval pages draw the link between the two cards,**
-  as the dialogs do.
-- **The V in the evidence page's heading is larger than the heading's text.**
-- **The evidence page's links sit below a rule, apart from the disclaimer,** and the
-  removal link reads "Is this your account? Remove this connection".
+- **The evidence, signed-record and approval pages have a tidier layout.**
 
 ### Fixed
 
