@@ -477,14 +477,19 @@ export class Sites {
    * Gives a stored site a new key and returns it. With `keep`, the old key is still
    * accepted for `rotationMs`, for a routine change. Without it, the old key stops working
    * at once, for a key that may have leaked. Any key before the old one stops either way.
+   *
+   * With `from`, the hash of the key the caller saw, nothing changes unless that is still
+   * the site's key, so a form sent twice replaces the key once. Returns undefined then.
    */
-  async rotate(id: string, keep: boolean): Promise<string> {
+  async rotate(id: string, keep: boolean, from?: string): Promise<string | undefined> {
     const key = secret();
 
-    await this.storage.transaction(async (tx) => {
+    const replaced = await this.storage.transaction(async (tx) => {
       const stored = await tx.get<Site>(`${registeredPrefix}${id}`);
 
       if (!stored) throw new Error(`Site ${id} is not registered`);
+
+      if (from !== undefined && hash(stored.key) !== from) return false;
 
       const { previousKey, previousUntil, ...site } = stored;
 
@@ -493,11 +498,13 @@ export class Sites {
         key,
         ...(keep ? { previousKey: stored.key, previousUntil: Date.now() + rotationMs } : {}),
       });
+
+      return true;
     });
 
     await this.refresh();
 
-    return key;
+    return replaced ? key : undefined;
   }
 
   /** Stops accepting a stored site's previous key, once the new one is deployed. */

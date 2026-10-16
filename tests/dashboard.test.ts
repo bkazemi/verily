@@ -48,7 +48,15 @@ async function managed() {
     return { response, cookie: response.headers.get('set-cookie')?.split(';')[0] ?? '' };
   };
 
-  return { store, request, post, login };
+  /** Sends the rotate form as the dashboard page has it, with the key it replaces. */
+  const rotate = async (cookie: string, keep: string) => {
+    const page = await (await request('/dashboard', { headers: { cookie } })).text();
+    const from = page.match(/name="from" value="([^"]+)"/)![1]!;
+
+    return post('/dashboard/rotate', { keep, from }, cookie);
+  };
+
+  return { store, request, post, login, rotate };
 }
 
 test('an operator signs in with the site id and dashboard key, and changes the settings', async () => {
@@ -162,12 +170,18 @@ test('a session ends once its dashboard key is removed, and sign-ins are limited
 });
 
 test('a key replaced for a routine change keeps the old one working for a day', async () => {
-  const { store, request, post, login } = await managed();
+  const { store, request, post, login, rotate } = await managed();
   const { cookie } = await login();
 
   const read = (key: string) => readStatus(request, 'managed', key);
 
-  const shown = await (await post('/dashboard/rotate', { keep: 'day' }, cookie)).text();
+  const shown = await (await rotate(cookie, 'day')).text();
+
+  // The key is on a page of its own, not among the dashboard's forms.
+  assert.match(shown, /<h1>New site key<\/h1>/);
+  assert.match(shown, /The old key keeps working until /);
+  assert.doesNotMatch(shown, /<form/);
+
   const newKey = shown.match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
   const stored = (await store.get<Site>('site/registered/managed'))!;
 
@@ -224,15 +238,13 @@ test('a key replaced for a routine change keeps the old one working for a day', 
 });
 
 test('a key replaced now, or an overlap stopped early, leaves only the new key', async () => {
-  const { store, request, post, login } = await managed();
+  const { store, request, post, login, rotate } = await managed();
   const { cookie } = await login();
 
   const read = (key: string) => readStatus(request, 'managed', key);
 
   const replace = async (keep: string) =>
-    (await (await post('/dashboard/rotate', { keep }, cookie)).text()).match(
-      /<pre><code>([A-Za-z0-9_-]{43})</,
-    )![1]!;
+    (await (await rotate(cookie, keep)).text()).match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
 
   // Replaced now, for a key that may have leaked: the old one stops at once.
   const second = await replace('none');
@@ -261,9 +273,31 @@ test('a key replaced now, or an overlap stopped early, leaves only the new key',
   );
 
   // Without a session, the key is left alone.
-  assert.equal((await post('/dashboard/rotate', { keep: 'none' })).status, 403);
+  assert.equal((await post('/dashboard/rotate', { keep: 'none', from: hash(third) })).status, 403);
   assert.equal((await post('/dashboard/previous-key', {})).status, 403);
   assert.equal(await read(third), 200);
+});
+
+test('a rotate form sent twice replaces the key once', async () => {
+  const { store, request, post, login } = await managed();
+  const { cookie } = await login();
+
+  const page = await (await request('/dashboard', { headers: { cookie } })).text();
+  const from = page.match(/name="from" value="([^"]+)"/)![1]!;
+
+  const first = await post('/dashboard/rotate', { keep: 'none', from }, cookie);
+  const newKey = (await first.text()).match(/<pre><code>([A-Za-z0-9_-]{43})</)![1]!;
+
+  // A reload of that response, or the same form in another tab, changes nothing.
+  const again = await post('/dashboard/rotate', { keep: 'none', from }, cookie);
+
+  assert.equal(again.status, 409);
+  assert.doesNotMatch(await again.text(), /<pre>/);
+  assert.equal((await store.get<Site>('site/registered/managed'))!.key, newKey);
+
+  // A form without the key it replaces changes nothing either.
+  assert.equal((await post('/dashboard/rotate', { keep: 'none' }, cookie)).status, 409);
+  assert.equal((await store.get<Site>('site/registered/managed'))!.key, newKey);
 });
 
 test('an operator deletes the site once they type its id, and the id is never reused', async () => {

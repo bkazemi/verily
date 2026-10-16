@@ -159,21 +159,40 @@ export class Dashboard {
   }
 
   /**
-   * Replaces the site key and shows the new one, once. The operator chooses whether the
-   * old key keeps working for a day, for a routine change, or stops at once, for a leak.
+   * Replaces the site key and shows the new one, once, on a page of its own. The operator
+   * chooses whether the old key keeps working for a day, for a routine change, or stops at
+   * once, for a leak. The form names the key it replaces, so sending it again, from a
+   * reload or a second tab, replaces nothing.
    */
   async rotate(request: Request): Promise<Response> {
     const found = await this.session(request);
 
     if (!found) return unavailable(403);
 
-    const keep = new URLSearchParams(await request.text()).get('keep') === 'day';
-    const key = await this.sites.rotate(found.site.id, keep);
+    const fields = new URLSearchParams(await request.text());
+    const keep = fields.get('keep') === 'day';
+    const key = await this.sites.rotate(found.site.id, keep, fields.get('from') ?? '');
+    const back = html`<p><a href="/dashboard">Back to the dashboard</a></p>`;
 
-    return this.render(
-      this.sites.sites.get(found.site.id)!,
-      html`<p>The new site key is shown once. ${keep ? 'The old key keeps working for 24 hours.' : 'The old key no longer works.'}</p>
-<pre><code>${key}</code></pre>`,
+    if (!key)
+      return respond(
+        'Key already replaced',
+        html`<p>The site key was already replaced since this form was loaded, so nothing changed. The new key was shown when it was made.</p>${back}`,
+        409,
+        'single',
+      );
+
+    const until = this.sites.sites.get(found.site.id)?.previousUntil;
+
+    return respond(
+      'New site key',
+      html`<p>This key is shown once. Copy it now.</p>
+<pre><code>${key}</code></pre>
+<p>${
+        keep && until
+          ? `The old key keeps working until ${minute(until)}. Deploy the new key to your backend, then stop accepting the old one from the dashboard.`
+          : 'The old key no longer works. Deploy the new key to your backend now: until you do, your site cannot send users here or read their connections.'
+      }</p>${back}`,
     );
   }
 
@@ -273,7 +292,7 @@ ${
   html`<section><p>The old key is accepted until ${minute(site.previousUntil!)}. Stop accepting it once the new key is deployed.</p>
 <div class="actions"><form action="/dashboard/previous-key" method="post"><button>Stop accepting the old key</button></form></div></section>`
 }
-<div class="actions"><form action="/dashboard/rotate" method="post"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div>
+<div class="actions"><form action="/dashboard/rotate" method="post"><input type="hidden" name="from" value="${hash(site.key)}"><button name="keep" value="day">Replace, keep the old key for 24 hours</button><button name="keep" value="none">Replace now</button></form></div>
 <section class="danger"><h2>Delete the site</h2>
 <p class="fine">The site stops being served here at once, and its id can never be registered again. To come back, register the domain as a new site; your users then connect their accounts again.</p>
 <form action="/dashboard/delete" method="post">
