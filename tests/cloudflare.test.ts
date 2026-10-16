@@ -177,6 +177,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     assert.match(publicBody, /"status":"verified"/);
     assert.ok(!publicBody.includes('provider-secret'));
     assert.ok(!publicBody.includes('site-owner'));
+
     assert.match(
       await (await request('/', { headers: { cookie } })).text(),
       /hljs-name">verily-badge/,
