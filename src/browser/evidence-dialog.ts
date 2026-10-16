@@ -32,7 +32,10 @@ const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
 
 export const styles = `
   * { box-sizing: border-box; }
-  dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 24px; border: 1px solid #dce2de; border-radius: 16px; background: #fff; color: #23312b; box-shadow: 0 24px 90px #10201935; font: 13px/1.6 system-ui, sans-serif; }
+  dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; overflow: hidden; border: 1px solid #dce2de; border-radius: 16px; background: #fff; color: #23312b; box-shadow: 0 24px 90px #10201935; font: 13px/1.6 system-ui, sans-serif; }
+  /* The pane scrolls inside the dialog, which clips its scrollbar to the rounded corners. */
+  dialog[open] { display: flex; flex-direction: column; }
+  .pane { min-height: 0; padding: 24px; overflow-y: auto; }
   dialog::backdrop { background: #15271f66; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
   h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
@@ -478,7 +481,7 @@ function actionsMenu(more: HTMLButtonElement, choices: HTMLElement[]): HTMLEleme
       menu.style.top = `${Math.max(edge, more.getBoundingClientRect().top - gap - height)}px`;
 
     // It does not follow its button, so it does not stay open once the button moves.
-    menu.closest('dialog')?.addEventListener('scroll', shut, { once: true });
+    menu.closest('.pane')?.addEventListener('scroll', shut, { once: true });
     choices[0]!.focus();
   });
 
@@ -1093,6 +1096,7 @@ export function openEvidenceDialog(
   // What drew the record, under it. The record is about the pair, not about us.
   const stamp = node('footer');
   const content = node('div', 'Checking verification…');
+  const pane = node('div', '', 'pane');
 
   heading.id = 'verily-dialog-title';
   dialog.setAttribute('aria-labelledby', heading.id);
@@ -1106,7 +1110,8 @@ export function openEvidenceDialog(
   close.autofocus = true;
   title.append(heading);
   header.append(title, close);
-  dialog.append(header, content, stamp);
+  pane.append(header, content, stamp);
+  dialog.append(pane);
 
   /** Links removed from this dialog, shown as removed before the page hands over new records. */
   const removed = new Map<string, number>();

@@ -215,6 +215,7 @@ export function openConnectDialog(
   const header = node('header');
   const stamp = node('footer');
   const content = node('div', 'Loading…', 'steps');
+  const pane = node('div', '', 'pane');
 
   heading.id = 'verily-connect-title';
   dialog.setAttribute('aria-labelledby', heading.id);
@@ -224,7 +225,8 @@ export function openConnectDialog(
   content.setAttribute('aria-live', 'polite');
   stamp.append(stampLink(), node('span', version));
   header.append(heading, close);
-  dialog.append(header, content, stamp);
+  pane.append(header, content, stamp);
+  dialog.append(pane);
   root.append(dialog);
   document.body.append(host);
   openDialogs.set(opener, dialog);
