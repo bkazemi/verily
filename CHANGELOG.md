@@ -3,6 +3,16 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.2] - 2026-10-16
+
+### Added
+
+- **A code step in a provider's instructions can say `language: 'html'`,** and the flow
+  page highlights it. `linkProvider`'s `rel="me"` snippet and the instance's embed snippet
+  are highlighted the same way.
+- **Verily depends on `highlight.js`,** for the HTML language only, which runs on the
+  server.
+
 ## [0.9.1] - 2026-10-15
 
 ### Changed
