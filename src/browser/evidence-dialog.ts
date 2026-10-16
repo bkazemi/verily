@@ -30,12 +30,49 @@ export function stampLink(): HTMLAnchorElement {
 
 const openDialogs = new WeakMap<HTMLElement, HTMLDialogElement>();
 
+let holds = 0;
+let release = () => {};
+
+/**
+ * Stops the page behind an open dialog from scrolling, and puts back the
+ * page's own inline styles once the last open dialog closes.
+ */
+export function holdPage(dialog: HTMLDialogElement): void {
+  if (holds++ === 0) {
+    const { style, clientWidth } = document.documentElement;
+    // Longhands, since the overflow shorthand reads empty when only one axis is set.
+    const held = ['overflow-x', 'overflow-y', 'scrollbar-gutter'];
+
+    const saved = held.map((name) => [
+      style.getPropertyValue(name),
+      style.getPropertyPriority(name),
+    ]);
+
+    // Keep the space of a hidden scrollbar so the page does not shift sideways.
+    if (innerWidth > clientWidth) style.setProperty('scrollbar-gutter', 'stable', 'important');
+
+    style.setProperty('overflow-x', 'hidden', 'important');
+    style.setProperty('overflow-y', 'hidden', 'important');
+
+    release = () =>
+      held.forEach((name, i) => {
+        const [value, priority] = saved[i]!;
+
+        if (value) style.setProperty(name, value, priority);
+        else style.removeProperty(name);
+      });
+  }
+
+  dialog.addEventListener('close', () => --holds === 0 && release(), { once: true });
+}
+
 export const styles = `
   * { box-sizing: border-box; }
   dialog { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; overflow: hidden; border: 1px solid #dce2de; border-radius: 16px; background: #fff; color: #23312b; box-shadow: 0 24px 90px #10201935; font: 13px/1.6 system-ui, sans-serif; }
-  /* The pane scrolls inside the dialog, which clips its scrollbar to the rounded corners. */
+  /* The pane scrolls inside the dialog, which clips its scrollbar to the rounded corners.
+     Contain keeps a scroll past its end from scrolling the page behind. */
   dialog[open] { display: flex; flex-direction: column; }
-  .pane { min-height: 0; padding: 24px; overflow-y: auto; }
+  .pane { min-height: 0; padding: 24px; overflow-y: auto; overscroll-behavior: contain; }
   dialog::backdrop { background: #15271f66; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
   h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.3px; }
@@ -1417,6 +1454,7 @@ export function openEvidenceDialog(
 
   if (opened && [opened].flat().length) draw(opened);
 
+  holdPage(dialog);
   dialog.showModal();
   void refresh();
 }

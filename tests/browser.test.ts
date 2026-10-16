@@ -4,6 +4,27 @@ import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { generateSigningKey, signer } from '../src/server/signing.js';
 
+/** Enough of an inline style to keep each property's value and priority. */
+class Style {
+  properties: Record<string, [string, string]> = {};
+
+  getPropertyValue(name: string) {
+    return this.properties[name]?.[0] ?? '';
+  }
+
+  getPropertyPriority(name: string) {
+    return this.properties[name]?.[1] ?? '';
+  }
+
+  setProperty(name: string, value: string, priority = '') {
+    this.properties[name] = [value, priority];
+  }
+
+  removeProperty(name: string) {
+    delete this.properties[name];
+  }
+}
+
 class Element {
   children: Element[] = [];
   private text = '';
@@ -221,7 +242,9 @@ test('distributed badge renders current/expired/revoked evidence and fails close
       replaceSync() {}
     },
     location: { href: 'https://site.test/profile', origin: 'https://site.test' },
+    innerWidth: 0,
     document: {
+      documentElement: { style: new Style(), clientWidth: 0 },
       createElementNS: (_namespace: string, tag: string) => {
         const element = new Element();
 
@@ -513,6 +536,8 @@ test('distributed badge renders current/expired/revoked evidence and fails close
 async function renderDialog(
   attestations: Record<string, unknown>,
   overrides: Record<string, unknown> = {},
+  // the page's own inline styles, and the width of its scrollbar
+  page: { properties?: Record<string, [string, string]>; scrollbar?: number } = {},
 ) {
   const asset = await readFile(new URL('../dist/verily.js', import.meta.url), 'utf8');
 
@@ -539,6 +564,9 @@ async function renderDialog(
   };
 
   const body = new Element();
+  const root = { style: new Style(), clientWidth: 1000 - (page.scrollbar ?? 0) };
+
+  root.style.properties = structuredClone(page.properties ?? {});
 
   const element = (tag: string) => {
     const created = new Element();
@@ -568,7 +596,9 @@ async function renderDialog(
       [Symbol.hasInstance]: (value: unknown) => (value as Element)?.tagName === 'dialog',
     },
     location: { href: 'https://site.test/profile', origin: 'https://site.test' },
+    innerWidth: 1000,
     document: {
+      documentElement: root,
       body,
       createElementNS: (_namespace: string, tag: string) => element(tag),
       createElement: element,
@@ -614,9 +644,45 @@ async function renderDialog(
 
   return {
     dialog,
+    root,
     cards: dialog.all().filter((found) => found.className.includes('account')),
   };
 }
+
+test('the evidence dialog stops the page scrolling until it closes', async () => {
+  const before: Record<string, [string, string]> = {
+    'overflow-x': ['hidden', ''],
+    'scrollbar-gutter': ['stable', 'important'],
+  };
+
+  const { dialog, root } = await renderDialog(
+    {
+      local: { by: 'backend', method: 'declared', confirmedAt: 1 },
+      external: [
+        {
+          by: 'provider',
+          method: 'gist',
+          artifactUrl: 'https://gist.github.com/alice/abc',
+          expect: 'verily-c1',
+          confirmedAt: 2,
+        },
+      ],
+    },
+    {},
+    { properties: before, scrollbar: 15 },
+  );
+
+  assert.deepEqual(root.style.properties, {
+    'overflow-x': ['hidden', 'important'],
+    'overflow-y': ['hidden', 'important'],
+    'scrollbar-gutter': ['stable', 'important'],
+  });
+
+  dialog.close();
+
+  // The page's own inline styles come back as they were, priority included.
+  assert.deepEqual(root.style.properties, before);
+});
 
 test('the evidence dialog presents both sides of a link as parallel cards', async () => {
   const { dialog, cards } = await renderDialog({
@@ -1166,7 +1232,9 @@ async function connectHarness(answer: (path: string, body?: string) => Promise<u
         },
       }),
     },
+    innerWidth: 0,
     document: {
+      documentElement: { style: new Style(), clientWidth: 0 },
       body,
       createElementNS: (_namespace: string, tag: string) => element(tag),
       createElement: element,
@@ -1566,6 +1634,7 @@ async function groupHarness(
     },
     location: { href: 'https://site.test/profile', origin: 'https://site.test' },
     document: {
+      documentElement: { style: new Style(), clientWidth: 0 },
       body,
       createElementNS: (_namespace: string, tag: string) => element(tag),
       createElement: element,

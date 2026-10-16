@@ -4,6 +4,7 @@ import {
   accountCard,
   backMark,
   closeMark,
+  holdPage,
   linkMark,
   node,
   namedCard,
@@ -803,6 +804,7 @@ export function openConnectDialog(
     ),
   );
 
+  holdPage(dialog);
   dialog.showModal();
   void choose();
 
