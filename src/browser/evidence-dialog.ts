@@ -126,7 +126,7 @@ export const styles = `
   footer { display: flex; align-items: center; justify-content: start; gap: 6px; margin: 20px 0 -8px; color: #9aa9a0; font-size: 11px; }
   footer a { display: flex; color: inherit; }
   .logo { display: block; height: 13px; }
-  /* Three or more accounts on a wide screen: two equal cards to a row. */
+  /* Four or more accounts on a wide screen: two equal cards to a row. */
   @media (min-width: 960px) {
     dialog.many { width: min(900px, calc(100vw - 32px)); }
     dialog.many .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
@@ -137,8 +137,6 @@ export const styles = `
     dialog.many .tiles .rest { display: flex; flex-direction: column; }
     dialog.many .tiles .rest > dl { margin-top: auto; }
     dialog.many .tiles .rest > :has(+ dl) { margin-bottom: 16px; }
-    /* A lone last tile is centred under the pair above it rather than left to one side. */
-    dialog.many .tiles > .account:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - 6px); margin-inline: auto; }
     /* The site's card is one tile wide, centred over the two columns. */
     dialog.many .local { width: calc(50% - 6px); margin-inline: auto; text-align: center; }
     dialog.many .local h3, dialog.many .local .named { justify-content: center; }
@@ -781,6 +779,23 @@ interface Fold {
  * Opens and shuts what a card folds away: how its account was shown, every method of it
  * together so that none is put ahead of another, and its dates.
  */
+/**
+ * Scrolls what a reader just opened into view, once it has been laid out. It moves only as
+ * far as needed, and puts the top in view when the whole does not fit in the pane.
+ */
+function reveal(element: HTMLElement) {
+  requestAnimationFrame(() => {
+    const pane = element.closest('.pane');
+    const tall = pane !== null && element.offsetHeight > pane.clientHeight;
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    element.scrollIntoView({
+      block: tall ? 'start' : 'nearest',
+      behavior: still ? 'auto' : 'smooth',
+    });
+  });
+}
+
 function foldToggle(folded: HTMLElement[], fold: Fold) {
   const toggle = node('button', '', 'fold');
   let shown = fold.open;
@@ -800,6 +815,8 @@ function foldToggle(folded: HTMLElement[], fold: Fold) {
   toggle.onclick = () => {
     set(!shown);
     fold.toggle(shown);
+
+    if (shown) reveal(folded.at(-1)!);
   };
 
   return toggle;
@@ -977,7 +994,7 @@ interface Folds {
  * Retired accounts sit in a group of their own at the foot, under what says they are,
  * shut until it is opened unless no other account is left to read. Every record given is
  * of the one subject, which the caller has checked. Returns whether the cards a reader
- * sees on opening are three or more: the accounts in use, or the retired ones when
+ * sees on opening are four or more: the accounts in use, or the retired ones when
  * nothing else is left and their group starts open.
  */
 function render(
@@ -1054,6 +1071,8 @@ function render(
   // group turns, so what it will be is the opposite of what it is.
   count.addEventListener('click', () => {
     folds.retired = !history.open;
+
+    if (folds.retired) reveal(history);
   });
 
   const accounts = node('div', '', 'tiles');
@@ -1075,7 +1094,7 @@ function render(
     ),
   );
 
-  return (listed.length || retired.length) >= 3;
+  return (listed.length || retired.length) >= 4;
 }
 
 /**

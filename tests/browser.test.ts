@@ -554,6 +554,7 @@ async function renderDialog(
     setTimeout,
     clearTimeout,
     setInterval: () => 0,
+    requestAnimationFrame: () => 0,
     clearInterval: () => {},
     CSSStyleSheet: class {
       replaceSync() {}
@@ -1520,6 +1521,7 @@ async function groupHarness(
     Promise,
     setTimeout: timer,
     clearTimeout,
+    requestAnimationFrame: () => 0,
     // The window a pill's panel is kept inside, and what it listens to while open.
     innerWidth: 1000,
     innerHeight: 800,

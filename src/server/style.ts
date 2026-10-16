@@ -193,15 +193,14 @@ main:has(.accounts) { max-width: 54rem; }
 .accounts .rest > p:last-of-type { margin-bottom: .625rem; }
 
 /*
- * Two across, with the subject one card wide and centred above them, and a lone last
- * account centred below. Every card on the page is then the same width.
+ * Two across, with the subject one card wide and centred above them. Every card on the
+ * page is then the same width.
  */
 @media (min-width: 48rem) {
   .accounts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   /* Each card is three rows of the grid: who, its verdict, and the rest. A row is as tall
      as the taller card's part, so the verdicts and times of neighbouring cards line up. */
   .accounts > .side { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 0; }
-  .accounts > .side:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - .375rem); margin-inline: auto; }
   .subject { width: calc(50% - .375rem); margin-inline: auto; text-align: center; }
   .subject .name { justify-content: center; }
 }
