@@ -339,12 +339,16 @@ export class Dashboard {
     const record = `_verily.${new URL(site.origin).hostname}`;
 
     const suspended = check?.absentSince !== undefined;
+    const controls = this.sites.controls.get(site.id) ?? {};
 
-    const standing = suspended
-      ? `Suspended since ${date(check.absentSince!)}`
-      : check?.checkedAt !== undefined
-        ? `Served · DNS record found ${date(check.checkedAt)}`
-        : 'Served · DNS record not checked yet';
+    const standing =
+      controls.suspendedAt !== undefined
+        ? `Suspended by the instance owner since ${date(controls.suspendedAt)}`
+        : suspended
+          ? `Suspended since ${date(check.absentSince!)}`
+          : check?.checkedAt !== undefined
+            ? `Served · DNS record found ${date(check.checkedAt)}`
+            : 'Served · DNS record not checked yet';
 
     // The one thing on the page the operator has to act on, so the one sentence.
     const restore =
@@ -359,8 +363,17 @@ export class Dashboard {
 
     const overlapping = !!site.previousKey && (site.previousUntil ?? 0) > Date.now();
 
+    // A provider the owner has not approved this site for stays chosen, and is offered once
+    // it is approved.
+    const held = this.sites.withheld(site.id);
+
     const providers = [...this.offered()].map(([id, name]) =>
-      checkbox('provider', id, name, !site.providers || site.providers.includes(id)),
+      checkbox(
+        'provider',
+        id,
+        held.includes(id) ? `${name} · awaiting the instance owner's approval` : name,
+        !site.providers || site.providers.includes(id),
+      ),
     );
 
     const visibility = (['public', 'unlisted'] as const).map((v) =>
@@ -383,6 +396,8 @@ export class Dashboard {
           <dd>${site.id}</dd>
           <dt>Status</dt>
           <dd>${standing}</dd>
+          <dt>Request limit</dt>
+          <dd>${this.sites.limit(site.id)} a minute</dd>
         </dl>
         ${restore}
         <h2>Settings</h2>

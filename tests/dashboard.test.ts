@@ -375,3 +375,46 @@ test('an operator deletes the site once they type its id, and the id is never re
     /taken/,
   );
 });
+
+test('only a provider the owner has not approved is marked as awaiting approval', async () => {
+  const { store, request, post } = memoryInstance({
+    providers: [
+      fakeProvider(),
+      { ...fakeProvider(), id: 'discord', name: 'Discord' },
+      { ...fakeProvider(), id: 'youtube', name: 'YouTube' },
+    ],
+    dns: offlineDns,
+  });
+
+  const sites = new Sites(store, new Map());
+
+  await sites.register(site, { kind: 'key', hash: hash(dashboardKey), addedAt: 0 });
+
+  const login = await post('/dashboard/login', { id: 'managed', key: dashboardKey });
+  const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+
+  // A subset leaves GitHub and YouTube unchecked.
+  await post(
+    '/dashboard/settings',
+    {
+      authorizeUrl: site.authorizeUrl,
+      returnUrl: site.returnUrl,
+      provider: ['discord'],
+      visibility: ['public', 'unlisted'],
+    },
+    cookie,
+  );
+
+  const page = async () => (await request('/dashboard', { headers: { cookie } })).text();
+
+  const before = await page();
+
+  assert.match(before, /YouTube · awaiting/);
+  assert.doesNotMatch(before, /GitHub · awaiting/);
+  assert.doesNotMatch(before, /Discord · awaiting/);
+
+  // Approved, YouTube needs nothing more, checked or not.
+  await sites.control('managed', (controls) => ({ ...controls, youtubeApprovedAt: Date.now() }));
+
+  assert.doesNotMatch(await page(), /awaiting/);
+});

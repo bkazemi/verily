@@ -7,6 +7,7 @@ import {
   type Visibility,
 } from '../core/index.js';
 import type { Store } from './store.js';
+import { limits } from './limits.js';
 import { readCookie, setCookie } from './page.js';
 import { hash, secret } from '../server/service.js';
 
@@ -129,6 +130,25 @@ export interface Retired {
 
 /** How long a stored site stays suspended before it is deleted. */
 export const lapseMs = 30 * 24 * 3600000;
+
+/** Where the instance owner's controls over a stored site are kept, under its id. */
+const controlsPrefix = 'site/controls/';
+
+/**
+ * What the instance owner has set for a stored site. Kept apart from the site itself, so
+ * nothing its operators change can reach it.
+ */
+export interface Controls {
+  /** When the owner suspended the site. Absent while the owner has not. */
+  suspendedAt?: number;
+  /** Requests a minute for the site, in place of `limits.registered`. */
+  limit?: number;
+  /** When the owner let the site's holders use YouTube. Absent while it is withheld. */
+  youtubeApprovedAt?: number;
+}
+
+/** Providers a stored site's holders get only once the owner approves the site. */
+const approvalNeeded = ['youtube'];
 
 /** Where the last DNS check of a stored site is kept, under its id. */
 export const dnsPrefix = 'site/dns/';
@@ -356,10 +376,14 @@ export class Sites {
   sites: Map<string, Site>;
 
   /**
-   * Stored sites whose DNS no longer names this instance. They start nothing new, but their
-   * backends can still read their connections, so they can move elsewhere.
+   * Stored sites whose DNS no longer names this instance, or that the owner suspended. They
+   * start nothing new, but their backends can still read their connections, so they can
+   * move elsewhere.
    */
   suspended = new Set<string>();
+
+  /** What the instance owner has set for each stored site, as `refresh()` last read it. */
+  controls = new Map<string, Controls>();
 
   /**
    * `pinned` are the sites the host configures, from `SITES`. They cannot be changed here,
@@ -388,6 +412,15 @@ export class Sites {
     }
 
     const suspended = new Set<string>();
+    const controls = new Map<string, Controls>();
+
+    for (const [key, set] of await this.storage.list<Controls>(controlsPrefix)) {
+      const id = key.slice(controlsPrefix.length);
+
+      controls.set(id, set);
+
+      if (set.suspendedAt !== undefined && !this.pinned.has(id)) suspended.add(id);
+    }
 
     for (const [key, check] of await this.storage.list<DnsCheck>(dnsPrefix)) {
       const id = key.slice(dnsPrefix.length);
@@ -397,11 +430,58 @@ export class Sites {
 
     this.sites = sites;
     this.suspended = suspended;
+    this.controls = controls;
   }
 
   /** The sites kept in the store and served, which are the ones whose DNS is checked. */
   stored(): Site[] {
     return [...this.sites.values()].filter((site) => !this.pinned.has(site.id));
+  }
+
+  /**
+   * Requests a minute for a site, counted once for its holders and once for its backend's
+   * reads. Undefined for a pinned site, which gets the instance's default.
+   */
+  limit(id: string): number | undefined {
+    if (this.pinned.has(id)) return undefined;
+
+    return this.controls.get(id)?.limit ?? limits.registered;
+  }
+
+  /**
+   * The provider ids a site's holders may use, from those the instance `offers`. A stored
+   * site goes without YouTube until the owner approves it. Undefined means every one.
+   */
+  providers(site: Site, offers: string[]): string[] | undefined {
+    const held = this.withheld(site.id);
+
+    return held.length
+      ? (site.providers ?? offers).filter((id) => !held.includes(id))
+      : site.providers;
+  }
+
+  /**
+   * The provider ids the owner has not approved a site for, whichever its operators chose.
+   * None for a pinned site.
+   */
+  withheld(id: string): string[] {
+    return this.pinned.has(id) || this.controls.get(id)?.youtubeApprovedAt ? [] : approvalNeeded;
+  }
+
+  /** Changes what the instance owner has set for a stored site. */
+  async control(id: string, change: (controls: Controls) => Controls): Promise<void> {
+    if (this.pinned.has(id)) throw new Error(`Site ${id} is set by the host`);
+
+    await this.storage.transaction(async (tx) => {
+      if (!(await tx.get<Site>(`${registeredPrefix}${id}`)))
+        throw new Error(`Site ${id} is not registered`);
+
+      const key = `${controlsPrefix}${id}`;
+
+      await tx.put<Controls>(key, change((await tx.get<Controls>(key)) ?? {}));
+    });
+
+    await this.refresh();
   }
 
   /** A site that may start something new: served, and not suspended. */
@@ -523,8 +603,8 @@ export class Sites {
   }
 
   /**
-   * Removes a stored site with its operators and DNS state, and keeps its id so no other
-   * site is ever given it. Its users' records stay, but their site starts nothing new.
+   * Removes a stored site with its operators, DNS state and owner's controls, and keeps its
+   * id so no other site is ever given it. Its users' records stay, but their site starts nothing new.
    */
   async retire(id: string, reason: Retired['reason']): Promise<void> {
     if (this.pinned.has(id)) throw new Error(`Site ${id} is set by the host`);
@@ -537,6 +617,7 @@ export class Sites {
       await tx.delete(`${registeredPrefix}${id}`);
       await tx.delete(`${operatorsPrefix}${id}`);
       await tx.delete(`${dnsPrefix}${id}`);
+      await tx.delete(`${controlsPrefix}${id}`);
     });
 
     await this.refresh();

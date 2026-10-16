@@ -8,9 +8,10 @@ interface Bucket {
 
 /**
  * Requests a minute for one signed-in holder, one client without a session, one site's
- * holders, and one site's backend reading its subjects' connections.
+ * holders, and one site's backend reading its subjects' connections. A site registered
+ * here gets `registered` for each of the last two, unless the owner sets it another.
  */
-export const limits = { session: 60, client: 30, site: 600, read: 600 };
+export const limits = { session: 60, client: 30, site: 600, read: 600, registered: 60 };
 
 const windowMs = 60000;
 

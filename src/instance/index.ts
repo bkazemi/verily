@@ -21,6 +21,7 @@ import { sessionCookie, Sites, type Listing, type Site, peek } from './sites.js'
 import { allow, client, limits, prune } from './limits.js';
 import { recheckSites, Registrations, type Registration } from './register.js';
 import { Dashboard } from './dashboard.js';
+import { OwnerSites } from './owner-sites.js';
 import type { DnsOptions } from '../server/domain.js';
 import { own } from './routes.js';
 import { respond, safeHeaders, see, unavailable } from './page.js';
@@ -306,6 +307,7 @@ class Server {
   private readonly sites: Sites;
   private readonly registrations?: Registrations;
   private readonly dashboard: Dashboard;
+  private readonly ownerSites: OwnerSites;
   private readonly local: LocalAccount;
 
   constructor(private readonly options: InstanceOptions) {
@@ -320,6 +322,7 @@ class Server {
     this.sites = new Sites(this.store, options.sites ?? new Map());
 
     this.dashboard = new Dashboard(this.store, this.sites, options.providers, origin.host);
+    this.ownerSites = new OwnerSites(this.store, this.sites);
 
     if (options.registration === 'open')
       this.registrations = new Registrations(this.store, this.sites, this.origin, options.dns);
@@ -370,12 +373,18 @@ class Server {
             }
           : undefined;
       },
-      // A site's holders get the providers that site chose. A holder whose site is gone gets
-      // none, rather than every one. The owner has no site.
+      // A site's holders get the providers that site chose, less any the owner has not
+      // approved it for. A holder whose site is gone gets none, rather than every one. The
+      // owner has no site.
       providersFor: (local) => {
         const site = this.siteOf(local);
 
-        return site || !local.id.includes(':') ? site?.providers : [];
+        if (!site) return local.id.includes(':') ? [] : undefined;
+
+        return this.sites.providers(
+          site,
+          options.providers.map((provider) => provider.id),
+        );
       },
       visibilityFor: (local) => this.siteOf(local)?.visibility,
       finish: ({ id, context, local, result }) => this.sites.finish(id, context, local, result),
@@ -483,7 +492,10 @@ class Server {
         String((await fields(request)).token ?? ''),
         request.headers.get('origin'),
         (local) => this.app.service.validateLocal(local),
-        (site) => allow(this.store, [{ key: `site/${site.id}`, limit: limits.site }]),
+        (site) =>
+          allow(this.store, [
+            { key: `site/${site.id}`, limit: this.sites.limit(site.id) ?? limits.site },
+          ]),
       );
 
       return shared(
@@ -527,6 +539,11 @@ class Server {
 
       if (url.pathname === '/mark') return this.mark(request);
 
+      if (url.pathname.startsWith('/sites/'))
+        return (await this.auth.authenticated(request))
+          ? this.ownerSites.change(url.pathname, request)
+          : unavailable(403);
+
       if (url.pathname === '/dashboard/login') return this.dashboard.login(request);
 
       if (url.pathname === '/dashboard/logout') return this.dashboard.logout(request);
@@ -551,6 +568,9 @@ class Server {
 
     if (request.method === 'GET' && url.pathname === '/dashboard')
       return this.dashboard.page(request);
+
+    if (request.method === 'GET' && url.pathname === '/sites')
+      return (await this.auth.authenticated(request)) ? this.ownerSites.page() : unavailable();
 
     if (request.method === 'GET' && url.pathname === '/register' && this.registrations)
       return this.registrations.page(request);
@@ -793,7 +813,7 @@ class Server {
     if (
       !(await allow(this.store, [
         asked
-          ? { key: `read/${asked.site.id}`, limit: limits.read }
+          ? { key: `read/${asked.site.id}`, limit: this.sites.limit(asked.site.id) ?? limits.read }
           : { key: client(address), limit: limits.client },
       ]))
     )
@@ -864,7 +884,7 @@ class Server {
 
     return allow(this.store, [
       holder,
-      ...(site ? [{ key: `site/${site}`, limit: limits.site }] : []),
+      ...(site ? [{ key: `site/${site}`, limit: this.sites.limit(site) ?? limits.site }] : []),
     ]);
   }
 
@@ -987,7 +1007,11 @@ class Server {
         ${card(local.heading, local.value, undefined, subject.reference)}
         <p class="links">
           <a class="button" href="/verify">Verify an account</a>${
-            !site && html`<a href="/records">Every connection on this instance</a>`
+            !site &&
+            html`
+              <a href="/records">Every connection on this instance</a>
+              <a href="/sites">Registered sites</a>
+            `
           }
         </p>
         ${
