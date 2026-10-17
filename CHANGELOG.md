@@ -3,6 +3,22 @@
 Changes that matter to people using Verily, newest first. Versions before 0.7.0 are in the
 [git history](https://github.com/bkazemi/verily/commits/v0.6.0).
 
+## [0.9.5] - 2026-10-16
+
+### Changed
+
+- **The badge, dialog and page stylesheets are `.css` files under `src`,**
+  formatted and checked by prettier like the rest of the code. `npm run css`
+  turns each into the module the code imports, and `npm ci`, the build and the
+  check scripts run it first.
+
+### Fixed
+
+- **The page behind an open verification or connect dialog no longer scrolls,**
+  including on phones once the dialog is scrolled to its end. The dialog locks
+  the page's root `overflow` while it is open, then restores the page's own
+  inline styles exactly when it closes.
+
 ## [0.9.4] - 2026-10-16
 
 ### Changed
