@@ -1,0 +1,13 @@
+@media (prefers-reduced-motion: no-preference) {
+  .mark.current path:last-child {
+    animation: verily-draw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.1s backwards;
+  }
+}
+@keyframes verily-draw {
+  from {
+    stroke-dasharray: 0 176;
+  }
+  to {
+    stroke-dasharray: 108 176;
+  }
+}

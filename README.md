@@ -641,6 +641,8 @@ setInterval(
 
 Clone the repository and run `npm ci`. `npm run preview` then shows the badge in every state at http://localhost:3001, with no other setup.
 
+Stylesheets are the `.css` files under `src`. `npm run css` turns each into a `.css.ts` module the code imports, and the build, check and run scripts do this first. Run it yourself after editing a `.css` file when you run a file with `tsx` directly.
+
 The full example also needs Postgres and a GitHub OAuth app, a Discord application or a Google OAuth client (any of them) with the callback URL `http://localhost:3000/api/verily/callback`:
 
 ```sh

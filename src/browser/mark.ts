@@ -1,4 +1,5 @@
 import { tones, verification, type MarkTone } from '../marks.js';
+import markCss from './mark.css.js';
 
 export type { MarkTone };
 
@@ -6,21 +7,7 @@ export type { MarkTone };
  * The check draws itself in from its left end once the verification holds: when a pill's
  * mark first becomes `current`, and each time the dialog opens on a current one.
  */
-export const markStyles = `
-  @media (prefers-reduced-motion: no-preference) {
-    .mark.current path:last-child {
-      animation: verily-draw 0.8s cubic-bezier(0.65, 0, 0.35, 1) 0.1s backwards;
-    }
-  }
-  @keyframes verily-draw {
-    from {
-      stroke-dasharray: 0 176;
-    }
-    to {
-      stroke-dasharray: 108 176;
-    }
-  }
-`;
+export const markStyles = markCss;
 
 /** Repaints a mark in place, so answering a check never replaces the drawing. */
 export function paintMark(svg: SVGSVGElement, tone: MarkTone): void {

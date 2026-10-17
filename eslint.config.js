@@ -2,7 +2,16 @@ import stylistic from '@stylistic/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
 
 export default [
-  { ignores: ['**/dist/**', '**/node_modules/**', '.agents/**', '.codex/**', '.wrangler/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '.agents/**',
+      '.codex/**',
+      '.wrangler/**',
+      'src/**/*.css.ts',
+    ],
+  },
   {
     files: ['**/*.{ts,js,mjs}'],
     languageOptions: { parser: tsParser },

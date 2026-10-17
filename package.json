@@ -21,16 +21,23 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "npm run build && tsx --test tests/*.test.ts",
+    "css": "node scripts/css.mjs",
+    "prepare": "npm run css",
+    "precheck": "npm run css",
     "check": "tsc --noEmit -p tsconfig.check.json",
+    "preexample": "npm run css",
     "example": "tsx example/server.ts",
     "test:consumer": "node scripts/test-consumer.mjs",
     "format": "eslint . --fix && prettier --write .",
     "format:check": "eslint . && prettier --check .",
     "prepack": "npm run build",
     "preview": "npm run build && tsx example/preview.ts",
+    "precloudflare:dev": "npm run css",
     "cloudflare:dev": "wrangler dev --local",
+    "precloudflare:check": "npm run css",
     "cloudflare:check": "wrangler deploy --dry-run --outdir .wrangler/build",
     "starter:check": "rm -rf .wrangler/starter && node dist/instance/bin.js init cloudflare .wrangler/starter && wrangler deploy --dry-run --config .wrangler/starter/wrangler.jsonc --outdir .wrangler/starter-build",
+    "prerelease:deploy": "npm run css",
     "release:deploy": "wrangler deploy"
   },
   "devDependencies": {

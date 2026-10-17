@@ -4,6 +4,8 @@ import { build } from 'esbuild';
 
 rmSync('dist', { recursive: true, force: true });
 
+execFileSync(process.execPath, ['scripts/css.mjs'], { stdio: 'inherit' });
+
 execFileSync(process.execPath, ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.json'], {
   stdio: 'inherit',
 });

@@ -8,3 +8,5 @@ dist/
 .env.*
 !.env.example
 wrangler.jsonc
+# generated from each src/**/*.css by scripts/css.mjs
+src/**/*.css.ts
