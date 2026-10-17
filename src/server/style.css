@@ -712,6 +712,19 @@ h1 .verdict {
   margin: 0.75rem 0;
   background: var(--surface);
 }
+
+/* The embed snippet is copied once, so it stays closed until asked for. */
+.embed summary {
+  width: fit-content;
+  cursor: pointer;
+}
+.embed summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.embed pre {
+  margin-top: 0;
+}
 .connection .actions {
   margin-top: 0.875rem;
 }

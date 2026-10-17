@@ -1286,8 +1286,10 @@ class Server {
           !site &&
             e.visibility === 'public' &&
             html`
-              <p class="fine">Embed on your site</p>
-              <pre><code>${highlightHtml(embed)}</code></pre>
+              <details class="embed">
+                <summary class="fine">Embed on your site</summary>
+                <pre><code>${highlightHtml(embed)}</code></pre>
+              </details>
             `,
           html`
             ${(goes.length > 0 || listing) && html`<div class="actions">${goes}${listing}</div>`}
