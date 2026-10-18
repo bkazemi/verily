@@ -22,7 +22,7 @@ const wrangler = `// Your instance's Cloudflare settings. Fill in account_id and
   "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
   "main": "worker.ts",
   "compatibility_date": "2026-07-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   // The library loads undici only on Node, so the Worker build gets a stand-in for it.
   "alias": { "undici": "@bkazemi/verily/instance/undici" },
 

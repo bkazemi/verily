@@ -22,7 +22,7 @@ test('Cloudflare SQLite transactions, persistent owner sessions, OAuth, public e
     modules: true,
     scriptPath,
     compatibilityDate: '2026-07-01',
-    compatibilityFlags: ['nodejs_compat'],
+    compatibilityFlags: ['nodejs_compat', 'global_fetch_strictly_public'],
     durableObjects: {
       VERILY: { className: 'VerilyStore', useSQLite: true },
       PROBE: { className: 'StorageProbe', useSQLite: true },
@@ -297,7 +297,7 @@ test('the Worker offers email once it can send it, and links a mailbox through R
         modules: true,
         scriptPath,
         compatibilityDate: '2026-07-01',
-        compatibilityFlags: ['nodejs_compat'],
+        compatibilityFlags: ['nodejs_compat', 'global_fetch_strictly_public'],
         durableObjects: {
           VERILY: { className: 'VerilyStore', useSQLite: true },
           PROBE: { className: 'StorageProbe', useSQLite: true },
