@@ -118,7 +118,7 @@ const verily = createVerily({
 
 Sign-in methods need an app registered with the provider. The callback URL is always `<baseUrl>/callback`, and every place you run Verily, development included, needs its own registered.
 
-- **GitHub:** [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) and set its callback URL. An OAuth app has only one, so development and production each need their own app.
+- **GitHub:** run `npx verily github-app <callback>...`, open the address it prints in a browser signed in to GitHub, and click **Create GitHub App**. It prints the client id and secret. One app can list up to 10 callback URLs, so development and production can share it. Add `--org <name>` for an organization to own the app, or `--name <name>` if the default name is taken. You can instead [register an OAuth app](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app) by hand, which has only one callback URL.
 - **Discord:** create an application in the [Discord developer portal](https://discord.com/developers/applications) and add the callback URL under **OAuth2 → Redirects**. One application can list several. Discord shows the client secret only when you reset it.
 - **YouTube:** in the [Google Cloud console](https://console.cloud.google.com/), enable the YouTube Data API v3, create an OAuth client of type **Web application**, and add the callback URL as an authorized redirect URI. One client can list several. The `youtube.readonly` scope is sensitive: until Google verifies your app, users see a warning and only 100 accounts can ever use it, so apply for verification before offering it publicly.
 
