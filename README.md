@@ -598,7 +598,7 @@ An instance sets `dns: true`.
 
 ## Operations
 
-Verification lasts 30 days, flows 10 minutes, and sharing links 7 days. Change them with `validityMs`, `flowTtlMs` and `shareTtlMs`. Evidence is never cached.
+Verification lasts a year, flows 10 minutes, and sharing links 7 days. Change them with `validityMs`, `flowTtlMs` and `shareTtlMs`. Evidence is never cached. A published proof that `recheck()` still finds extends its record once half the term is gone, so only a sign-in or a mailed code needs renewing. Raising `validityMs` lengthens records still running on the next `recheck()`; lowering it shortens nothing.
 
 A user's DNS setup is saved for seven days. If propagation outlasts a flow's ten minutes, they choose DNS again and get the same TXT value and the last domain entered. Each return reads the proof afresh. The TXT record has to stay after verification, for the ongoing checks.
 

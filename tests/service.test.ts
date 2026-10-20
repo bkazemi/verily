@@ -856,6 +856,46 @@ test('each run spends a bounded number of requests, oldest proof first', async (
   assert.deepEqual(confirmed, [1004000, 1004000, 1002000, 1003000]);
 });
 
+test('a proof still up extends its record once half the term is gone', async () => {
+  const f = await proved({ validityMs: 4000, freshnessMs: 5000 });
+
+  // Most of the term is left, so the read confirms without moving the expiry.
+  f.advance(1000);
+  assert.equal(await f.service.recheck(), 1);
+  assert.equal((await f.service.read(f.id)).expiresAt, 1004000);
+
+  f.advance(1500);
+  assert.equal(await f.service.recheck(), 1);
+  assert.equal((await f.service.read(f.id)).expiresAt, 1006500);
+
+  // A sign-in has nothing to read, so it keeps the term it was approved with.
+  const signedIn = fixture(fakeProvider(), { validityMs: 4000, recheckMs: 1000 });
+  const { id } = await signedIn.connect('public');
+
+  signedIn.advance(3000);
+  await signedIn.service.recheck();
+  assert.equal((await signedIn.service.read(id)).expiresAt, 1004000);
+});
+
+test('a longer term applies to records still running and never revives expired ones', async () => {
+  const running = fixture();
+  const { id } = await running.connect('public');
+  const longer = fixture(fakeProvider(), { validityMs: 5000, storage: running.storage });
+
+  longer.advance(500);
+  await longer.service.recheck();
+  assert.equal((await longer.service.read(id)).expiresAt, 1005000);
+
+  const lapsed = fixture();
+  const { id: gone } = await lapsed.connect('public');
+  const late = fixture(fakeProvider(), { validityMs: 5000, storage: lapsed.storage });
+
+  late.advance(1000);
+  await late.service.recheck();
+  assert.equal((await late.service.read(gone)).expiresAt, 1001000);
+  assert.equal((await late.service.read(gone)).status, 'expired');
+});
+
 test('freshness must outlast the schedule meant to keep it', () => {
   assert.throws(() => fixture(fakeArtifactProvider(), { recheckMs: 5000, freshnessMs: 5000 }));
   assert.doesNotThrow(() => fixture(fakeArtifactProvider(), { freshnessMs: Infinity }));

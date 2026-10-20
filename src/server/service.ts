@@ -350,6 +350,11 @@ export class VerilyService {
     };
   }
 
+  /** How long an approval stands. A published proof that is still up extends it. */
+  private get validity(): number {
+    return this.options.validityMs ?? 365 * 86400000;
+  }
+
   /** A proof is only as fresh as the schedule that reads it, so both live together. */
   private get freshness(): number {
     return this.options.freshnessMs ?? freshnessMs;
@@ -1316,7 +1321,7 @@ export class VerilyService {
           authenticatedAt: flow.authenticatedAt!,
           approvedAt: this.now(),
           connectedAt: this.now(),
-          expiresAt: this.now() + (this.options.validityMs ?? 30 * 86400000),
+          expiresAt: this.now() + this.validity,
           attestations: {
             local: this.declared(flow),
             external: [this.attestation(flow, provider, connectionId)],
@@ -1695,7 +1700,7 @@ export class VerilyService {
 
     connection.local = flow.local!;
     connection.approvedAt = this.now();
-    connection.expiresAt = this.now() + (this.options.validityMs ?? 30 * 86400000);
+    connection.expiresAt = this.now() + this.validity;
     connection.revocationReason = undefined;
 
     if (attestation.method === main.method) {
@@ -2095,6 +2100,23 @@ export class VerilyService {
     const now = this.now();
     const spent = new Map<string, number>();
 
+    // Validity counts from approval, so a longer term set since applies to running records.
+    await this.transaction(async (tx) => {
+      for (const connection of await tx.list('connections')) {
+        const term = connection.approvedAt + this.validity;
+
+        if (
+          connection.revokedAt === undefined &&
+          connection.retiredAt === undefined &&
+          connection.expiresAt > now &&
+          connection.expiresAt < term
+        ) {
+          connection.expiresAt = term;
+          await tx.put('connections', connection.id, connection);
+        }
+      }
+    });
+
     // When a proof was last read, or last tried. One whose last read did not confirm it,
     // because the read failed or the proof was missing, is tried again four times as soon.
     const tried = (a: Attestation) => a.readAt ?? a.confirmedAt;
@@ -2343,6 +2365,11 @@ export class VerilyService {
 
       held.confirmedAt = started;
       delete held.absentAt;
+
+      // A proof still up keeps its record running. It is moved only once half the term is
+      // gone, so a daily read does not report a new expiry every time.
+      if (current.expiresAt > started && current.expiresAt - started < this.validity / 2)
+        current.expiresAt = started + this.validity;
 
       // A zone can start or stop being signed, so the flag is as the last read found it.
       if (dnssec) held.dnssec = true;
